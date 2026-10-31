@@ -150,7 +150,6 @@ internal fun WebScreen(
     onSystemBarColor: (Color?) -> Unit,
     /** A path such as `/?session=…` to show instead of the start page; reported back once used. */
     deepLinkPath: String? = null,
-    browserPresenter: io.andchamber.app.ui.browser.NativeBrowserPresenter? = null,
     onDeepLinkUsed: () -> Unit = {},
     /** The remembered page of this instance, for the first load only; a deep link wins over it. */
     resumePath: String? = null,
@@ -349,74 +348,6 @@ internal fun WebScreen(
 
     WebLifecycleEffect(web)
     WebHostEffect(web)
-    val localTrusted = isLocal &&
-        target is io.andchamber.app.runtime.ServerTarget.Local &&
-        localState is RuntimeState.Running &&
-        web?.gatewayLoginMode != true &&
-        phase !is SessionPhase.Unreachable
-    val consoleGeneration = web?.browserBindGeneration ?: sessionKey.hashCode().toLong()
-    // Leaving the trusted console (or this screen) detaches the host: grant revoked, pages destroyed.
-    // A new document of the same console is not a departure; the binding effect below hands over.
-    val hostActivity = context.findActivity()
-    androidx.compose.runtime.DisposableEffect(web, browserPresenter, localTrusted, hostActivity) {
-        onDispose {
-            web?.unbindBrowserHost()
-            browserPresenter?.detachHostAny(targetId)
-        }
-    }
-    androidx.compose.runtime.DisposableEffect(web, browserPresenter, localTrusted, consoleGeneration) {
-        val presenter = browserPresenter
-        val activity = hostActivity
-        val view = web
-        var sessionCallback: ((String?) -> Unit)? = null
-        if (localTrusted && presenter != null && activity != null && view != null) {
-            val host = io.andchamber.app.ui.browser.BrowserHostSurface(presenter)
-            val reportSession: (String?) -> Unit = { session ->
-                if (view.acceptsBrowserHost(consoleGeneration)) view.browserHost?.context(session.orEmpty())
-            }
-            sessionCallback = reportSession
-            view.browserHost = host
-            view.browserConsoleGeneration = consoleGeneration
-            view.onConsoleSessionChanged = reportSession
-            view.onConsoleDocumentInvalidated = { presenter.invalidateConsoleDocument(targetId) }
-            presenter.attachHost(activity, targetId, consoleGeneration)
-            // The page may already show a chat (reload, deep link, a pooled view): report it now.
-            host.context(view.consoleSessionId.orEmpty())
-        } else if (web?.browserHost != null) {
-            web.unbindBrowserHost()
-            presenter?.detachHostAny(targetId)
-        }
-        // Generation hand-over: attachHost with the next generation revokes the grant and keeps the
-        // tabs. `paused` follows only the activity lifecycle observer below.
-        onDispose {
-            val callback = sessionCallback
-            if (callback != null && web?.onConsoleSessionChanged === callback) web.onConsoleSessionChanged = null
-        }
-    }
-    val hostLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(browserPresenter, localTrusted, hostLifecycle) {
-        val presenter = browserPresenter
-        if (presenter == null || !localTrusted) return@DisposableEffect onDispose {}
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> presenter.onHostPaused()
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> presenter.onHostResumed()
-                else -> Unit
-            }
-        }
-        // Start from the real lifecycle state; addObserver replays events up to it.
-        if (!hostLifecycle.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) presenter.onHostPaused()
-        hostLifecycle.lifecycle.addObserver(observer)
-        onDispose { hostLifecycle.lifecycle.removeObserver(observer) }
-    }
-    // "Open web page" is offered only for the local console, with a native presenter and a chat the
-    // page says it is showing: the open belongs to that chat and never grants it.
-    val consoleSession = web?.consoleSessionId
-    val canOpenWebPage = isLocal && localTrusted && browserPresenter != null && web != null && consoleSession != null
-    val scope = rememberCoroutineScope()
-    var openUrlDialog by remember(web) { mutableStateOf(false) }
-    LaunchedEffect(canOpenWebPage) { if (!canOpenWebPage) openUrlDialog = false }
-
     val pageError = web?.pageError
     val overlay: WebOverlay? =
         when {
@@ -462,24 +393,6 @@ internal fun WebScreen(
                     .union(WindowInsets.displayCutout)
                     .union(WindowInsets.imeAnimationTarget)
             BoxWithConstraints(modifier = Modifier.fillMaxSize().windowInsetsPadding(pageInsets)) {
-                // Both the main WebView and native overlay fill this same inset-consumed content box.
-                var consoleSize by remember(web, web.generation) { mutableStateOf(IntSize.Zero) }
-                val density = LocalDensity.current
-                val measurement = web.composerMeasurement
-                val topPx = measurement?.topPx(web.browserConsoleGeneration, web.generation,
-                    consoleSize.width, consoleSize.height)
-                val measuredClearance = composerClearancePx(topPx, consoleSize.height, with(density) { 12.dp.toPx() })
-                val composerClearance = measuredClearance?.let { with(density) { it.toDp() } }
-                    ?: if (maxWidth >= 600.dp) 72.dp else 136.dp
-                androidx.compose.runtime.SideEffect {
-                    web.view?.tag = ComposerLayoutSnapshot(
-                        measurement, web.browserConsoleGeneration, web.generation,
-                        consoleSize.width, consoleSize.height, with(density) { composerClearance.toPx() },
-                        measuredClearance == null,
-                        measurement?.validityReason(web.browserConsoleGeneration, web.generation,
-                            consoleSize.width, consoleSize.height) ?: "measurement-missing",
-                    )
-                }
                 key(web, web.generation) {
                     // Only a WebView bound to this server's profile is ever attached; after a failed
                     // rebind there is none, and the isolation panel covers the screen instead.
@@ -487,12 +400,7 @@ internal fun WebScreen(
                         AndroidView(
                             // Detached from any earlier holder only here, never during recomposition.
                             factory = { viewContext -> web.attachableView() ?: View(viewContext) },
-                            modifier = Modifier.fillMaxSize().clipToBounds().onSizeChanged {
-                                if (consoleSize != it) {
-                                    consoleSize = it
-                                    web.requestComposerMeasurement()
-                                }
-                            },
+                            modifier = Modifier.fillMaxSize().clipToBounds(),
                             // The WebView outlives this screen in the pool; never destroy it here.
                             onRelease = {},
                         )
@@ -523,44 +431,9 @@ internal fun WebScreen(
                         onReload = reload,
                         // The local server's password is internal, so a browser couldn't sign in.
                         onOpenInBrowser = if (shownTarget is ServerTarget.Remote) web::openInBrowser else null,
-                        onOpenUrl = if (canOpenWebPage) ({ openUrlDialog = true }) else null,
                     )
                 }
 
-                if (localTrusted && browserPresenter != null) {
-                    // Drawn above the edge handle, so full screen covers the whole safe area and no
-                    // chat control sits on top of the browser's own buttons. The composer height is
-                    // measured (or a conservative fallback); focus never changes the agent grant.
-                    io.andchamber.app.ui.browser.BrowserFloatPage(
-                        browserPresenter,
-                        bottomClearance = composerClearance,
-                        // The address card is drawn in this window, over the page: keep it out of
-                        // any page capture while it is open.
-                        presentationOccluded = openUrlDialog,
-                    )
-                }
-
-                if (openUrlDialog) {
-                    val presenter = browserPresenter
-                    val session = consoleSession
-                    if (presenter != null && session != null) {
-                        OpenBrowserUrlDialog(
-                            onOpen = { url ->
-                                openUrlDialog = false
-                                // Opens in this chat's window; the agent may use it once it has loaded.
-                                scope.launch {
-                                    // The card occludes the page until recomposition clears its gate.
-                                    // Do not race the manual open against that same-frame teardown.
-                                    val exposed = withTimeoutOrNull(2_000L) {
-                                        presenter.state.first { !it.presentationBlocked }
-                                    }
-                                    if (exposed != null) presenter.openUser(url, session)
-                                }
-                            },
-                            onDismiss = { openUrlDialog = false },
-                        )
-                    }
-                }
             }
         }
 

@@ -69,17 +69,11 @@ class NotificationSink internal constructor(
     private val inline: InlineNotificationFormDelivery,
     private val scope: CoroutineScope,
     private val order: NotificationEventOrder,
-    /**
-     * Called for every parsed local event before foreground suppression. The phone conversation
-     * projection uses it; it has no effect on the Android notification posted below.
-     */
-    private val onEvent: ((DesktopNotification) -> Unit)? = null,
 ) {
     constructor(
         notifier: OpenChamberNotifier,
         foreground: AppForeground,
         api: LocalApiClient,
-        onEvent: ((DesktopNotification) -> Unit)? = null,
     ) : this(
         notifier = notifier,
         foreground = foreground,
@@ -87,7 +81,6 @@ class NotificationSink internal constructor(
         inline = InlineNotificationFormDelivery(notifier, LocalApiNotificationFormTransport(api)),
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
         order = NotificationEventOrder(),
-        onEvent = onEvent,
     )
 
     internal constructor(
@@ -97,7 +90,6 @@ class NotificationSink internal constructor(
         transport: NotificationFormTransport,
         scope: CoroutineScope,
         order: NotificationEventOrder = NotificationEventOrder(),
-        onEvent: ((DesktopNotification) -> Unit)? = null,
     ) : this(
         notifier = notifier,
         foreground = foreground,
@@ -105,15 +97,11 @@ class NotificationSink internal constructor(
         inline = InlineNotificationFormDelivery(notifier, transport),
         scope = scope,
         order = order,
-        onEvent = onEvent,
     )
 
     /** Entry point called for each raw line. Malformed lines are ignored. */
     fun accept(line: String) {
         val event = NotificationPayload.parseLine(line) ?: return
-        // Before suppression: a question suppressed for the visible page is still the current task's
-        // question in the native overlay. This callback only keeps a memory projection.
-        runCatching { onEvent?.invoke(event) }
         val id = NotificationPayload.notificationId(event.tag)
         // Left to the page only when the event asks for that (requireHidden) and the local page is on screen.
         val leaveToPage = NotifyPolicy.leaveToPage(event.requireHidden, foreground.isInForeground())

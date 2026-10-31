@@ -33,7 +33,6 @@ import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -68,10 +67,9 @@ private val TouchWidth = 28.dp
 private val TouchHeight = 60.dp
 
 /**
- * A small tab on the trailing edge of the page: tap for Home / Reload, and Open web page / Open in
- * browser where offered; drag up or down to move it out of the way. Takes no layout space, and
- * fades back after a few seconds. [onOpenUrl] (open a page in this chat's browser window) and
- * [onOpenInBrowser] are left out of the menu when null.
+ * A small tab on the trailing edge of the page: tap for Home / Reload, and Open in browser where
+ * offered; drag up or down to move it out of the way. Takes no layout space, and fades back after a
+ * few seconds. [onOpenInBrowser] is left out of the menu when null.
  */
 @Composable
 internal fun EdgeHandle(
@@ -83,7 +81,6 @@ internal fun EdgeHandle(
     onReload: () -> Unit,
     onOpenInBrowser: (() -> Unit)?,
     modifier: Modifier = Modifier,
-    onOpenUrl: (() -> Unit)? = null,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -203,16 +200,6 @@ internal fun EdgeHandle(
                         onReload()
                     },
                 )
-                if (onOpenUrl != null) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.browser_open_page)) },
-                        leadingIcon = { Icon(Icons.Rounded.Language, contentDescription = null) },
-                        onClick = {
-                            menuOpen = false
-                            onOpenUrl()
-                        },
-                    )
-                }
                 if (onOpenInBrowser != null) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.open_in_browser)) },

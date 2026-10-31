@@ -14,9 +14,6 @@ val generatedRuntimeJni = rootProject.layout.buildDirectory.dir("generated/runti
 val runtimeNativeWorkDir = rootProject.layout.buildDirectory.dir("runtime-native")
 val nativeLicenseSourceDir = repoRoot.resolve("third_party/native-runtime")
 val generatedNativeLicenseAssets = rootProject.layout.buildDirectory.dir("generated/native-license-assets")
-val phoneAdbLicenseSourceDir = repoRoot.resolve("third_party/phone-adb")
-val generatedPhoneAdbLicenseAssets =
-    rootProject.layout.buildDirectory.dir("generated/phone-adb-license-assets")
 
 // The runtime native sources are NOT downloaded by the build. They are prepared beforehand with the
 // network step (see docs/fdroid-source-build.md):
@@ -130,12 +127,6 @@ val resolvedApplicationId: String =
         }
     } ?: productionApplicationId
 val isTestIdRequested = testApplicationId != null
-val browserSmokeRunnerRequested = providers.gradleProperty("andchamber.browserSmokeRunner").orNull
-val useBrowserSmokeRunner = when (browserSmokeRunnerRequested) {
-    null, "false" -> false
-    "true" -> true
-    else -> error("andchamber.browserSmokeRunner must be true or false")
-}
 
 // Version: CI passes the tag-derived values as Gradle properties; local builds use the defaults.
 val appVersionName: String = providers.gradleProperty("andchamber.versionName").orNull ?: "0.0.1"
@@ -165,12 +156,7 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
-        testInstrumentationRunner = when {
-            useBrowserSmokeRunner ->
-                "io.andchamber.app.browser.BrowserSmokeInstrumentation"
-            else ->
-                "androidx.test.runner.AndroidJUnitRunner"
-        }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // The on-device runtime only exists for these two ABIs (see prepare_android_runtime_native_libs.py).
         ndk {
@@ -234,7 +220,6 @@ android {
     sourceSets {
         getByName("main").jniLibs.srcDir(generatedRuntimeJni)
         getByName("main").assets.srcDir(generatedNativeLicenseAssets)
-        getByName("main").assets.srcDir(generatedPhoneAdbLicenseAssets)
     }
 
     packaging {
@@ -262,23 +247,9 @@ val syncNativeLicenseAssets =
         outputs.dir(generatedNativeLicenseAssets).withPropertyName("nativeLicenseAssets")
     }
 
-// ADB dependency license texts and provenance (LibADB Android, SPAKE2, Bouncy Castle, Conscrypt).
-// The sources stay in third_party/phone-adb/; this copies them into the APK like the native notices.
-val syncPhoneAdbLicenseAssets =
-    tasks.register<Sync>("syncPhoneAdbLicenseAssets") {
-        from(phoneAdbLicenseSourceDir) {
-            include("**/*")
-            into("licenses/phone-adb")
-        }
-        into(generatedPhoneAdbLicenseAssets)
-        inputs.dir(phoneAdbLicenseSourceDir).withPropertyName("phoneAdbLicenseSources")
-        outputs.dir(generatedPhoneAdbLicenseAssets).withPropertyName("phoneAdbLicenseAssets")
-    }
-
 tasks.named("preBuild").configure {
     dependsOn(buildAndChamberRuntimeNative)
     dependsOn(syncNativeLicenseAssets)
-    dependsOn(syncPhoneAdbLicenseAssets)
 }
 
 // Release APK is named AndChamber-<versionName>.apk for publishing. Debug keeps the AGP default.
@@ -328,14 +299,6 @@ dependencies {
     implementation("org.tukaani:xz:1.9")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.webkit:webkit:1.14.0")
-
-    // Native ADB for the local phone-control driver. Apache-2.0 option; the transitive
-    // spake2-android 2.2.1 (LGPL-3.0) and bcprov 1.81 (Bouncy Castle licence) are documented in
-    // third_party/phone-adb/. The app-local patch is in io/github/muntashirakon/adb/.
-    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
-    // LibADB's own recommended TLS 1.3 provider. The platform Conscrypt class is a hidden API and
-    // reflection to exportKeyingMaterial is denied on API 35; this provider exposes it publicly.
-    implementation("org.conscrypt:conscrypt-android:2.5.3")
 
     implementation("io.insert-koin:koin-android:4.0.1")
     implementation("io.insert-koin:koin-androidx-compose:4.0.1")

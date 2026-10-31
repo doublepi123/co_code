@@ -11,17 +11,13 @@ import io.andchamber.app.data.LocalReadiness
 import io.andchamber.app.data.LocalApiClient
 import io.andchamber.app.data.WebSessionProfiles
 import io.andchamber.app.R
-import io.andchamber.app.notify.ApiRequest
 import io.andchamber.app.notify.NotificationBootstrapStore
-import io.andchamber.app.notify.NotificationActions
 import io.andchamber.app.notify.RuntimeErrorWatch
 import io.andchamber.app.notify.NotificationObserver
 import io.andchamber.app.notify.NotificationSettingsBootstrap
 import io.andchamber.app.notify.NotificationSink
 import io.andchamber.app.notify.OpenChamberNotifier
 import io.andchamber.app.notify.ProcessForeground
-import io.andchamber.app.notify.LocalApiSessionPromptTransport
-import io.andchamber.app.notify.SessionPromptController
 import io.andchamber.app.runtime.DefaultLocalRuntimeController
 import android.system.Os
 import io.andchamber.app.runtime.ForegroundStarter
@@ -51,52 +47,13 @@ import io.andchamber.app.runtime.network.RuntimeDnsReporter
 import io.andchamber.app.runtime.network.ResolvConf
 import io.andchamber.app.runtime.install.VerifiedRuntimeDownloader
 import io.andchamber.app.runtime.manifest.RuntimeManifestReader
-import io.andchamber.app.runtime.process.BrowserPluginAssets
-import io.andchamber.app.runtime.process.BrowserToolHost
 import io.andchamber.app.runtime.process.EmbeddedCommandSuite
 import io.andchamber.app.runtime.process.HealthProbe
-import io.andchamber.app.runtime.process.LocalBrowserProviderBinding
 import io.andchamber.app.runtime.process.ProotOpenChamberServer
-import io.andchamber.app.runtime.process.PhonePluginAssets
-import io.andchamber.app.runtime.process.PhonePluginRegistrationProbe
-import io.andchamber.app.runtime.process.PhoneToolBinding
-import io.andchamber.app.runtime.process.PhoneToolHost
-import io.andchamber.app.runtime.process.phonePluginRegistrationAccepted
-import io.andchamber.app.phone.android.PhoneAgentToolReadiness
-import io.andchamber.app.phone.android.PhoneDriverFacade
-import io.andchamber.app.phone.android.overlay.PhoneOverlayCoordinator
-import io.andchamber.app.phone.android.overlay.PhoneOverlayDesignerContent
-import io.andchamber.app.phone.android.overlay.PhoneOverlayDriverBridge
-import io.andchamber.app.phone.android.overlay.PhoneOverlayHolder
-import io.andchamber.app.phone.android.overlay.LazyPhoneTaskEventHandler
-import io.andchamber.app.phone.android.overlay.LazyPhoneTaskNativeFacts
-import io.andchamber.app.phone.android.overlay.PhoneOverlayTaskCoordinator
-import io.andchamber.app.phone.android.overlay.PhoneOverlaySettings
-import io.andchamber.app.phone.android.PhoneGrantRoutePublisher
-import io.andchamber.app.phone.android.PhoneIdentityStore
-import io.andchamber.app.phone.android.PhoneIntegration
-import io.andchamber.app.phone.android.PhoneIntegrationTaskStarter
-import io.andchamber.app.phone.android.PhoneStandingContinueSender
-import io.andchamber.app.phone.standing.PhoneTaskStarter
-import io.andchamber.app.phone.android.PhoneIntegrationStore
-import io.andchamber.app.phone.android.PhonePairingReceipts
-import io.andchamber.app.phone.android.PhoneProposalSource
-import io.andchamber.app.phone.android.RuntimePhoneToolReadiness
-import io.andchamber.app.phone.android.phonePluginEnabledNow
-import io.andchamber.app.phone.android.phoneIntegrationStore
-import io.andchamber.app.phone.core.PhoneController
-import io.andchamber.app.phone.core.PhoneTargetPolicy
-import io.andchamber.app.runtime.process.ProviderPageRouter
+import io.andchamber.app.runtime.process.ProotStaleServerCleaner
 import io.andchamber.app.ui.ScreenAwakeController
 import io.andchamber.app.ui.UiPrefs
-import io.andchamber.app.ui.browser.NativeBrowserPresenter
-import io.andchamber.app.runtime.process.ProotStaleServerCleaner
 import io.andchamber.app.service.RuntimeService
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import org.koin.dsl.module
 import java.io.File
@@ -139,25 +96,11 @@ val appModule =
             )
         }
 
-        // Memory-only notification question for the phone overlay conversation. It reads pending
-        // state only for a local question event or an explicit refresh; never polls.
-        single {
-            SessionPromptController(
-                transport = LocalApiSessionPromptTransport(get()),
-                currentLaunchId = { get<OpenChamberServer>().readyLaunchId() },
-                currentTaskSession = { get<PhoneOverlayTaskCoordinator>().snapshot()?.routeSession },
-                // The overlay's task/owner snapshot is Main-owned; evaluate its submit fence there.
-                fenceDispatcher = Dispatchers.Main.immediate,
-                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-            )
-        }
-
         single {
             NotificationSink(
                 get(),
                 ProcessForeground,
                 get(),
-                onEvent = { get<SessionPromptController>().onNotification(it) },
             )
         }
 
@@ -203,17 +146,7 @@ val appModule =
 
         single<SharedStorageController> { get<SharedStorageControllerImpl>() }
 
-        single { NativeBrowserPresenter(scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)) }
-
-        single { ProviderPageRouter(get()) }
-
-        single { LocalBrowserProviderBinding(get(), get()) }
-
-        single<BrowserToolHost> { get<LocalBrowserProviderBinding>() }
-
-        // One long-lived server. The phone plugin flag is sampled once per launch through
-        // `phonePluginEnabledNow`; toggling the experiment never rebuilds this instance, so the
-        // monotonic launch ids and the browser/phone tool watermarks stay intact.
+        // One long-lived server.
         single<OpenChamberServer> {
             val context = get<Context>()
             val paths = RuntimePaths.under(context.filesDir)
@@ -245,208 +178,9 @@ val appModule =
                     ).cleanBeforeStart(port, guestRunDir, proot)
                 },
                 notificationSink = { line -> get<NotificationSink>().accept(line) },
-                browserPluginAssets = {
-                    BrowserPluginAssets.Assets(
-                        packageJson =
-                            context.assets.open(BrowserPluginAssets.PACKAGE_ASSET).bufferedReader().use { it.readText() },
-                        indexJs =
-                            context.assets.open(BrowserPluginAssets.INDEX_ASSET).bufferedReader().use { it.readText() },
-                    )
-                },
-                browserTrustedRoot = context.filesDir,
-                onBrowserUnavailable = { reason -> Log.w("AndChamberBrowser", reason) },
-                browserTool = get(),
-                // Phone control is off unless the person turned it on. Only this launch's start reads
-                // the switch; a change applies to the next start and never stops a running server.
-                phonePluginEnabledNow = phonePluginEnabledNow(get<PhoneIntegrationStore>()),
-                phonePluginAssets = {
-                    PhonePluginAssets.Assets(
-                        packageJson =
-                            context.assets.open(PhonePluginAssets.PACKAGE_ASSET).bufferedReader().use { it.readText() },
-                        indexJs =
-                            context.assets.open(PhonePluginAssets.INDEX_ASSET).bufferedReader().use { it.readText() },
-                    )
-                },
-                phoneTool = get(),
-                onPhoneUnavailable = { reason -> Log.w("AndChamberPhone", reason) },
                 bindsForStart = { storage.prepareForStart() },
                 onStarted = { binds -> storage.recordStarted(binds) },
                 onStopped = { storage.recordStopped() },
-            )
-        }
-
-        // --- Phone control (experimental, off by default) -------------------------------------
-        // The identity is an AndroidKeyStore key created on first driver use: app start does no
-        // keystore work. The controller is the only authority; the integration only displays it.
-        single { PhoneIdentityStore(get<Context>()) }
-
-        single<PhoneIntegrationStore> { phoneIntegrationStore(get<Context>()) }
-
-        single {
-            val context = get<Context>()
-            PhoneDriverFacade(
-                identity = { get<PhoneIdentityStore>().identity() },
-                // The tool binding records `launch-<id>` with the controller; the adapter reports the
-                // same id on connect so the driver's fixed id never overwrites the runtime identity.
-                runtimeIdentity = { PhoneDriverFacade.runtimeEpoch(get<OpenChamberServer>().readyLaunchId()) },
-                // A receipt survives a process restart, but only for the same certificate and host. The
-                // lambda runs at first driver creation (the integration calls that from Dispatchers.IO),
-                // so neither Keystore nor the preferences read happens while this singleton is built.
-                pairingReceipts = { owner -> PhonePairingReceipts.open(context, owner.certificateFingerprint) },
-                overlayBridge = get<PhoneOverlayDriverBridge>(),
-            )
-        }
-
-        // Driver-side overlay guard. The bridge stores only lambdas; it resolves the *already built*
-        // coordinator installed by MainActivity (PhoneOverlayHolder), never constructs it on the
-        // driver's IO thread and never creates a Compose owner/View.
-        single {
-            PhoneOverlayDriverBridge(
-                overlayRequired = { PhoneOverlayHolder.current()?.driverOverlayRequired() ?: true },
-                manager = { PhoneOverlayHolder.current()?.driverOverlayBarrier() },
-                authorityEpoch = { PhoneOverlayHolder.current()?.driverAuthorityEpoch() },
-                displayOwner = { PhoneOverlayHolder.current()?.driverDisplayOwner() },
-                onSafetyLost = { _, _ -> PhoneOverlayHolder.current()?.onDriverOverlayLost() },
-                makeWay = { avoid, currentFrame, deadlineMs ->
-                    PhoneOverlayHolder.current()
-                        ?.driverMakeWay(avoid, currentFrame, deadlineMs) ?: false
-                },
-                liveTaskTarget = { PhoneOverlayHolder.current()?.driverLiveTargetPackage() },
-                notificationFallback = { PhoneOverlayHolder.current()?.driverNotificationFallbackAllowed() ?: false },
-            )
-        }
-
-        single {
-            val context = get<Context>()
-            PhoneController(
-                driver = get<PhoneDriverFacade>(),
-                // Same monotonic clock the screen uses for its countdown; never wall time.
-                clock = { android.os.SystemClock.elapsedRealtime() },
-                targetPolicy = PhoneTargetPolicy(hostPackage = context.packageName),
-            )
-        }
-
-        // Deferred native standing adapter: it resolves the already-built integration at call time,
-        // so PhoneToolBinding can be constructed first without a DI cycle.
-        single<PhoneTaskStarter> {
-            PhoneIntegrationTaskStarter(owner = { get<PhoneIntegration>() })
-        }
-
-        single {
-            PhoneToolBinding(
-                controller = get<PhoneController>(),
-                readyLaunch = { get<OpenChamberServer>().readyLaunchId() },
-                // Model task events are admitted by the tool route, then handled by the native
-                // progress/task binding. Lazy so the DI graph has no construction cycle.
-                taskEvents = LazyPhoneTaskEventHandler { get<PhoneOverlayTaskCoordinator>() },
-                // Direct chat requests delegate to the native standing scope, fail-closed by default.
-                taskStarter = get<PhoneTaskStarter>(),
-                // Read-only native RPC gate, off Main. LocalApiClient validates the launch and
-                // keeps the session cookie; this callback only maps the exact response to a boolean.
-                registrationProbe =
-                    PhonePluginRegistrationProbe(
-                        attempt = {
-                            val result =
-                                get<LocalApiClient>().send(
-                                    ApiRequest(
-                                        method = "POST",
-                                        path = "/api/rpc/andchamber-phone/ready",
-                                        body = buildJsonObject { put("input", buildJsonObject { }) },
-                                    ),
-                                    directory = "/root",
-                                )
-                            phonePluginRegistrationAccepted(result.status, result.body)
-                        },
-                    ),
-            )
-        }
-
-        single<PhoneToolHost> { get<PhoneToolBinding>() }
-
-        single<PhoneProposalSource> {
-            val binding = get<PhoneToolBinding>()
-            object : PhoneProposalSource {
-                override val pending = binding.pendingRequest
-
-                override fun dismiss(revision: Long): Boolean = binding.dismissPendingRequest(revision)
-
-                override fun consume(revision: Long) = binding.consumePendingRequest(revision)
-            }
-        }
-
-        // Native-only routing for a freshly granted epoch. The binding fails closed when there is no
-        // current/ready local launch, and the integration revokes the grant in that case.
-        // Read-only readiness probes. `toolReady` is the tool lane's `PhoneToolHost.isReady()`:
-        // true only when the current launch installed the phone tool and the server still reports
-        // that same ready launch. Nothing here restarts the runtime or changes authorization.
-        single<PhoneAgentToolReadiness> {
-            RuntimePhoneToolReadiness(
-                runtimeState = { get<LocalRuntimeController>().state.value },
-                toolReadyProbe = { get<PhoneToolHost>().isReady() },
-            )
-        }
-
-        single<PhoneGrantRoutePublisher> {
-            val binding = get<PhoneToolBinding>()
-            PhoneGrantRoutePublisher { epoch, confirmedSessionLabel ->
-                binding.publishGrantRoute(epoch, confirmedSessionLabel)
-            }
-        }
-
-        // Overlay surface: default off, permission-gated; the coordinator only decides visibility
-        // and routes stop/return to the native owner. The visual capsule is the designer's composable.
-        single {
-            val context = get<Context>()
-            PhoneOverlaySettings(
-                context = context,
-                prefs = context.getSharedPreferences(PhoneOverlaySettings.FILE, Context.MODE_PRIVATE),
-            )
-        }
-
-        // Native task/progress binding. The tool lane injects this handler where it publishes events;
-        // delivery is not inferred here (it waits for the native-only callback).
-        single { PhoneOverlayTaskCoordinator(get<PhoneIntegration>()) }
-
-        single {
-            val task = get<PhoneOverlayTaskCoordinator>()
-            PhoneOverlayCoordinator(
-                context = get<Context>(),
-                settings = get<PhoneOverlaySettings>(),
-                integration = get<PhoneIntegration>(),
-                content =
-                    PhoneOverlayDesignerContent(
-                        clock = get<PhoneIntegration>().monotonicClock,
-                        progress = task.progress,
-                    ),
-                taskProgress = task.progress,
-                conversation = get<SessionPromptController>(),
-                currentLaunchId = { get<OpenChamberServer>().readyLaunchId() },
-                // Exact retained/live native task end; it persists the needs-check record and never
-                // re-grants or touches a newer task.
-                endTask = { key, epoch -> task.endRetainedTask(key, epoch) },
-            )
-        }
-
-        single {
-            PhoneIntegration(
-                context = get<Context>(),
-                store = get<PhoneIntegrationStore>(),
-                driver = get<PhoneDriverFacade>(),
-                controller = get<PhoneController>(),
-                proposals = get<PhoneProposalSource>(),
-                grantRoutes = get<PhoneGrantRoutePublisher>(),
-                readiness = get<PhoneAgentToolReadiness>(),
-                // Deferred: the coordinator depends on this integration; the sink is only called when
-                // a grant is really confirmed.
-                taskNative = LazyPhoneTaskNativeFacts { get<PhoneOverlayTaskCoordinator>() },
-                // One fixed wake-up of the original chat, reusing the same authenticated loopback
-                // client as notification replies. 2xx only; never a session log or a retry loop.
-                continueSender = PhoneStandingContinueSender { sessionId, text ->
-                    get<LocalApiClient>().send(NotificationActions.sendReply(sessionId, text)).ok
-                },
-                // Read-only need-user projection; the coordinator depends on this integration, so
-                // resolve it lazily at read time.
-                taskProgress = { get<PhoneOverlayTaskCoordinator>().progress.value },
             )
         }
 

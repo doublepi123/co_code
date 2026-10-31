@@ -92,9 +92,9 @@ class StringResourcesTest {
 
     @Test
     fun `the number of translated strings is what the brief committed to`() {
-        // 332 existing keys plus 24 for inline notification steps, actions, privacy-safe status
-        // messages and draft recovery. One entry per key, as the loader keeps them.
-        assertEquals(356, english.size)
+        // All app strings, one entry per key, as the loader keeps them. The embedded-browser and
+        // phone-control experiments were removed, so only the core app strings remain.
+        assertEquals(294, english.size)
     }
 
     private companion object {

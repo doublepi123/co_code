@@ -103,9 +103,6 @@ object ProotCommands {
         suiteEnvironment: Map<String, String>,
         prootTmp: File,
         uiPassword: String,
-        browserTool: Map<String, String> = emptyMap(),
-        /** Phone-tool overlay, applied after [browserTool] so a shared config key carries both. */
-        phoneTool: Map<String, String> = emptyMap(),
     ): Map<String, String> =
         buildMap {
             putAll(suiteEnvironment)
@@ -123,12 +120,6 @@ object ProotCommands {
             put("OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS", "15000")
             // Android's SELinux makes os.networkInterfaces() throw; the shim supplies a loopback list.
             put("NODE_OPTIONS", "--require $SHIM_PATH")
-            // The plugin entry and its endpoint-file path. A failed prepare passes an empty map, so
-            // the user's inline config stays untouched and no overlay is injected.
-            putAll(browserTool)
-            // Independent phone-tool overlay. Absent by default; applied last so its merged
-            // OPENCODE_CONFIG_CONTENT contains both plugin directories when both are present.
-            putAll(phoneTool)
         }
 
     /** Environment for installer steps (apk, npm): no server secrets, no shim. */

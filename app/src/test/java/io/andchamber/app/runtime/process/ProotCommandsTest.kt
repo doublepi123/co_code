@@ -101,35 +101,7 @@ class ProotCommandsTest {
         assertEquals("true", env["OPENCODE_DISABLE_AUTOUPDATE"])
         assertEquals("/usr/local/bin/opencode", env["OPENCHAMBER_OPENCODE_BIN"])
         assertEquals("--require /opt/andchamber/android-shim.cjs", env["NODE_OPTIONS"])
-        assertFalse(env.containsKey(BrowserPluginAssets.TOOL_ENV))
-        assertFalse(env.containsKey(BrowserPluginAssets.CONFIG_ENV))
-    }
-
-    @Test
-    fun `server environment adds only the plugin endpoint and merged config`() {
-        val existing = """{"model":"keep-me"}"""
-        val merged = BrowserPluginAssets.mergeConfig(existing)
-        val env =
-            ProotCommands.serverEnvironment(
-                suiteEnvironment = mapOf(BrowserPluginAssets.CONFIG_ENV to existing),
-                prootTmp = prootTmp,
-                uiPassword = "secret-password",
-                browserTool = mapOf(
-                    BrowserPluginAssets.TOOL_ENV to BrowserPluginAssets.GUEST_ENDPOINT_FILE,
-                    BrowserPluginAssets.CONFIG_ENV to merged,
-                ),
-            )
-
-        assertEquals(BrowserPluginAssets.GUEST_ENDPOINT_FILE, env[BrowserPluginAssets.TOOL_ENV])
-        assertEquals(merged, env[BrowserPluginAssets.CONFIG_ENV])
-        assertTrue(env.getValue(BrowserPluginAssets.CONFIG_ENV).contains("keep-me"))
-        assertTrue(env.getValue(BrowserPluginAssets.CONFIG_ENV).contains(BrowserPluginAssets.GUEST_DIR))
-        assertEquals("secret-password", env["OPENCHAMBER_UI_PASSWORD"])
-        assertFalse(env.containsKey("OPENCODE_CONFIG"))
-        assertFalse(env.containsKey("OPENCHAMBER_BROWSER_PROVIDER"))
-        assertFalse(env.containsKey("ANDCHAMBER_BROWSER_PROVIDER_TOKEN"))
-        assertFalse(env.containsKey("ANDCHAMBER_BROWSER_ENDPOINT_FILE"))
-        assertFalse(env.values.any { it.contains("\"token\"") })
+        assertFalse(env.containsKey("OPENCODE_CONFIG_CONTENT"))
     }
 
     @Test
@@ -144,8 +116,6 @@ class ProotCommandsTest {
 
         assertFalse(env.containsKey("OPENCHAMBER_UI_PASSWORD"))
         assertFalse(env.containsKey("NODE_OPTIONS"))
-        assertFalse(env.containsKey(BrowserPluginAssets.TOOL_ENV))
-        assertFalse(env.containsKey(BrowserPluginAssets.CONFIG_ENV))
         assertEquals("/root", env["HOME"])
     }
 

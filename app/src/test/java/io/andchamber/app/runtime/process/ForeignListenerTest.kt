@@ -1,6 +1,5 @@
 package io.andchamber.app.runtime.process
 
-import io.andchamber.app.browser.tool.BrowserToolEndpoint
 import io.andchamber.app.runtime.RuntimePaths
 import io.andchamber.app.runtime.install.InstalledRuntime
 import io.andchamber.app.runtime.install.RuntimeMetadata
@@ -15,7 +14,6 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
-import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -84,51 +82,6 @@ class ForeignListenerTest {
         }
     }
 
-    /**
-     * A child whose stdout stays open until [destroy]. A byte-array stream would EOF while the
-     * process is still alive, so it cannot represent a running server.
-     */
-    private class OpenOutputChild(
-        output: String,
-    ) : Process() {
-        private val pipe = java.io.PipedInputStream()
-        private val writer = java.io.PipedOutputStream(pipe)
-        private val alive = java.util.concurrent.atomic.AtomicBoolean(true)
-
-        init {
-            writer.write(output.toByteArray())
-            writer.flush()
-        }
-
-        override fun getOutputStream(): OutputStream = OutputStream.nullOutputStream()
-
-        override fun getInputStream(): InputStream = pipe
-
-        override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
-
-        override fun waitFor(): Int {
-            while (isAlive) Thread.sleep(5)
-            return 0
-        }
-
-        override fun exitValue(): Int {
-            if (isAlive) throw IllegalThreadStateException("still running")
-            return 0
-        }
-
-        override fun destroy() {
-            alive.set(false)
-            writer.close()
-        }
-
-        /** Ends stdout without marking the process dead, for a late pump after a replacement launch. */
-        fun endOutput() {
-            writer.close()
-        }
-
-        override fun isAlive(): Boolean = alive.get()
-    }
-
     /** Health probe that records every call; a foreign server answering counts as a call. */
     private class RecordingHealth(
         private val report: HealthReport?,
@@ -150,9 +103,6 @@ class ForeignListenerTest {
         precheckFree: Boolean = true,
         maxLogBytes: Long = 1_048_576L,
         notificationSink: (String) -> Unit = {},
-        browserPluginAssets: () -> BrowserPluginAssets.Assets = { pluginAssets() },
-        onBrowserUnavailable: (String) -> Unit = {},
-        browserTool: BrowserToolHost = BrowserToolHost.None,
         spawnOverride: (() -> Process)? = null,
         capturedEnv: MutableList<Map<String, String>> = mutableListOf(),
     ) = ProotOpenChamberServer(
@@ -174,10 +124,6 @@ class ForeignListenerTest {
         pollMillis = 1L,
         maxLogBytes = maxLogBytes,
         notificationSink = notificationSink,
-        browserPluginAssets = browserPluginAssets,
-        browserTrustedRoot = folder.root,
-        onBrowserUnavailable = onBrowserUnavailable,
-        browserTool = browserTool,
         sleep = { Thread.sleep(1) },
         spawn = { _, env, _ ->
             capturedEnv += env
@@ -232,153 +178,6 @@ class ForeignListenerTest {
         val launchId = server(child, RecordingHealth(ok), spawned).start(runtime(), "ui-secret", {}, { false })
 
         assertTrue(launchId > 0)
-    }
-
-    @Test
-    fun `start deletes the old endpoint, syncs the plugin and injects the plugin environment`() {
-        val home = File(folder.root, "home")
-        val endpoint = BrowserToolEndpoint.hostFile(home)
-        endpoint.parentFile.mkdirs()
-        endpoint.writeText("""{"version":1,"url":"http://127.0.0.1:1/v1/tool","token":"old"}""")
-        val child = FakeChild(
-            output = "OpenChamber server listening on 127.0.0.1:$port\n",
-            exitCode = 0,
-            lifetimeMillis = 10_000L,
-        )
-        val ok = HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "ours")
-        val captured = mutableListOf<Map<String, String>>()
-        var endpointGoneAtSync = false
-
-        val host = RecordingToolHost()
-        server(
-            child,
-            RecordingHealth(ok),
-            mutableListOf(),
-            browserPluginAssets = {
-                endpointGoneAtSync = !java.nio.file.Files.exists(endpoint.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                pluginAssets()
-            },
-            capturedEnv = captured,
-            browserTool = host,
-        ).start(runtime(), "ui-secret", {}, { false })
-
-        assertTrue("the old endpoint is deleted before the plugin sync", endpointGoneAtSync)
-        assertFalse(java.nio.file.Files.exists(endpoint.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
-        assertEquals("plugin-package", File(home, BrowserPluginAssets.PACKAGE_RELATIVE).readText())
-        assertEquals("plugin-index", File(home, BrowserPluginAssets.INDEX_RELATIVE).readText())
-        val env = captured.single()
-        assertEquals(BrowserPluginAssets.GUEST_ENDPOINT_FILE, env[BrowserPluginAssets.TOOL_ENV])
-        assertTrue(env.getValue(BrowserPluginAssets.CONFIG_ENV).contains(BrowserPluginAssets.GUEST_DIR))
-        assertFalse(env.containsKey("OPENCODE_CONFIG"))
-        assertFalse(env.containsKey("OPENCHAMBER_BROWSER_PROVIDER"))
-        assertFalse(env.containsKey("ANDCHAMBER_BROWSER_PROVIDER_TOKEN"))
-        assertFalse(env.containsKey("ANDCHAMBER_BROWSER_ENDPOINT_FILE"))
-        assertFalse(env.values.any { it.contains("ui-secret") && it.contains(BrowserPluginAssets.CONFIG_ENV) })
-        assertEquals("ui-secret", env["OPENCHAMBER_UI_PASSWORD"])
-        assertEquals(1, host.started.size)
-        assertEquals(home.canonicalFile, host.started.single().second.canonicalFile)
-    }
-
-    @Test
-    fun `browser plugin prepare failure still starts OpenChamber and injects no browser config`() {
-        val child = FakeChild(
-            output = "OpenChamber server listening on 127.0.0.1:$port\n",
-            exitCode = 0,
-            lifetimeMillis = 10_000L,
-        )
-        val ok = HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "ours")
-        val captured = mutableListOf<Map<String, String>>()
-        val reasons = mutableListOf<String>()
-
-        val launchId = server(
-            child,
-            RecordingHealth(ok),
-            mutableListOf(),
-            browserPluginAssets = { error("asset missing") },
-            capturedEnv = captured,
-            onBrowserUnavailable = { reasons += it },
-        ).start(runtime(), "ui-secret", {}, { false })
-
-        assertTrue(launchId > 0)
-        assertEquals(1, reasons.size)
-        assertFalse(reasons.single().contains("asset missing"))
-        assertFalse(captured.single().containsKey(BrowserPluginAssets.TOOL_ENV))
-        assertFalse(captured.single().containsKey(BrowserPluginAssets.CONFIG_ENV))
-    }
-
-    @Test
-    fun `stop revokes the launch tool host and a dead previous pump does not revoke the next launch`() {
-        val first = OpenOutputChild("OpenChamber server listening on 127.0.0.1:$port\n")
-        val second = OpenOutputChild("OpenChamber server listening on 127.0.0.1:$port\n")
-        val ok = HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "ours")
-        val host = RecordingToolHost()
-        val children = ArrayDeque<Process>()
-        children.add(first)
-        children.add(second)
-        val created = server(
-            first,
-            RecordingHealth(ok),
-            mutableListOf(),
-            browserTool = host,
-            spawnOverride = { children.removeFirst() },
-        )
-        val launchA = created.start(runtime(), "ui-secret", {}, { false })
-        assertTrue(first.isAlive)
-        assertFalse(host.stopped.contains(launchA))
-
-        created.stop()
-        val stopped = host.stopped.toList()
-        assertEquals(listOf(launchA), stopped)
-
-        val launchB = created.start(runtime(), "ui-secret", {}, { false })
-        first.endOutput()
-        Thread.sleep(50)
-
-        assertFalse(host.stopped.contains(launchB))
-        assertEquals(launchB, created.readyLaunchId())
-        assertEquals(1, host.stopped.count { it == launchA })
-        assertFalse(host.stopped.drop(stopped.size).contains(launchA))
-        second.destroy()
-    }
-
-    @Test
-    fun `a launch that was never ready does not stop a newer tool host`() {
-        val first = FakeChild(
-            output = "OpenChamber server listening on 127.0.0.1:$port\n",
-            exitCode = 0,
-            lifetimeMillis = 10_000L,
-        )
-        val ok = HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "ours")
-        val host = RecordingToolHost()
-        val created = server(first, RecordingHealth(ok), mutableListOf(), browserTool = host)
-        val launchA = created.start(runtime(), "ui-secret", {}, { false })
-        created.stop()
-
-        assertEquals(listOf(launchA), host.stopped)
-        assertFalse(host.stopped.contains(launchA + 1))
-    }
-
-    @Test
-    fun `the settings default and legacy cleanup run before spawn`() {
-        val home = File(folder.root, "home")
-        val legacy = File(home, ".local/state/andchamber/browser-control.json")
-        legacy.parentFile.mkdirs()
-        legacy.writeText("""{"token":"legacy"}""")
-        val child = FakeChild(
-            output = "OpenChamber server listening on 127.0.0.1:$port\n",
-            exitCode = 0,
-            lifetimeMillis = 10_000L,
-        )
-        val ok = HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "ours")
-
-        server(child, RecordingHealth(ok), mutableListOf()).start(runtime(), "ui-secret", {}, { false })
-
-        assertFalse(legacy.exists())
-        val settings = BrowserPluginAssets.settingsFile(home)
-        assertTrue(settings.isFile)
-        assertEquals(false, kotlinx.serialization.json.Json.parseToJsonElement(settings.readText())
-            .let { (it as kotlinx.serialization.json.JsonObject)["agentWebToolEnabled"] }!!
-            .let { (it as kotlinx.serialization.json.JsonPrimitive).content.toBoolean() })
     }
 
     @Test
@@ -539,8 +338,6 @@ class ForeignListenerTest {
         sleep = { Thread.sleep(1) },
         spawn = { _, _, _ -> child },
         notificationSink = { sunk += it },
-        browserPluginAssets = { pluginAssets() },
-        browserTrustedRoot = folder.root,
     )
 
     @Test
@@ -561,29 +358,4 @@ class ForeignListenerTest {
         assertTrue(error is PortInUseException)
         assertEquals(0, spawned.size)
     }
-    private fun pluginAssets() = BrowserPluginAssets.Assets(packageJson = "plugin-package", indexJs = "plugin-index")
-
-    private class RecordingToolHost : BrowserToolHost {
-        val started = mutableListOf<Pair<Long, File>>()
-        val stopped = mutableListOf<Long>()
-
-        override fun start(
-            launchId: Long,
-            home: File,
-            trustedRoot: File,
-        ): Boolean {
-            started += launchId to home
-            return true
-        }
-
-        override fun stop(launchId: Long) {
-            stopped += launchId
-        }
-
-        override fun clearStaleEndpoint(
-            home: File,
-            trustedRoot: File,
-        ): Boolean = BrowserToolEndpoint.delete(BrowserToolEndpoint.hostFile(home), trustedRoot)
-    }
-
 }

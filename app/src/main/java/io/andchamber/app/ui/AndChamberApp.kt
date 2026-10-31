@@ -60,9 +60,6 @@ import io.andchamber.app.runtime.RuntimeState
 import io.andchamber.app.runtime.ServerTarget
 import io.andchamber.app.runtime.SharedStorageController
 import io.andchamber.app.runtime.WebSessionAuthenticator
-import io.andchamber.app.phone.android.PhoneIntegration
-import io.andchamber.app.phone.android.PhoneOpenRequest
-import io.andchamber.app.ui.phone.PhoneControlScreen
 import io.andchamber.app.ui.home.HomeActions
 import io.andchamber.app.ui.home.HomeScreen
 import io.andchamber.app.ui.theme.AndChamberTheme
@@ -82,7 +79,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 internal object Routes {
     const val HOME = "home"
-    const val PHONE = "phone"
     const val ARG_TARGET = "targetId"
     const val WEB = "web/{$ARG_TARGET}"
 
@@ -207,8 +203,6 @@ internal fun AndChamberApp(
     remotes: RemoteServerStore,
     auth: WebSessionAuthenticator,
     storage: SharedStorageController,
-    phone: PhoneIntegration? = null,
-    overlay: io.andchamber.app.phone.android.overlay.PhoneOverlayCoordinator? = null,
 ) {
     AndChamberTheme {
         val nav = rememberNavController()
@@ -222,25 +216,6 @@ internal fun AndChamberApp(
         val pendingRemovalIds = remember { mutableStateMapOf<String, Unit>() }
         val removalScope = rememberCoroutineScope()
         val context = LocalContext.current
-
-        // Overlay settings card on the phone screen. Its state is the coordinator's; it never grants.
-        val overlaySettings =
-            overlay?.let { coordinator ->
-                val state by coordinator.settingsState.collectAsStateWithLifecycle()
-                state
-            }
-        val overlaySettingsActions =
-            remember(overlay) {
-                overlay?.settingsActions()
-                    ?: io.andchamber.app.ui.phone.overlay.PhoneOverlaySettingsActions()
-            }
-
-        // The session/paired notifications ask for the phone screen; nothing else navigates there.
-        val phoneOpenRequests by PhoneOpenRequest.requests.collectAsStateWithLifecycle()
-        LaunchedEffect(phoneOpenRequests) {
-            if (phoneOpenRequests == 0) return@LaunchedEffect
-            nav.navigate(Routes.PHONE) { launchSingleTop = true }
-        }
 
         val askForNotifications = rememberNotificationPermissionRequest()
         val local = remember(runtime, askForNotifications, pool) { LocalActions(runtime, askForNotifications, pool) }
@@ -409,17 +384,6 @@ internal fun AndChamberApp(
         val background = MaterialTheme.colorScheme.background
         val currentEntry by nav.currentBackStackEntryAsState()
         val onWeb = currentEntry?.destination?.route == Routes.WEB
-        // A phone link the person already configured reconnects in the background when the local
-        // instance is in front and its runtime is starting or running, so the chat tool has a device
-        // without opening the native phone page (opening it applies the host-return stop). It never
-        // pairs, grants, changes the scope, starts a task or restarts the runtime.
-        val onLocalChat =
-            onWeb && currentEntry?.arguments?.getString(Routes.ARG_TARGET) == ServerTarget.LOCAL_ID
-        val localRuntimeReady = runtimeState is RuntimeState.Running || runtimeState is RuntimeState.Starting
-        LaunchedEffect(phone, onLocalChat, localRuntimeReady) {
-            if (inspection || phone == null || !onLocalChat || !localRuntimeReady) return@LaunchedEffect
-            phone.autoConnectIfConfigured(localRuntimeReady = true)
-        }
         WindowBackgroundEffect(background)
         SystemBarsEffect(darkIcons = ((if (onWeb) webBarColor else null) ?: background).luminance() > 0.5f)
 
@@ -520,61 +484,6 @@ internal fun AndChamberApp(
                             storage = storageState,
                             autoOpenLocal = uiPrefs.autoOpenLocal,
                             updates = updates,
-                            onOpenPhone =
-                                phone?.let {
-                                    { nav.navigate(Routes.PHONE) { launchSingleTop = true } }
-                                },
-                        )
-                    }
-
-                    composable(Routes.PHONE) {
-                        val target = phone ?: return@composable
-                        val phoneState by target.state.collectAsStateWithLifecycle()
-                        // The screen and the controller share one monotonic clock; never wall time.
-                        val phoneActions =
-                            remember(target, nav, local) {
-                                // Home, always: the phone screen may sit on top of a chat, and the
-                                // runtime notice asks the person to go Home to start/restart it.
-                                target.actions(
-                                    onBack = { nav.showHome() },
-                                    onRestartRuntime = local::restart,
-                                    // Navigation only; it never revokes, grants or resumes. With no
-                                    // bound session, offer is a no-op and we reuse the local open
-                                    // path (start/last page) instead of falling back to Home.
-                                    onOpenChat = {
-                                        val session = target.currentTaskSessionId()
-                                        OpenSessionLink.offer(session, null)
-                                        if (session == null) {
-                                            removalScope.launch {
-                                                try {
-                                                    openLocalForLink(runtime, nav, lifecycle, local) {}
-                                                } catch (cancelled: CancellationException) {
-                                                    throw cancelled
-                                                } catch (_: Exception) {
-                                                    // Navigation is best-effort; never revoke or report success.
-                                                }
-                                            }
-                                        }
-                                    },
-                                )
-                            }
-                        DisposableEffect(target) {
-                            target.onScreenOpened()
-                            onDispose { target.onScreenClosed() }
-                        }
-                        // Entering is not the only way the phone page comes to the front: resuming
-                        // the Activity with this route already composed must still apply the
-                        // host-return stop. A chat task started while the app was backgrounded on
-                        // this page must not survive. onScreenOpened is the same idempotent entry.
-                        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                            target.onScreenOpened()
-                        }
-                        PhoneControlScreen(
-                            state = phoneState,
-                            actions = phoneActions,
-                            clock = target.monotonicClock,
-                            overlaySettings = overlaySettings,
-                            overlaySettingsActions = overlaySettingsActions,
                         )
                     }
 
@@ -601,9 +510,6 @@ internal fun AndChamberApp(
                                     "remote|${target.id}|${target.baseUrl}|${target.uiPassword.orEmpty().hashCode()}"
                                 null -> null
                             }
-                        val browserPresenter = remember {
-                            runCatching { org.koin.core.context.GlobalContext.get().get<io.andchamber.app.ui.browser.NativeBrowserPresenter>() }.getOrNull()
-                        }
                         WebScreen(
                             targetId = targetId,
                             target = target,
@@ -622,7 +528,6 @@ internal fun AndChamberApp(
                             onSystemBarColor = { webBarColor = it },
                             deepLinkPath = if (isLocal) sessionLink else null,
                             onDeepLinkUsed = { sessionLink = null },
-                            browserPresenter = if (isLocal) browserPresenter else null,
                             // This instance's own last page, applied when its page is loaded fresh
                             // (switching instances or a cold launch), and only if the server still
                             // answers at the origin it was remembered on (a re-pointed remote drops it).
@@ -687,10 +592,9 @@ private suspend fun openLocalOnLaunch(
     // Starting the foreground service needs the app in the foreground. Everything from here on runs
     // without suspending, so the app is still resumed when the start is requested.
     lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-    // A launch starts from Home, or from the native phone page when the app icon is tapped there;
-    // any chat page already in front is left alone.
+    // A launch starts from Home; any chat page already in front is left alone.
     val from = nav.currentBackStackEntry?.destination?.route
-    if (from != Routes.HOME && from != Routes.PHONE) return
+    if (from != Routes.HOME) return
     // Decide on the state as it is now; it may have moved on while the screens came up.
     when (launchTarget(runtime.state.value)) {
         LaunchTarget.StartAndOpenLocal -> {
@@ -701,8 +605,6 @@ private suspend fun openLocalOnLaunch(
         LaunchTarget.Home, LaunchTarget.Wait -> return
     }
     nav.navigate(Routes.web(ServerTarget.LOCAL_ID)) {
-        // From the phone page (or any non-Home entry), Back still leads to Home.
-        if (from != Routes.HOME) popUpTo(Routes.HOME)
         launchSingleTop = true
     }
     if (underCover) {
@@ -730,11 +632,10 @@ private suspend fun openRemoteOnLaunch(
     if (covered) onOpening()
     withTimeoutOrNull(NAV_READY_TIMEOUT_MS) { nav.currentBackStackEntryFlow.first() } ?: return
     lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-    // Home, or the native phone page when the app icon is tapped there; never another page.
+    // Home only; never another page.
     val from = nav.currentBackStackEntry?.destination?.route
-    if (from != Routes.HOME && from != Routes.PHONE) return
+    if (from != Routes.HOME) return
     nav.navigate(Routes.web(targetId)) {
-        if (from != Routes.HOME) popUpTo(Routes.HOME)
         launchSingleTop = true
     }
     if (covered) {
