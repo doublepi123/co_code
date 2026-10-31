@@ -110,6 +110,10 @@ object ProotCommands {
             put("T3CODE_AUTH_PASSWORD", uiPassword)
             // Codex/OpenCode must not try to update themselves over the pinned npm install.
             put("OPENCODE_DISABLE_AUTOUPDATE", "true")
+            // PRoot's -0 fakes uid 0 inside an unprivileged Android app sandbox. Claude Code refuses
+            // T3's bypassPermissions mode for root unless the process says it is sandboxed, which
+            // it is: the guest has no more rights than the app.
+            put("IS_SANDBOX", "1")
             // Android's SELinux makes os.networkInterfaces() throw; the shim supplies a loopback list.
             put("NODE_OPTIONS", "--require $SHIM_PATH")
         }

@@ -88,6 +88,7 @@ class ProotCommandsTest {
         assertEquals("/root/.t3", env["T3CODE_HOME"])
         assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
         assertEquals("true", env["OPENCODE_DISABLE_AUTOUPDATE"])
+        assertEquals("1", env["IS_SANDBOX"])
         assertEquals("--require /opt/cocode/android-shim.cjs", env["NODE_OPTIONS"])
         assertFalse(env.containsKey("OPENCODE_CONFIG_CONTENT"))
     }

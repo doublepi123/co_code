@@ -117,6 +117,9 @@ class ProotT3Server(
         // cleanup means we must not launch, and must never send the password to it.
         if (!cleanBeforeStart(port, prootPath)) throw PortInUseException(port)
         runCatching { refreshDns(runtime) }
+        // Installed agents whose T3 provider is off until configured become usable. Never fails a start.
+        runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys) }
+            .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
         val resolved = suite()
 
         paths.logs.mkdirs()
