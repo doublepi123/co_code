@@ -24,9 +24,19 @@ The instrumentation classes cover:
 
 On the x86_64 emulator, a fresh T3-only setup with Codex completed. OpenCode was then added through the app while Codex remained selected. Both the committed metadata and the actual binaries remained present: `codex-cli 0.166.0` and `opencode v2.2.5`.
 
-On an ARM64 host running an Android 12 / API 31 redroid container, upgrading an existing installation retained T3 data, agent installations and the existing application-data lifetime. Adding OpenChamber 2.5.3 preserved the T3 installation and all three agents. OpenChamber's separate musl node-pty build succeeded. T3 switching back and restart restoration were verified. OpenChamber activation initially failed because another application occupied port 3000; CoCode correctly refused to authenticate that listener. That failure is not a successful OpenChamber activation test.
+On an ARM64 host running an Android 12 / API 31 redroid container, upgrading an existing installation retained T3 data, agent installations and the existing application-data lifetime. Adding OpenChamber 2.5.3 preserved the T3 installation and all three agents. OpenChamber's separate musl node-pty build succeeded. T3 switching back and restart restoration were verified. OpenChamber activation initially failed because another application occupied port 3000; CoCode correctly refused to authenticate that listener. That initial failure remains recorded separately.
 
-The ARM64 container results do not represent a physical phone. Further activation and storage results must be recorded separately rather than inferred from compilation or the x86 emulator.
+After explicit permission to temporarily stop the older application, the same final development APK listed above was verified on ARM64:
+
+- Device `base.apk` SHA-256 matched the tested artifact; the original first-install time and existing agent/data records were retained.
+- Switching to OpenChamber stopped T3's listener, started OpenChamber on port 3000, and reported `/health` ready with OpenCode running and its binary managed by policy.
+- The actual OpenChamber WebView loaded authenticated. Its separate password produced successful login/session probes; the OpenCode upgrade endpoint returned policy rejection HTTP 409.
+- A synthetic OpenCode-config marker had identical host/guest hashes under the shared home and was removed after checking.
+- Switching back stopped OpenChamber, restored T3 on port 3773 with its original environment identity, and opened the existing T3 threads without another interactive login.
+- The same seven migration and two guest-bind storage tests passed on ARM64: nine tests, no failures or skips.
+- The older application was reopened after the test and recovered its previous port and data. CoCode remained on T3. No real credentials were copied into public storage during acceptance testing; directory tests used synthetic disposable data.
+
+The ARM64 container results do not represent a physical phone or a Pi400 deployment. Vendor background policies remain unverified.
 
 ## Recorded failure and replacement
 
