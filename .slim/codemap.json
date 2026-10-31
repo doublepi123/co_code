@@ -2,7 +2,7 @@
   "metadata": {
     "version": "1.0.0",
     "last_run": "2026-10-19T05:29:21.757Z",
-    "root": "/home/lcy/code/and-chamber",
+    "root": ".",
     "include_patterns": [
       "app/src/main/java/**/*.kt",
       "app/src/main/AndroidManifest.xml",
