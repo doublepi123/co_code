@@ -995,9 +995,13 @@ private fun webThemeRes(dark: Boolean): Int =
     if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar
 
 /**
- * The pool's two independent slots. The local server's page lives in [Local] and is never destroyed
- * by opening a remote server; all remote servers share [Remote], so switching between them replaces
- * only the previous remote page.
+ * The pool's two independent slots. The on-device server's page lives in [Local] and is never
+ * destroyed by opening a remote server; all remote servers share [Remote], so switching between them
+ * replaces only the previous remote page.
+ *
+ * Both on-device servers (`local-t3`, `local-openchamber`) use [Local]: only one of them runs at a
+ * time. Each keeps its own target id, so its own profile; switching servers is a new identity, which
+ * destroys the old page and binds a new WebView to the other server's profile (no shared cookies).
  */
 internal enum class WebViewSlot {
     Local,
@@ -1005,8 +1009,7 @@ internal enum class WebViewSlot {
     ;
 
     companion object {
-        fun of(targetId: String): WebViewSlot =
-            if (targetId == io.cocode.app.runtime.ServerTarget.LOCAL_ID) Local else Remote
+        fun of(targetId: String): WebViewSlot = if (io.cocode.app.ui.isLocalTargetId(targetId)) Local else Remote
     }
 }
 

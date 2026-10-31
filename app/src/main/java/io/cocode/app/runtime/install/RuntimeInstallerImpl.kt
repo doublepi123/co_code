@@ -1,6 +1,7 @@
 package io.cocode.app.runtime.install
 
 import io.cocode.app.runtime.RuntimePaths
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.fs.deleteTreeOrThrow
 import io.cocode.app.runtime.manifest.RuntimeManifest
 import io.cocode.app.runtime.process.EmbeddedCommandSuite
@@ -47,23 +48,49 @@ class RuntimeInstallerImpl(
     override fun installedRuntime(): InstalledRuntime? {
         val metadataFile = paths.metadataFile
         if (!metadataFile.isFile || !paths.rootfs.isDirectory) return null
-        if (!File(paths.rootfs, "opt/t3/bin.mjs").isFile) return null
         normalizeRuntimeSymlinks(paths.environment)
         val metadata =
             runCatching { json.decodeFromString<RuntimeMetadata>(metadataFile.readText()) }
                 .getOrNull() ?: return null
         if (metadata.abi != abi) return null
-        return InstalledRuntime(metadata, paths.rootfs)
+        val servers =
+            installedServerVersions(paths.rootfs, metadata)
+                .filterKeys { kind ->
+                    kind != ServerKind.OpenChamber ||
+                        manifest.agent("opencode")?.let { InstalledComponents.agentFilesPresent(paths.rootfs, it) } != false
+                }
+        if (servers.isEmpty()) return null
+        val agents =
+            metadata.agents.filter { (id, _) ->
+                manifest.agent(id)?.let { InstalledComponents.agentFilesPresent(paths.rootfs, it) } == true
+            }
+        val normalized =
+            metadata.copy(
+                schemaVersion = 2,
+                servers = servers.mapKeys { (kind, _) -> kind.id },
+                agents = agents,
+                t3Version = servers[ServerKind.T3] ?: "",
+            )
+        if (normalized != metadata) {
+            runCatching {
+                io.cocode.app.runtime.fs.writeFileReplacing(
+                    metadataFile,
+                    json.encodeToString(RuntimeMetadata.serializer(), normalized),
+                )
+            }
+        }
+        return InstalledRuntime(normalized, paths.rootfs)
     }
 
     override suspend fun install(
         report: InstallReporter,
         agents: Set<String>,
+        servers: Set<ServerKind>,
     ): InstalledRuntime {
         paths.root.mkdirs()
         recover()
         val proot = suite()
-        return installer.install(report, proot, agents)
+        return installer.install(report, proot, agents, servers)
     }
 
     override suspend fun update(
@@ -84,6 +111,17 @@ class RuntimeInstallerImpl(
         recover()
         val proot = suite()
         return installer.applyAgents(report, proot, selected)
+    }
+
+    override suspend fun applyServers(
+        report: InstallReporter,
+        selected: Set<ServerKind>,
+        agents: Set<String>,
+    ): InstalledRuntime {
+        paths.root.mkdirs()
+        recover()
+        val proot = suite()
+        return installer.applyServers(report, proot, selected, agents)
     }
 
     override fun discardEnvironment() {

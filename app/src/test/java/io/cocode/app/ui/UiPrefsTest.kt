@@ -1,13 +1,14 @@
 package io.cocode.app.ui
 
 import android.content.SharedPreferences
-import io.cocode.app.runtime.ServerTarget
+import io.cocode.app.runtime.ServerKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class UiPrefsTest {
+    private val LOCAL_T3 = ServerKind.T3.localTargetId
     private val local = "http://127.0.0.1:3000"
     private val remote = "https://t3.example.com"
 
@@ -15,19 +16,19 @@ class UiPrefsTest {
     fun `each instance keeps its own page across switches and Home`() {
         val store = MemoryPrefs()
         val prefs = UiPrefs(store)
-        prefs.setLastTargetId(ServerTarget.LOCAL_ID)
-        prefs.setPage(ServerTarget.LOCAL_ID, "/?session=ses_local", local)
+        prefs.setLastTargetId(LOCAL_T3)
+        prefs.setPage(LOCAL_T3, "/?session=ses_local", local)
         prefs.setLastTargetId("r1")
         prefs.setPage("r1", "/?session=ses_remote", remote)
         prefs.clearLastTarget()
 
         assertNull(prefs.lastTargetId)
-        assertEquals(RememberedPage("/?session=ses_local", local), prefs.pageFor(ServerTarget.LOCAL_ID))
+        assertEquals(RememberedPage("/?session=ses_local", local), prefs.pageFor(LOCAL_T3))
         assertEquals(RememberedPage("/?session=ses_remote", remote), prefs.pageFor("r1"))
 
         // A new process reads the same pages back.
         val reread = UiPrefs(store)
-        assertEquals(RememberedPage("/?session=ses_local", local), reread.pageFor(ServerTarget.LOCAL_ID))
+        assertEquals(RememberedPage("/?session=ses_local", local), reread.pageFor(LOCAL_T3))
         assertEquals(RememberedPage("/?session=ses_remote", remote), reread.pageFor("r1"))
     }
 
@@ -35,17 +36,17 @@ class UiPrefsTest {
     fun `removed servers lose their page`() {
         val store = MemoryPrefs()
         val prefs = UiPrefs(store)
-        prefs.setPage(ServerTarget.LOCAL_ID, "/", local)
+        prefs.setPage(LOCAL_T3, "/", local)
         prefs.setPage("r1", "/a", remote)
         prefs.setPage("r2", "/b", remote)
 
         prefs.forgetPage("r1")
-        prefs.retainPages(setOf(ServerTarget.LOCAL_ID))
+        prefs.retainPages(setOf(LOCAL_T3))
 
         assertNull(prefs.pageFor("r1"))
         assertNull(prefs.pageFor("r2"))
-        assertEquals(RememberedPage("/", local), prefs.pageFor(ServerTarget.LOCAL_ID))
-        assertEquals(setOf("page_path:local", "page_origin:local"), store.all.keys.filter { it.startsWith("page_") }.toSet())
+        assertEquals(RememberedPage("/", local), prefs.pageFor(LOCAL_T3))
+        assertEquals(setOf("page_path:local-t3", "page_origin:local-t3"), store.all.keys.filter { it.startsWith("page_") }.toSet())
     }
 
     @Test
@@ -78,6 +79,27 @@ class UiPrefsTest {
     }
 
     /** Enough of SharedPreferences for UiPrefs; edits apply at once. */
+    @Test
+    fun `the old local record and page move to T3 Code once`() {
+        val store = MemoryPrefs()
+        store.edit()
+            .putString(UiPrefs.KEY_LAST_TARGET_ID, "local")
+            .putString(UiPrefs.PAGE_PATH_PREFIX + "local", "/?session=old")
+            .putString(UiPrefs.PAGE_ORIGIN_PREFIX + "local", "http://127.0.0.1:3773")
+            .apply()
+
+        val prefs = UiPrefs(store)
+
+        assertEquals("local-t3", prefs.lastTargetId)
+        assertEquals(RememberedPage("/?session=old", "http://127.0.0.1:3773"), prefs.pageFor("local-t3"))
+        assertNull(prefs.pageFor("local"))
+        assertEquals("local-t3", store.getString(UiPrefs.KEY_LAST_TARGET_ID, null))
+        assertFalse(store.contains(UiPrefs.PAGE_PATH_PREFIX + "local"))
+        assertEquals("/?session=old", store.getString(UiPrefs.PAGE_PATH_PREFIX + "local-t3", null))
+        // Read again: nothing left to migrate, same result.
+        assertEquals("local-t3", UiPrefs(store).lastTargetId)
+    }
+
     private class MemoryPrefs : SharedPreferences {
         private val values = LinkedHashMap<String, Any?>()
 

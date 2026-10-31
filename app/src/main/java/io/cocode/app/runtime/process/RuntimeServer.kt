@@ -1,14 +1,15 @@
 package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.RuntimePaths
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.install.InstalledRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 import java.util.ArrayDeque
 
-/** Runs and stops the T3 Code server process. */
-interface T3Server {
+/** Runs and stops one of the supported web servers inside PRoot. */
+interface RuntimeServer {
     /**
      * Launches the server and waits until it is ready (see [Readiness]). Throws on any failure and
      * whenever [isCancelled] returns true, so a Stop never queues behind the readiness wait.
@@ -40,11 +41,14 @@ class PortInUseException(
 ) : IllegalStateException("Port $port is in use by another app")
 
 /**
- * Launches `node /opt/t3/bin.mjs` inside PRoot. Ported from AndCode's LocalRuntimeProcessLauncher
- * (MIT), reduced to the single T3 Code server.
+ * Launches one server of [kind] inside PRoot: T3 Code's `/opt/t3/bin.mjs` or OpenChamber's npm CLI.
+ * Lifecycle, ownership, logging and readiness are shared; only the command, environment, log file,
+ * password file and health document differ per kind. Ported from AndCode's
+ * LocalRuntimeProcessLauncher (MIT), generalised to both servers.
  */
-class ProotT3Server(
+class ProotRuntimeServer(
     private val paths: RuntimePaths,
+    private val kind: ServerKind = ServerKind.T3,
     private val suite: () -> EmbeddedCommandSuite.Paths,
     private val health: HealthProbe,
     private val scanner: ProcessScanner,
@@ -80,7 +84,7 @@ class ProotT3Server(
             }
             .start()
     },
-) : T3Server {
+) : RuntimeServer {
     private val lock = Any()
     private var process: Process? = null
     private var launchId = 0L
@@ -109,23 +113,31 @@ class ProotT3Server(
         isCancelled: () -> Boolean,
     ): Long {
         stop()
-        val port = runtime.metadata.port
-        // T3 Code keeps its data in T3CODE_HOME (/root/.t3, under the bind-mounted home).
+        val port = kind.port
+        // T3 Code keeps its data in T3CODE_HOME (/root/.t3, under the bind-mounted home); OpenChamber
+        // shares that same guest home, so its OpenCode config and sessions are shared too.
         val prootPath = runCatching { suite().proot.absolutePath }.getOrNull()
             ?: error("Embedded PRoot is unavailable")
         // Port ownership is decided before anything is spawned: a foreign listener that survives our
         // cleanup means we must not launch, and must never send the password to it.
         if (!cleanBeforeStart(port, prootPath)) throw PortInUseException(port)
         runCatching { refreshDns(runtime) }
-        // Installed agents whose T3 provider is off until configured become usable. Never fails a start.
-        runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys) }
-            .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
+        if (kind == ServerKind.T3) {
+            // Installed agents whose T3 provider is off until configured become usable. Never fails a start.
+            runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys) }
+                .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
+        }
+        if (kind == ServerKind.OpenChamber) {
+            // Pin the guest OpenCode path and disable OpenChamber's own upgrade before it starts.
+            OpenChamberPolicy.write(runtime.rootfs)
+        }
         val resolved = suite()
 
+        val logFile = paths.serverLog(kind)
         paths.logs.mkdirs()
         paths.workspace.mkdirs()
         paths.prootTmp.mkdirs()
-        truncateLogFile(paths.serverLog, maxLogBytes)
+        truncateLogFile(logFile, maxLogBytes)
 
         val binds = bindsForStart()
         val command =
@@ -134,6 +146,7 @@ class ProotT3Server(
                 rootfs = runtime.rootfs,
                 binds = binds,
                 extraBinds = emptyList(),
+                kind = kind,
             )
         val env =
             ProotCommands.serverEnvironment(
@@ -141,6 +154,7 @@ class ProotT3Server(
                 paths.prootTmp,
                 port,
                 uiPassword,
+                kind,
             )
         val signal = CompletableDeferred<Unit>()
         val started = spawn(command, env, paths.root)
@@ -152,9 +166,9 @@ class ProotT3Server(
                 listenSignal = signal
                 ++launchId
             }
-        val pump = pumpOutput(started, id, port, signal, onLog)
+        val pump = pumpOutput(started, id, port, kind, signal, onLog)
         try {
-            waitUntilReady(started, port, isCancelled, signal, pump)
+            waitUntilReady(started, port, kind, isCancelled, signal, pump)
         } catch (error: Throwable) {
             stop()
             throw error
@@ -202,18 +216,19 @@ class ProotT3Server(
         process: Process,
         launch: Long,
         port: Int,
+        kind: ServerKind,
         signal: CompletableDeferred<Unit>,
         onLog: (String) -> Unit,
     ): Thread =
         Thread({
-            val writer = BoundedLogWriter(paths.serverLog, maxLogBytes)
+            val writer = BoundedLogWriter(paths.serverLog(kind), maxLogBytes)
             try {
                 process.inputStream.bufferedReader().forEachLine { line ->
                     synchronized(lock) {
                         recentOutput.addLast(line)
                         while (recentOutput.size > DIAGNOSTIC_LINES) recentOutput.removeFirst()
                     }
-                    if (line.contains(Readiness.listenMarker(port))) signal.complete(Unit)
+                    if (line.contains(Readiness.listenMarker(port, kind))) signal.complete(Unit)
                     writer.appendLine(line)
                     onLog(line)
                 }
@@ -228,22 +243,24 @@ class ProotT3Server(
                     if (this.process === process && launchId == launch) readyId = null
                 }
             }
-        }, "t3-output").apply { isDaemon = true; start() }
+        }, "${kind.id}-output").apply { isDaemon = true; start() }
 
     /**
      * Readiness in trust order: the child printed the listen line (signal), the child is alive, then
-     * the environment document is believed while its id stays stable. A child that exits before
-     * listening because the port was taken fails as port in use.
+     * the health document is believed while its identity stays stable. A child that exits before
+     * listening because the port was taken fails as port in use. OpenChamber additionally requires
+     * its OpenCode backend to be ready, and a reported OpenCode failure fails immediately.
      */
     private fun waitUntilReady(
         started: Process,
         port: Int,
+        kind: ServerKind,
         isCancelled: () -> Boolean,
         signal: CompletableDeferred<Unit>,
         pump: Thread,
     ) {
         val deadline = now() + readyTimeoutMillis * 1_000_000L
-        val environmentIds = mutableListOf<String?>()
+        val identities = mutableListOf<String?>()
         var listening = false
         while (true) {
             if (isCancelled()) throw CancellationException("Start cancelled")
@@ -252,25 +269,26 @@ class ProotT3Server(
                 pump.join(2_000)
                 val output = synchronized(lock) { recentOutput.toList() }
                 if (!listening && output.any { it.contains("EADDRINUSE") }) throw PortInUseException(port)
-                error("T3 Code exited during startup (exit ${started.exitValue()}): ${tail()}")
+                error("${kind.displayName} exited during startup (exit ${started.exitValue()}): ${tail()}")
             }
             if (!listening) listening = signal.isCompleted
             if (!listening) {
-                if (now() >= deadline) error("T3 Code did not start listening on port $port: ${tail()}")
+                if (now() >= deadline) error("${kind.displayName} did not start listening on port $port: ${tail()}")
                 sleep(pollMillis)
                 continue
             }
             val report = health.read(port)
-            environmentIds += report?.environmentId
-            check(Readiness.identityStable(environmentIds)) {
-                "Another T3 Code server answered on port $port during startup; refusing to continue"
+            identities += report?.identity
+            check(Readiness.identityStable(identities)) {
+                "Another ${kind.displayName} server answered on port $port during startup; refusing to continue"
             }
-            when (Readiness.verdict(report)) {
+            when (val verdict = Readiness.verdict(report)) {
                 Readiness.Verdict.Ready -> return
                 Readiness.Verdict.Waiting -> Unit
+                is Readiness.Verdict.Failed -> error(verdict.reason)
             }
             if (now() >= deadline) {
-                error("T3 Code did not become ready on port $port within ${readyTimeoutMillis / 1000}s: ${tail()}")
+                error("${kind.displayName} did not become ready on port $port within ${readyTimeoutMillis / 1000}s: ${tail()}")
             }
             sleep(pollMillis)
         }

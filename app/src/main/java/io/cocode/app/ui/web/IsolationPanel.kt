@@ -24,7 +24,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 @Composable
 internal fun IsolationPanel(
     failure: WebIsolationFailure,
-    isLocal: Boolean,
+    /** The on-device server's product name, or null for a remote server. */
+    localName: String?,
     onRetry: () -> Unit,
     onHome: () -> Unit,
     onOpenInBrowser: (() -> Unit)?,
@@ -38,7 +39,7 @@ internal fun IsolationPanel(
             WebIsolationFailure.InvalidServerAddress -> R.string.web_bad_address_title to R.string.web_bad_address_body
         }
     val bodyText = stringResource(body)
-    val shownBody = if (isLocal) bodyText + "\n\n" + stringResource(R.string.web_local_keeps_running) else bodyText
+    val shownBody = if (localName != null) bodyText + "\n\n" + stringResource(R.string.web_local_keeps_running, localName) else bodyText
     // A bad address won't get better by trying again; it is fixed on Home.
     val retry = if (failure == WebIsolationFailure.InvalidServerAddress) null else PanelAction(stringResource(R.string.try_again), onRetry)
     StatusPanel(

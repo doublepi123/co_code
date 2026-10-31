@@ -33,10 +33,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
-import io.cocode.app.ui.components.ChamberMark
+import io.cocode.app.ui.components.CoCodeMark
 import kotlinx.coroutines.delay
 
-/** The cover shows only the background this long, then fades the cube in. */
+/** The cover shows only the background this long, then fades the mark in. */
 internal const val LAUNCH_MARK_DELAY_MS = 120L
 
 /** The cover stays quiet this long before saying what it is waiting for. */
@@ -65,7 +65,7 @@ internal class UiPrefs(
         prefs?.edit()?.putBoolean(KEY_AUTO_OPEN_LOCAL, enabled)?.apply()
     }
 
-    private var lastId = prefs?.getString(KEY_LAST_TARGET_ID, null)
+    private var lastId = prefs?.getString(KEY_LAST_TARGET_ID, null)?.let(::migratedTargetId)
 
     /** Last page of every instance, by [ServerTarget] id. Snapshot state, so screens read the latest. */
     private val pages = mutableStateMapOf<String, RememberedPage>()
@@ -76,8 +76,12 @@ internal class UiPrefs(
             if (!key.startsWith(PAGE_PATH_PREFIX) || value !is String) continue
             val id = key.removePrefix(PAGE_PATH_PREFIX)
             val origin = stored[PAGE_ORIGIN_PREFIX + id] as? String ?: continue
-            pages[id] = RememberedPage(value, origin)
+            // The single local server of older versions is T3 Code; its new id wins if both exist.
+            val newId = migratedTargetId(id)
+            if (newId != id && newId in pages) continue
+            pages[newId] = RememberedPage(value, origin)
         }
+        migrateLegacyLocalId(stored)
         // Before pages were kept per instance, only the last instance had one: move it over.
         val legacyPath = prefs?.getString(KEY_LEGACY_TARGET_PATH, null)
         val legacyOrigin = prefs?.getString(KEY_LEGACY_TARGET_ORIGIN, null)
@@ -90,6 +94,23 @@ internal class UiPrefs(
             }
             editor.apply()
         }
+    }
+
+    /**
+     * Before OpenChamber there was one local id, `local`, and it always meant T3 Code. Its record and
+     * page move to `local-t3` once, so they stay T3 Code's and never open OpenChamber.
+     */
+    private fun migrateLegacyLocalId(stored: Map<String, *>) {
+        if (prefs == null) return
+        val legacy = LEGACY_LOCAL_TARGET_ID
+        val hasLegacyPage = (PAGE_PATH_PREFIX + legacy) in stored || (PAGE_ORIGIN_PREFIX + legacy) in stored
+        val hasLegacyLast = stored[KEY_LAST_TARGET_ID] == legacy
+        if (!hasLegacyPage && !hasLegacyLast) return
+        val editor = prefs.edit().remove(PAGE_PATH_PREFIX + legacy).remove(PAGE_ORIGIN_PREFIX + legacy)
+        val newId = migratedTargetId(legacy)
+        pages[newId]?.let { editor.putString(PAGE_PATH_PREFIX + newId, it.path).putString(PAGE_ORIGIN_PREFIX + newId, it.origin) }
+        if (hasLegacyLast) editor.putString(KEY_LAST_TARGET_ID, newId)
+        editor.apply()
     }
 
     /** The instance the user last had open ([ServerTarget] id); null means they left from Home. */
@@ -178,7 +199,7 @@ internal fun rememberUiPrefs(): UiPrefs {
 
 /**
  * Neutral first frame of a launch that may open the local server: the app background and the
- * cube, nothing else, so neither Home nor a spinner flashes by. The cube fades in (no hard cut
+ * mark, nothing else, so neither Home nor a spinner flashes by. The mark fades in (no hard cut
  * after the system splash, and no flash when the decision takes only a few frames); "Checking…"
  * appears only if the wait gets noticeable. Swallows touches meant for the screens underneath.
  */
@@ -203,7 +224,7 @@ internal fun LaunchCoverContent(
 ) {
     val markFade by animateFloatAsState(if (markShown) 1f else 0f, tween(240), label = "launchMark")
     val captionAlpha by animateFloatAsState(if (slow) 1f else 0f, tween(400), label = "launchCaption")
-    // The cube only starts breathing once the caption explains the wait; it begins at full
+    // The mark only starts breathing once the caption explains the wait; it begins at full
     // opacity, so there is no jump.
     val breathing: State<Float>? = if (slow) rememberBreathing() else null
     Box(
@@ -217,14 +238,14 @@ internal fun LaunchCoverContent(
                     }
                 },
     ) {
-        ChamberMark(
+        CoCodeMark(
             size = 56.dp,
             modifier =
                 Modifier
                     .align(Alignment.Center)
                     .graphicsLayer { alpha = markFade * (breathing?.value ?: 1f) },
         )
-        // Placed below the centred cube, so the cube never moves when the caption appears.
+        // Placed below the centred mark, so the mark never moves when the caption appears.
         Text(
             text = stringResource(R.string.launch_checking),
             style = MaterialTheme.typography.labelMedium,

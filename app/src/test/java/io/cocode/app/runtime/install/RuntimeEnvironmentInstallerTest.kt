@@ -30,6 +30,18 @@ class RuntimeEnvironmentInstallerTest {
     }
 
     @Test
+    fun `OpenChamber adds the native build toolchain for node-pty`() {
+        val packages = RuntimeEnvironmentInstaller.apkPackages(needsNativeBuild = true).split(" ")
+        listOf("make", "g++", "linux-headers").forEach {
+            assertTrue("$it missing from the OpenChamber build packages", it in packages)
+        }
+        val t3Only = RuntimeEnvironmentInstaller.apkPackages(needsNativeBuild = false).split(" ")
+        listOf("make", "g++", "linux-headers").forEach {
+            assertFalse("$it must not be needed for a T3-only install", it in t3Only)
+        }
+    }
+
+    @Test
     fun `agents install from npm at their latest version`() {
         val script = RuntimeEnvironmentInstaller.agentInstallScript(listOf(codex, opencode))
 

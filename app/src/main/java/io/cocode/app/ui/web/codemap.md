@@ -52,5 +52,5 @@ Files:
 
 - Driven by `ui/CoCodeApp.kt`, which passes `target`, `localState`, `checking`, `sessionKey`, `auth`, `pool`, `resumePath` and the callbacks. The root also calls `pool.discard` on server removal and before repair or uninstall.
 - Runtime contract: `WebSessionAuthenticator.prepare(target, cookies: WebSessionCookies)` → `WebSessionResult` (`Ready`, `NeedsLogin`, `Unreachable`). The cookies come from the bound profile; the target and origin must match. `ServerTarget.Local(baseUrl)` and `Remote(id, displayName, baseUrl, uiPassword, allowInsecureHttp)`. `RuntimeState` and `FailurePhase` drive `LocalServerPanel`.
-- Uses `ui/` helpers `findActivity`, `rememberLastNonNull`, `displayAddress`, `components` (`ChamberMark`, `StatusDot`, `StatusTone`), `theme` tokens, `i18n.UserMessages.stepLabel`, and `R.string.*`.
+- Uses `ui/` helpers `findActivity`, `rememberLastNonNull`, `displayAddress`, `components` (`CoCodeMark`, `StatusDot`, `StatusTone`), `theme` tokens, `i18n.UserMessages.stepLabel`, and `R.string.*`.
 - Android APIs: `WebView`, `WebViewCompat` / `WebViewFeature` (profiles), `MediaStore`, `ActivityResultContracts`, `LifecycleEventObserver` (resume and pause). `DownloadManager` is not used for page downloads.

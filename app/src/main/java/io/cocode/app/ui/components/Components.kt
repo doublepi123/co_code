@@ -37,9 +37,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -208,50 +213,59 @@ internal fun DetailRow(
 }
 
 /**
- * The T3 Code cube drawn with Canvas: an open-top isometric box. Matches the web UI's logo
- * without bundling an image.
+ * The CoCode mark drawn with Canvas: a phone outline with a terminal prompt (">_") on its screen.
+ * Same geometry as the launcher icon (res/drawable/ic_launcher_foreground.xml) without bundling an
+ * image: [color] draws the phone and cursor, [accent] the prompt chevron.
  */
 @Composable
-internal fun ChamberMark(
+internal fun CoCodeMark(
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
+    color: Color = MaterialTheme.colorScheme.onBackground,
+    accent: Color = MaterialTheme.colorScheme.primary,
     size: Dp = 28.dp,
 ) {
     Canvas(modifier = modifier.size(size)) {
-        // Logo geometry is defined on a 100x100 box centered on (0,0) at the cube center.
-        val unit = this.size.minDimension / 100f
+        // Geometry uses the launcher icon's 108-unit canvas; the 64-unit box centred on (54, 54)
+        // holds the phone (x 35..73, y 24..84) and is scaled to fill the requested size.
+        val unit = this.size.minDimension / 64f
         translate(left = this.size.width / 2f, top = this.size.height / 2f) {
             scale(unit, unit, pivot = Offset.Zero) {
-                val stroke = Stroke(width = 5f, join = StrokeJoin.Round)
-                val left =
-                    Path().apply {
-                        moveTo(0f, 2f)
-                        lineTo(-40f, -21f)
-                        lineTo(-40f, 23f)
-                        lineTo(0f, 46f)
-                        close()
-                    }
-                val right =
-                    Path().apply {
-                        moveTo(0f, 2f)
-                        lineTo(40f, -21f)
-                        lineTo(40f, 23f)
-                        lineTo(0f, 46f)
-                        close()
-                    }
-                val top =
-                    Path().apply {
-                        moveTo(0f, -44f)
-                        lineTo(-40f, -21f)
-                        lineTo(0f, 2f)
-                        lineTo(40f, -21f)
-                        close()
-                    }
-                drawPath(left, color.copy(alpha = 0.22f), style = Fill)
-                drawPath(right, color.copy(alpha = 0.42f), style = Fill)
-                drawPath(left, color, style = stroke)
-                drawPath(right, color, style = stroke)
-                drawPath(top, color, style = stroke)
+                translate(left = -54f, top = -54f) {
+                    val outer = RoundRect(35f, 24f, 73f, 84f, CornerRadius(11f))
+                    val inner = RoundRect(40f, 29f, 68f, 79f, CornerRadius(6f))
+                    val screen = Path().apply { addRoundRect(inner) }
+                    val frame =
+                        Path().apply {
+                            fillType = PathFillType.EvenOdd
+                            addRoundRect(outer)
+                            addRoundRect(inner)
+                        }
+                    val chevron =
+                        Path().apply {
+                            moveTo(45.5f, 48.5f)
+                            lineTo(51.5f, 54.5f)
+                            lineTo(45.5f, 60.5f)
+                        }
+                    drawPath(screen, color.copy(alpha = 0.08f), style = Fill)
+                    drawPath(frame, color, style = Fill)
+                    drawRoundRect(
+                        color = color.copy(alpha = 0.45f),
+                        topLeft = Offset(50f, 32.25f),
+                        size = Size(8f, 2.5f),
+                        cornerRadius = CornerRadius(1.25f),
+                    )
+                    drawPath(
+                        chevron,
+                        accent,
+                        style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Miter),
+                    )
+                    drawRoundRect(
+                        color = color,
+                        topLeft = Offset(56.5f, 58.5f),
+                        size = Size(8f, 4f),
+                        cornerRadius = CornerRadius(1.25f),
+                    )
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package io.cocode.app.runtime.process
 
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.storage.GuestBinds
 import io.cocode.app.runtime.storage.SharedStorageLayout
 import java.io.File
@@ -14,6 +15,8 @@ object ProotCommands {
     const val GUEST_NODE = "/usr/bin/node"
     const val T3_CLI = "/opt/t3/bin.mjs"
     const val T3_HOME = "/root/.t3"
+    const val OPENCHAMBER_CLI = "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js"
+    const val GUEST_OPENCODE = "/usr/local/bin/opencode"
     const val SHIM_PATH = "/opt/cocode/android-shim.cjs"
 
     /** Shared PRoot prefix: kill-on-exit, link2symlink, fake root, rootfs and the Android mounts. */
@@ -61,7 +64,7 @@ object ProotCommands {
             listOf("/bin/sh", "-lc", script)
 
     /**
-     * The T3 Code server, bound to loopback, running in the foreground with the guest home as the
+     * A server of [kind], bound to loopback, running in the foreground with the guest home as the
      * working directory. Private-only binds: ~/projects is the private workspace.
      */
     fun serverCommand(
@@ -70,27 +73,44 @@ object ProotCommands {
         home: File,
         workspace: File,
         storageArguments: List<String>,
+        kind: ServerKind = ServerKind.T3,
     ): List<String> =
         serverCommand(
             proot = proot,
             rootfs = rootfs,
             binds = GuestBinds.privateOnly(home = home, privateWorkspace = workspace),
             extraBinds = storageArguments,
+            kind = kind,
         )
 
-    /** The T3 Code server with an explicit bind set; the port comes from the environment. */
+    /** A server of [kind] with an explicit bind set; each kind carries its own fixed port. */
     fun serverCommand(
         proot: File,
         rootfs: File,
         binds: GuestBinds,
         extraBinds: List<String>,
+        kind: ServerKind = ServerKind.T3,
     ): List<String> =
         prootArguments(
             proot,
             rootfs,
             bindArguments(binds.specs() + extraBinds) + listOf("-w", SharedStorageLayout.GUEST_HOME),
-        ) +
-            listOf(GUEST_NODE, T3_CLI)
+        ) + serverGuestCommand(kind)
+
+    /** The guest argv of the server, after proot and its binds. */
+    private fun serverGuestCommand(kind: ServerKind): List<String> =
+        when (kind) {
+            ServerKind.T3 -> listOf(GUEST_NODE, T3_CLI)
+            ServerKind.OpenChamber ->
+                listOf(
+                    GUEST_NODE,
+                    OPENCHAMBER_CLI,
+                    "serve",
+                    "--foreground",
+                    "--port",
+                    kind.port.toString(),
+                )
+        }
 
     /** Environment for the long-running server: cleared by the caller, then set to exactly this. */
     fun serverEnvironment(
@@ -98,24 +118,37 @@ object ProotCommands {
         prootTmp: File,
         port: Int,
         uiPassword: String,
+        kind: ServerKind = ServerKind.T3,
     ): Map<String, String> =
         buildMap {
             putAll(suiteEnvironment)
             put("PROOT_TMP_DIR", prootTmp.absolutePath)
             putAll(guestBaseEnvironment())
-            put("T3CODE_HOST", "127.0.0.1")
-            put("T3CODE_PORT", port.toString())
-            put("T3CODE_NO_BROWSER", "true")
-            put("T3CODE_HOME", T3_HOME)
-            put("T3CODE_AUTH_PASSWORD", uiPassword)
-            // Codex/OpenCode must not try to update themselves over the pinned npm install.
-            put("OPENCODE_DISABLE_AUTOUPDATE", "true")
-            // PRoot's -0 fakes uid 0 inside an unprivileged Android app sandbox. Claude Code refuses
-            // T3's bypassPermissions mode for root unless the process says it is sandboxed, which
-            // it is: the guest has no more rights than the app.
-            put("IS_SANDBOX", "1")
+            // OpenCode must not try to update itself over the pinned npm install.
+            put("OPENCODE_DISABLE_AUTOUPDATE", if (kind == ServerKind.T3) "true" else "1")
             // Android's SELinux makes os.networkInterfaces() throw; the shim supplies a loopback list.
             put("NODE_OPTIONS", "--require $SHIM_PATH")
+            when (kind) {
+                ServerKind.T3 -> {
+                    put("T3CODE_HOST", "127.0.0.1")
+                    put("T3CODE_PORT", port.toString())
+                    put("T3CODE_NO_BROWSER", "true")
+                    put("T3CODE_HOME", T3_HOME)
+                    put("T3CODE_AUTH_PASSWORD", uiPassword)
+                    // PRoot's -0 fakes uid 0 inside an unprivileged Android app sandbox. Claude Code
+                    // refuses T3's bypassPermissions mode for root unless the process says it is
+                    // sandboxed, which it is: the guest has no more rights than the app.
+                    put("IS_SANDBOX", "1")
+                }
+                ServerKind.OpenChamber -> {
+                    put("OPENCHAMBER_HOST", "127.0.0.1")
+                    put("OPENCHAMBER_UI_PASSWORD", uiPassword)
+                    // No paired-device relay: this server is only reachable on device loopback.
+                    put("OPENCHAMBER_RELAY_HOST", "off")
+                    put("OPENCHAMBER_OPENCODE_BIN", GUEST_OPENCODE)
+                    put("OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS", "15000")
+                }
+            }
         }
 
     /** Environment for installer steps (apk, npm): no server secrets, no shim. */

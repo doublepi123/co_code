@@ -48,7 +48,7 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.cocode.app.ui.components.ChamberMark
+import io.cocode.app.ui.components.CoCodeMark
 import io.cocode.app.ui.theme.ChamberTextStyles
 
 /** A labelled button for a panel. */
@@ -233,7 +233,7 @@ private fun BreathingMark(animate: Boolean) {
         animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "breathingAlpha",
     )
-    ChamberMark(size = 48.dp, modifier = Modifier.alpha(if (animate) pulse else 1f))
+    CoCodeMark(size = 48.dp, modifier = Modifier.alpha(if (animate) pulse else 1f))
 }
 
 /** Shown while the session is being prepared and until the page first paints. [name] null = this device. */
@@ -243,9 +243,16 @@ internal fun ConnectingPanel(
     address: String?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** For this device ([name] null): the product name of the server being opened. */
+    localName: String? = null,
 ) {
     StatusPanel(
-        title = if (name == null) stringResource(R.string.opening_local) else stringResource(R.string.connecting_to, name),
+        title =
+            if (name == null) {
+                stringResource(R.string.opening_local, localName ?: stringResource(R.string.server_t3))
+            } else {
+                stringResource(R.string.connecting_to, name)
+            },
         body = address,
         progress = Float.NaN,
         breathingMark = true,

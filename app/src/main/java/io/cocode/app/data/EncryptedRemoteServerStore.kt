@@ -5,6 +5,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.cocode.app.runtime.RemoteServerStore
 import io.cocode.app.runtime.ServerTarget
+import io.cocode.app.runtime.ServerKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,7 +14,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Remote T3 Code servers, persisted as one JSON list in EncryptedSharedPreferences. The UI
+ * Remote coding servers, persisted as one JSON list in EncryptedSharedPreferences. The UI
  * password is stored only here, encrypted at rest with an AES-GCM master key.
  */
 class EncryptedRemoteServerStore(
@@ -38,7 +39,7 @@ class EncryptedRemoteServerStore(
         val payload = prefs.getString(KEY_SERVERS, null) ?: return emptyList()
         return runCatching {
             json.decodeFromString(ListSerializer(StoredServer.serializer()), payload)
-                .map { it.toTarget() }
+                .mapNotNull { it.toTarget() }
         }.getOrDefault(emptyList())
     }
 
@@ -55,12 +56,17 @@ class EncryptedRemoteServerStore(
         val baseUrl: String,
         val uiPassword: String? = null,
         val allowInsecureHttp: Boolean = false,
+        // Entries saved before protocol selection were all T3 Code servers.
+        val kind: String = "t3",
     ) {
-        fun toTarget() = ServerTarget.Remote(id, displayName, baseUrl, uiPassword, allowInsecureHttp)
+        fun toTarget(): ServerTarget.Remote? {
+            val protocol = ServerKind.entries.firstOrNull { it.id == kind } ?: return null
+            return ServerTarget.Remote(id, displayName, baseUrl, uiPassword, allowInsecureHttp, kind = protocol)
+        }
 
         companion object {
             fun from(target: ServerTarget.Remote) =
-                StoredServer(target.id, target.displayName, target.baseUrl, target.uiPassword, target.allowInsecureHttp)
+                StoredServer(target.id, target.displayName, target.baseUrl, target.uiPassword, target.allowInsecureHttp, target.kind.id)
         }
     }
 

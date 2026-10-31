@@ -57,6 +57,9 @@ import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -105,6 +108,8 @@ import io.cocode.app.runtime.RuntimeInfo
 import io.cocode.app.runtime.RuntimeState
 import io.cocode.app.runtime.RuntimeUpdate
 import io.cocode.app.runtime.RuntimeUpdateState
+import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.ServersState
 import io.cocode.app.runtime.UpdateFailure
 import io.cocode.app.runtime.VersionChange
 import io.cocode.app.runtime.manifest.AgentSpec
@@ -117,6 +122,7 @@ import io.cocode.app.ui.components.StatusPill
 import io.cocode.app.ui.components.StatusTone
 import io.cocode.app.ui.components.color
 import io.cocode.app.ui.formatBytes
+import io.cocode.app.ui.label
 import io.cocode.app.ui.rememberCopyAction
 import io.cocode.app.ui.rememberLastNonNull
 import io.cocode.app.ui.theme.ChamberTextStyles
@@ -169,25 +175,13 @@ private fun RuntimePhase.tone(): StatusTone =
         else -> StatusTone.Idle
     }
 
-private enum class PendingConfirm { Repair, Uninstall, Update }
+private enum class PendingConfirm { Repair, Uninstall, Update, RemoveAgents, RemoveServers }
 
 /** Recommended free space before setup, with headroom over the ~1.2 GB footprint. */
 private const val LOW_SPACE_BYTES = 3L * 1024 * 1024 * 1024
 
 /** How long a confirmed update hides the offer while the request reaches the runtime. */
 private const val UPDATE_PICKUP_GRACE_MS = 15_000L
-
-/** The first non-null [value] this composition saw, kept from then on (not a snapshot state). */
-@Composable
-private fun <T : Any> rememberFirstNonNull(value: T?): T? {
-    val holder = remember { FirstValue<T>() }
-    if (holder.value == null) holder.value = value
-    return holder.value
-}
-
-private class FirstValue<T : Any> {
-    var value: T? = null
-}
 
 /** What the update slot under the card body shows. */
 private sealed interface UpdateNotice {
@@ -246,8 +240,18 @@ internal fun LocalRuntimeCard(
     onUpdate: () -> Unit = {},
     onCheckForUpdates: () -> Unit = {},
     onDismissUpdateFailure: () -> Unit = {},
+    /**
+     * T3 Code / OpenChamber: what the user picked, what is installed and which one is active. The
+     * card's status, actions and log are the active server's.
+     */
+    servers: ServersState = ServersState(),
+    /** Persists a new server selection; with an installed runtime this also applies it. Never empty. */
+    onServersChange: (Set<ServerKind>) -> Unit = {},
+    /** Makes another installed server the active one (stops the current one, starts that one). */
+    onSelectServer: (ServerKind) -> Unit = {},
 ) {
     val phase = if (checking || state == RuntimeState.Detecting) RuntimePhase.Checking else state.phase
+    val activeName = servers.active.label()
     var logOpen by rememberSaveable { mutableStateOf(false) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<PendingConfirm?>(null) }
@@ -280,9 +284,40 @@ internal fun LocalRuntimeCard(
         }
     val updatingNow = (state as? RuntimeState.Installing)?.updating == true
 
-    // Before an install a toggle is persisted immediately, so Set up uses it. Afterwards the toggles
-    // are staged locally until Apply asks the runtime to install/remove the diff.
-    var pendingAgents by remember(agents.selected) { mutableStateOf(agents.selected) }
+    // Before the first setup (or after it failed, with nothing installed yet) a toggle is saved right
+    // away, so Set up / Try again use it. Afterwards toggles are staged until Apply, measured against
+    // what is actually installed. The draft may be empty for a moment (uncheck one agent before
+    // checking another); it is then never saved or applied. See AgentDraft.
+    val agentsBeforeInstall =
+        phase == RuntimePhase.NotInstalled || (phase == RuntimePhase.Failed && info == null)
+    val installedAgentIds = agents.installed.keys
+    // Server picker: the same rules as the agent picker (see SelectionDraft).
+    val installedServers = servers.installed.keys
+    var serverDraft by remember(agentsBeforeInstall, if (agentsBeforeInstall) servers.selected else installedServers) {
+        mutableStateOf(ServerDraft.of(servers.selected, installedServers, agentsBeforeInstall))
+    }
+    // OpenChamber runs on OpenCode: while it is installed or about to be, OpenCode stays checked.
+    // That is a dependency, not the user's choice; the controller reports it in AgentsState.required.
+    val requiredAgents =
+        agents.required +
+            if (ServerKind.OpenChamber in serverDraft.checked && agents.available.any { it.id == OPENCODE_ID }) {
+                setOf(OPENCODE_ID)
+            } else {
+                emptySet()
+            }
+    var agentDraft by remember(
+        agentsBeforeInstall,
+        if (agentsBeforeInstall) agents.selected else installedAgentIds,
+        requiredAgents,
+    ) {
+        mutableStateOf(AgentDraft.of(agents.selected, installedAgentIds, agentsBeforeInstall, locked = requiredAgents))
+    }
+    // Never sends an empty or unchanged set to the controller.
+    val applyAgents: () -> Unit = { agentDraft.applySelection()?.let { onAgentsChange(it) } }
+    val applyServers: () -> Unit = { serverDraft.applySelection()?.let { onServersChange(it) } }
+    var switchTo by remember { mutableStateOf<ServerKind?>(null) }
+    // Set up needs a server and an agent.
+    val canSetUp = serverDraft.canSetUp && agentDraft.canSetUp
     val showAgents =
         agents.available.isNotEmpty() &&
             phase in setOf(
@@ -296,7 +331,18 @@ internal fun LocalRuntimeCard(
         modifier = modifier,
         accent = if (phase == RuntimePhase.Running) ChamberTheme.colors.success else null,
     ) {
-        CardHeader(phase = phase, updating = updatingNow)
+        CardHeader(phase = phase, updating = updatingNow, title = activeName)
+
+        // Both servers installed: which one this phone uses. Status and actions below follow it.
+        if (installedServers.size > 1 && phase != RuntimePhase.Checking && phase != RuntimePhase.Unsupported) {
+            ActiveServerSelector(
+                installed = ServerKind.entries.filter { it in installedServers },
+                active = servers.active,
+                enabled = !phase.isBusy,
+                onSelect = { kind -> if (kind != servers.active) switchTo = kind },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
 
         AnimatedContent(
             targetState = phase,
@@ -312,20 +358,17 @@ internal fun LocalRuntimeCard(
                 when (shown) {
                     RuntimePhase.Checking -> Spacer(Modifier.height(48.dp))
                     RuntimePhase.Unsupported -> UnsupportedBody()
-                    RuntimePhase.NotInstalled -> NotInstalledBody(onSetUp = onSetUp)
+                    RuntimePhase.NotInstalled -> NotInstalledBody(onSetUp = onSetUp, setUpEnabled = canSetUp)
                     RuntimePhase.Installing -> {
                         val installing = live as? RuntimeState.Installing
-                        InstallingBody(
-                            state = installing,
-                            // The offer as it was when the update began: it is cleared once the update
-                            // lands, and a check finishing meanwhile must not change what is shown.
-                            update = rememberFirstNonNull(updates.available.takeIf { installing?.updating == true }),
-                        )
+                        // No version list here: `updating` also covers adding or removing servers and
+                        // agents, so the pending update offer says nothing about what is happening.
+                        InstallingBody(state = installing)
                     }
-                    RuntimePhase.Stopped -> StoppedBody(onStart = onStart)
+                    RuntimePhase.Stopped -> StoppedBody(serverName = activeName, onStart = onStart)
                     RuntimePhase.Starting ->
                         TransitionBody(
-                            title = stringResource(R.string.starting_title),
+                            title = stringResource(R.string.starting_title, activeName),
                             detail = (live as? RuntimeState.Starting)?.detail,
                         )
                     RuntimePhase.Running ->
@@ -334,14 +377,17 @@ internal fun LocalRuntimeCard(
                         } ?: Spacer(Modifier.height(96.dp))
                     RuntimePhase.Stopping ->
                         TransitionBody(
-                            title = stringResource(R.string.stopping_title),
+                            title = stringResource(R.string.stopping_title, activeName),
                             detail = (live as? RuntimeState.Stopping)?.detail,
                         )
                     RuntimePhase.Failed ->
                         (live as? RuntimeState.Failed)?.let {
                             FailedBody(
                                 failed = it,
+                                serverName = activeName,
                                 onRetry = onRetry,
+                                // Retrying a first setup installs the picked servers and agents.
+                                retryEnabled = !agentsBeforeInstall || canSetUp,
                                 onRepair = { confirm = PendingConfirm.Repair },
                             )
                         } ?: Spacer(Modifier.height(96.dp))
@@ -350,18 +396,55 @@ internal fun LocalRuntimeCard(
         }
 
         if (showAgents) {
+            SelectionSection(
+                title = stringResource(R.string.servers_title),
+                hint = stringResource(if (agentsBeforeInstall) R.string.servers_hint else R.string.servers_hint_installed),
+                emptyHint = stringResource(R.string.servers_none_selected),
+                rows =
+                    ServerKind.entries.map { kind ->
+                        SelectionRow(
+                            id = kind,
+                            name = kind.label(),
+                            version = servers.installed[kind],
+                            note = if (kind == ServerKind.OpenChamber) stringResource(R.string.servers_needs_opencode) else null,
+                        )
+                    },
+                draft = serverDraft,
+                enabled = !phase.isBusy,
+                onToggle = { kind ->
+                    val (next, save) = serverDraft.toggle(kind)
+                    serverDraft = next
+                    // Before setup only; never an empty set.
+                    save?.let(onServersChange)
+                },
+                onApply = {
+                    if (serverDraft.needsRemovalConfirm) confirm = PendingConfirm.RemoveServers else applyServers()
+                },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
             AgentSelectionSection(
                 available = agents.available,
-                selected = pendingAgents,
+                selected = agentDraft.checked,
                 installed = agents.installed,
                 enabled = !phase.isBusy,
-                beforeInstall = phase == RuntimePhase.NotInstalled,
-                canApply = phase != RuntimePhase.NotInstalled && pendingAgents != agents.selected,
+                beforeInstall = agentsBeforeInstall,
+                canApply = agentDraft.canApply,
+                additions = agentDraft.additions,
+                removals = agentDraft.removals,
+                locked = agentDraft.locked,
                 onToggle = { id ->
-                    pendingAgents = if (id in pendingAgents) pendingAgents - id else pendingAgents + id
-                    if (phase == RuntimePhase.NotInstalled) onAgentsChange(pendingAgents)
+                    val (next, save) = agentDraft.toggle(id)
+                    agentDraft = next
+                    save?.let(onAgentsChange)
                 },
-                onApply = { onAgentsChange(pendingAgents) },
+                // Removing an installed agent asks first; only adding goes straight through.
+                onApply = {
+                    if (agentDraft.needsRemovalConfirm) {
+                        confirm = PendingConfirm.RemoveAgents
+                    } else {
+                        applyAgents()
+                    }
+                },
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
             )
         }
@@ -491,6 +574,35 @@ internal fun LocalRuntimeCard(
                     onDismiss = { confirm = null },
                 )
             }
+        PendingConfirm.RemoveServers -> {
+            if (!serverDraft.needsRemovalConfirm) {
+                LaunchedEffect(Unit) { confirm = null }
+            } else {
+                val removing = ServerKind.entries.filter { it in serverDraft.removals }.map { it.label() }
+                ConfirmDialog(
+                    title = pluralStringResource(R.plurals.servers_remove_title, removing.size, removing.joinToString(", ")),
+                    body = stringResource(R.string.servers_remove_body),
+                    confirmLabel = stringResource(R.string.agents_remove_confirm),
+                    onConfirm = applyServers,
+                    onDismiss = { confirm = null },
+                    destructive = true,
+                )
+            }
+        }
+        PendingConfirm.RemoveAgents -> {
+            if (!agentDraft.needsRemovalConfirm) {
+                // The draft changed underneath (the install finished, or the picker was reset).
+                LaunchedEffect(Unit) { confirm = null }
+            } else {
+                // Cancel only closes the dialog: nothing is sent, the checkboxes stay as staged.
+                RemoveAgentsDialog(
+                    available = agents.available,
+                    draft = agentDraft,
+                    onConfirm = applyAgents,
+                    onDismiss = { confirm = null },
+                )
+            }
+        }
         PendingConfirm.Repair ->
             ConfirmDialog(
                 title = stringResource(R.string.repair_dialog_title),
@@ -510,12 +622,40 @@ internal fun LocalRuntimeCard(
             )
         null -> Unit
     }
+
+    switchTo?.let { target ->
+        if (target !in installedServers || target == servers.active) {
+            LaunchedEffect(target) { switchTo = null }
+        } else {
+            val serverUp = state is RuntimeState.Running || state is RuntimeState.Starting
+            val from = activeName
+            val to = target.label()
+            ConfirmDialog(
+                title = stringResource(R.string.servers_switch_title, to),
+                body =
+                    stringResource(
+                        if (serverUp) R.string.servers_switch_body_running else R.string.servers_switch_body,
+                        from,
+                        to,
+                    ),
+                confirmLabel = stringResource(R.string.servers_switch_confirm),
+                onConfirm = { onSelectServer(target) },
+                // Cancel: nothing is sent, the current server keeps running.
+                onDismiss = { switchTo = null },
+            )
+        }
+    }
 }
+
+/** OpenChamber's own agent: needed while OpenChamber is installed or picked. */
+private const val OPENCODE_ID = "opencode"
 
 @Composable
 private fun CardHeader(
     phase: RuntimePhase,
     updating: Boolean,
+    /** The active server's name. */
+    title: String,
 ) {
     val tone = phase.tone()
     Row(
@@ -530,7 +670,7 @@ private fun CardHeader(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = stringResource(R.string.local_title),
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -571,7 +711,11 @@ private fun UnsupportedBody() {
 }
 
 @Composable
-private fun NotInstalledBody(onSetUp: () -> Unit) {
+private fun NotInstalledBody(
+    onSetUp: () -> Unit,
+    /** False while no coding agent is picked; the picker below says why. */
+    setUpEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val inspection = LocalInspectionMode.current
     val freeBytes =
@@ -602,6 +746,7 @@ private fun NotInstalledBody(onSetUp: () -> Unit) {
     Spacer(Modifier.height(18.dp))
     Button(
         onClick = onSetUp,
+        enabled = setUpEnabled,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = MaterialTheme.shapes.medium,
     ) {
@@ -630,14 +775,12 @@ private fun FactRow(
 }
 
 /**
- * Setup, repair or update progress. An update has its own, shorter step list and says what it moves
- * to ([update], the offer being installed; null when unknown).
+ * Setup, repair or maintenance progress. [RuntimeState.Installing.updating] marks any change to the
+ * installed environment (an update, or adding/removing a server or agent), so the header stays
+ * generic and no target versions are shown: they would be the update offer's, not this operation's.
  */
 @Composable
-private fun InstallingBody(
-    state: RuntimeState.Installing?,
-    update: RuntimeUpdate?,
-) {
+private fun InstallingBody(state: RuntimeState.Installing?) {
     val updating = state?.updating == true
     val steps = if (updating) InstallStep.updateSteps else InstallStep.setupSteps
     val current = state?.step ?: steps.first()
@@ -650,14 +793,6 @@ private fun InstallingBody(
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        if (update != null) {
-            Spacer(Modifier.height(4.dp))
-            VersionChanges(
-                update = update,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                emphasis = MaterialTheme.colorScheme.onSurface,
-            )
-        }
         Spacer(Modifier.height(14.dp))
     }
     Text(
@@ -822,9 +957,12 @@ private fun StepProgressBar(progress: Float?) {
 }
 
 @Composable
-private fun StoppedBody(onStart: () -> Unit) {
+private fun StoppedBody(
+    serverName: String,
+    onStart: () -> Unit,
+) {
     Text(
-        text = stringResource(R.string.stopped_body),
+        text = stringResource(R.string.stopped_body, serverName),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -959,6 +1097,8 @@ private fun FailedBody(
     failed: RuntimeState.Failed,
     onRetry: () -> Unit,
     onRepair: () -> Unit,
+    retryEnabled: Boolean = true,
+    serverName: String = "",
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -970,7 +1110,7 @@ private fun FailedBody(
             Icon(Icons.Rounded.ErrorOutline, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Column {
-                Text(stringResource(R.string.failed_title), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.failed_title, serverName), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(2.dp))
                 Text(failed.reason, style = ChamberTextStyles.codeSmall)
             }
@@ -981,6 +1121,7 @@ private fun FailedBody(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = onRetry,
+                enabled = retryEnabled,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 shape = MaterialTheme.shapes.medium,
             ) {
@@ -1497,8 +1638,8 @@ private fun SettingSwitchRow(
 }
 
 /**
- * Three (or however many the manifest offers) agent checkboxes with their installed versions. Keep
- * this simple: the designer lane polishes layout and copy.
+ * Three (or however many the manifest offers) agent checkboxes with their installed versions. With
+ * nothing checked a warning line asks for one agent; Set up and Apply stay disabled meanwhile.
  */
 @Composable
 private fun AgentSelectionSection(
@@ -1511,6 +1652,12 @@ private fun AgentSelectionSection(
     onToggle: (String) -> Unit,
     onApply: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Staged, not yet applied: checked but not installed. */
+    additions: Set<String> = emptySet(),
+    /** Staged, not yet applied: installed but unchecked. */
+    removals: Set<String> = emptySet(),
+    /** Needed by an installed or picked server: checked and can't be unchecked. */
+    locked: Set<String> = emptySet(),
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -1525,7 +1672,8 @@ private fun AgentSelectionSection(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = stringResource(R.string.agents_hint),
+                // After setup, say plainly what checking and unchecking do.
+                text = stringResource(if (beforeInstall) R.string.agents_hint else R.string.agents_hint_installed),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1536,40 +1684,257 @@ private fun AgentSelectionSection(
                             .fillMaxWidth()
                             .toggleable(
                                 value = spec.id in selected,
-                                enabled = enabled,
+                                enabled = enabled && spec.id !in locked,
                                 role = Role.Checkbox,
                                 onValueChange = { onToggle(spec.id) },
                             )
                             .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Checkbox(checked = spec.id in selected, onCheckedChange = null, enabled = enabled)
+                    Checkbox(checked = spec.id in selected, onCheckedChange = null, enabled = enabled && spec.id !in locked)
                     Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = spec.displayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    installed[spec.id]?.let {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = MonoFamily,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = spec.displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
+                        if (spec.id in locked) {
+                            Text(
+                                text = stringResource(R.string.agents_required_by_openchamber),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    when (spec.id) {
+                        in removals -> AgentChangeTag(stringResource(R.string.agents_will_remove), MaterialTheme.colorScheme.error)
+                        in additions -> AgentChangeTag(stringResource(R.string.agents_will_install), MaterialTheme.colorScheme.primary)
+                        else ->
+                            installed[spec.id]?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = MonoFamily,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                     }
                 }
             }
-            if (!beforeInstall && canApply) {
+            AnimatedVisibility(
+                visible = selected.isEmpty(),
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.ErrorOutline,
+                        contentDescription = null,
+                        tint = ChamberTheme.colors.warning,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.agents_none_selected),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ChamberTheme.colors.warning,
+                    )
+                }
+            }
+            // After setup the Apply row also shows for an empty draft (disabled), so the button
+            // doesn't vanish the moment the last box is unchecked.
+            if (!beforeInstall && (canApply || selected.isEmpty())) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onApply, enabled = enabled) {
+                    TextButton(onClick = onApply, enabled = enabled && canApply) {
                         Text(stringResource(R.string.agents_apply))
                     }
                 }
             }
         }
     }
+}
+
+/** One row of [SelectionSection]. */
+internal data class SelectionRow<T>(
+    val id: T,
+    val name: String,
+    /** Installed version, shown when nothing is staged for the row. */
+    val version: String?,
+    /** Small secondary line under the name. */
+    val note: String? = null,
+)
+
+/**
+ * A titled checkbox list over a [SelectionDraft]: staged changes are tagged per row, an empty draft
+ * shows [emptyHint], and after setup Apply sends the draft (disabled while empty or unchanged).
+ */
+@Composable
+private fun <T> SelectionSection(
+    title: String,
+    hint: String,
+    emptyHint: String,
+    rows: List<SelectionRow<T>>,
+    draft: SelectionDraft<T>,
+    enabled: Boolean,
+    onToggle: (T) -> Unit,
+    onApply: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(text = title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(2.dp))
+            Text(text = hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            rows.forEach { row ->
+                val checked = row.id in draft.checked
+                val rowEnabled = enabled && row.id !in draft.locked
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(value = checked, enabled = rowEnabled, role = Role.Checkbox, onValueChange = { onToggle(row.id) })
+                            .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = checked, onCheckedChange = null, enabled = rowEnabled)
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = row.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                        row.note?.let {
+                            Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    when (row.id) {
+                        in draft.removals -> AgentChangeTag(stringResource(R.string.agents_will_remove), MaterialTheme.colorScheme.error)
+                        in draft.additions -> AgentChangeTag(stringResource(R.string.agents_will_install), MaterialTheme.colorScheme.primary)
+                        else ->
+                            row.version?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = MonoFamily,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                    }
+                }
+            }
+            AnimatedVisibility(
+                visible = draft.isEmpty,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = ChamberTheme.colors.warning, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(text = emptyHint, style = MaterialTheme.typography.bodySmall, color = ChamberTheme.colors.warning)
+                }
+            }
+            if (!draft.beforeInstall && (draft.canApply || draft.isEmpty)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onApply, enabled = enabled && draft.canApply) {
+                        Text(stringResource(R.string.agents_apply))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Which installed server this phone uses, as a two-way segmented control. Choosing the other one
+ * asks first (see the switch dialog); the selection itself only moves once the runtime reports it.
+ */
+@Composable
+private fun ActiveServerSelector(
+    installed: List<ServerKind>,
+    active: ServerKind,
+    enabled: Boolean,
+    onSelect: (ServerKind) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.servers_active_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            installed.forEachIndexed { index, kind ->
+                SegmentedButton(
+                    selected = kind == active,
+                    onClick = { onSelect(kind) },
+                    enabled = enabled,
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = installed.size),
+                ) {
+                    Text(kind.label(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** A small tinted label for a staged change on an agent row ("Will install" / "Will uninstall"). */
+@Composable
+private fun AgentChangeTag(
+    text: String,
+    color: Color,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        modifier =
+            Modifier
+                .clip(CircleShape)
+                .drawBehind { drawRect(color.copy(alpha = 0.14f)) }
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * Confirms an Apply that uninstalls agents. Lists exactly what goes, what is installed alongside and
+ * what stays, and says that settings and projects are kept. Nothing happens until Uninstall is tapped.
+ */
+@Composable
+private fun RemoveAgentsDialog(
+    available: List<AgentSpec>,
+    draft: AgentDraft,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    fun names(ids: Set<String>): String =
+        (available.filter { it.id in ids }.map { it.displayName } + (ids - available.map { it.id }.toSet()).sorted())
+            .joinToString(", ")
+    val removing = names(draft.removals)
+    val body =
+        buildList {
+            add(stringResource(R.string.agents_remove_list, removing))
+            if (draft.additions.isNotEmpty()) add(stringResource(R.string.agents_add_list, names(draft.additions)))
+            if (draft.kept.isNotEmpty()) add(stringResource(R.string.agents_keep_list, names(draft.kept)))
+            add("")
+            add(stringResource(R.string.agents_remove_body))
+        }.joinToString("\n")
+    ConfirmDialog(
+        title = pluralStringResource(R.plurals.agents_remove_title, draft.removals.size, removing),
+        body = body,
+        confirmLabel = stringResource(R.string.agents_remove_confirm),
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+        destructive = true,
+    )
 }
 
 @Composable

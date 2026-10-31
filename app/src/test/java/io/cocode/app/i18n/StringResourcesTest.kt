@@ -93,7 +93,7 @@ class StringResourcesTest {
     @Test
     fun `the number of translated strings is what the brief committed to`() {
         // All app strings, one entry per key, as the loader keeps them.
-        assertEquals(244, english.size)
+        assertEquals(297, english.size)
     }
 
     private companion object {

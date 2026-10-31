@@ -2,7 +2,8 @@ package io.cocode.app.ui
 
 import io.cocode.app.data.canonicalWebOrigin
 import io.cocode.app.runtime.RuntimeState
-import io.cocode.app.runtime.ServerTarget
+import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.ServersState
 
 /*
  * Pure launch rules, kept free of Android and Compose so they are unit-tested directly.
@@ -72,8 +73,11 @@ internal fun initialLaunchStage(
 
 /** Where a launch that remembers the last used instance goes. */
 internal sealed interface ResumeTarget {
-    /** The local T3 Code: the existing local launch logic (with its state rules) applies. */
-    data object Local : ResumeTarget
+    /**
+     * The on-device server: the existing local launch logic (with its state rules) applies. [kind] is
+     * the remembered local server, or null when none was remembered (the active one is used).
+     */
+    data class Local(val kind: ServerKind? = null) : ResumeTarget
 
     /** This remote server, opened directly; the local runtime is not started for it. */
     data class Remote(val targetId: String) : ResumeTarget
@@ -89,10 +93,25 @@ internal fun resumeTarget(
     remoteIds: Set<String>,
 ): ResumeTarget =
     when {
-        rememberedId == null -> ResumeTarget.Local
-        rememberedId == ServerTarget.LOCAL_ID -> ResumeTarget.Local
+        rememberedId == null -> ResumeTarget.Local()
+        isLocalTargetId(rememberedId) -> ResumeTarget.Local(localKindOf(rememberedId))
         rememberedId in remoteIds -> ResumeTarget.Remote(rememberedId)
-        else -> ResumeTarget.Local
+        else -> ResumeTarget.Local()
+    }
+
+/**
+ * The on-device server a launch opens: the remembered one when it is installed, otherwise what Home
+ * would open ([openableKind]). A server that isn't installed is never reopened.
+ */
+internal fun localKindToOpen(
+    remembered: ServerKind?,
+    servers: ServersState,
+): ServerKind? =
+    when {
+        remembered == null -> servers.openableKind()
+        servers.installed.isEmpty() -> remembered.takeIf { it == servers.active } ?: servers.openableKind()
+        remembered in servers.installed -> remembered
+        else -> servers.openableKind()
     }
 
 /** Longest page address the app remembers; longer ones are dropped rather than truncated. */

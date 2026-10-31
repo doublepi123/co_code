@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -30,9 +33,13 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -63,6 +70,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -86,9 +94,18 @@ private val RailReach = 6.dp
 private const val STATUS_SETTLE_MS = 900L
 
 /**
- * "Projects and settings folder": keeps ~/projects and OpenCode's settings in CoCode/ on
- * shared storage. The switch is the setting; the body explains the current status, and a notice
- * offers a restart when the running server still uses the old folders.
+ * "Projects and agent folders": keeps ~/projects and the OpenCode, Codex and Claude Code folders in
+ * CoCode/ on shared storage. The Codex and Claude Code folders are shared in full, sign-ins and
+ * session history included (the user's explicit choice), so turning it on asks first with a
+ * prominent warning and an acknowledgement, and the active body keeps that warning in view.
+ * The switch is the setting; a notice offers a restart when the running server still uses the old
+ * folders.
+ *
+ * [SharedStorageState.needsConsent]: shared storage was turned on in an older version, which shared
+ * only projects/ and opencode/. Until the user accepts the full Codex and Claude Code sharing (the
+ * same dialog and acknowledgement as a fresh turn-on), the card says it runs in that partial mode,
+ * lists only those two folders and offers the upgrade as its own action, so the switch never has to
+ * be turned off and on to find it. Nothing is migrated until the user accepts.
  */
 @Composable
 internal fun SharedStorageCard(
@@ -101,10 +118,14 @@ internal fun SharedStorageCard(
     modifier: Modifier = Modifier,
 ) {
     val enabled = state.status != SharedStorageStatus.Off
+    // Legacy partial sharing (projects + OpenCode only) until the user accepts the full mode.
+    val partial = enabled && state.needsConsent
     var confirmOff by rememberSaveable { mutableStateOf(false) }
+    var confirmOn by rememberSaveable { mutableStateOf(false) }
     val toggle: (Boolean) -> Unit = { on ->
         when {
-            on -> onEnabledChange(true)
+            // Sign-ins and sessions become readable by other apps: never without the warning.
+            on -> confirmOn = true
             // Turning off makes T3 Code stop seeing the files there, so say so first.
             state.status == SharedStorageStatus.Active -> confirmOff = true
             else -> onEnabledChange(false)
@@ -112,7 +133,18 @@ internal fun SharedStorageCard(
     }
 
     ChamberCard(modifier = modifier) {
-        StorageHeader(status = state.status, enabled = enabled, onToggle = toggle)
+        StorageHeader(status = state.status, enabled = enabled, partial = partial, onToggle = toggle)
+
+        AnimatedVisibility(
+            visible = partial,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            ConsentNeededBanner(
+                onReview = { confirmOn = true },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
 
         AnimatedVisibility(
             visible = state.restartRequired && serverRunning,
@@ -137,17 +169,29 @@ internal fun SharedStorageCard(
                 when (status) {
                     SharedStorageStatus.Off -> OffBody()
                     SharedStorageStatus.NeedsPermission ->
-                        NeedsPermissionBody(onAllowAccess = onAllowAccess, onCheckAgain = onCheckAgain)
-                    SharedStorageStatus.Active -> ActiveBody(hostRoot = state.hostRoot)
+                        NeedsPermissionBody(onAllowAccess = onAllowAccess, onCheckAgain = onCheckAgain, partial = partial)
+                    SharedStorageStatus.Active -> ActiveBody(hostRoot = state.hostRoot, partial = partial)
                 }
             }
         }
     }
 
+    if (confirmOn) {
+        EnableSharedStorageDialog(
+            hostRoot = state.hostRoot,
+            onConfirm = {
+                confirmOn = false
+                onEnabledChange(true)
+            },
+            onDismiss = { confirmOn = false },
+        )
+    }
+
     if (confirmOff) {
         ConfirmDialog(
             title = stringResource(R.string.storage_off_dialog_title),
-            body = stringResource(R.string.storage_off_dialog_body),
+            // Partial mode never shared Codex or Claude Code, so there is nothing about them to say.
+            body = stringResource(if (partial) R.string.storage_off_dialog_body_partial else R.string.storage_off_dialog_body),
             confirmLabel = stringResource(R.string.turn_off),
             onConfirm = { onEnabledChange(false) },
             onDismiss = { confirmOff = false },
@@ -159,6 +203,8 @@ internal fun SharedStorageCard(
 private fun StorageHeader(
     status: SharedStorageStatus,
     enabled: Boolean,
+    /** On, but only projects and OpenCode (see [SharedStorageState.needsConsent]). */
+    partial: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
     val target =
@@ -196,7 +242,8 @@ private fun StorageHeader(
                     when (status) {
                         SharedStorageStatus.Off -> stringResource(R.string.storage_off)
                         SharedStorageStatus.NeedsPermission -> stringResource(R.string.storage_needs_access)
-                        SharedStorageStatus.Active -> stringResource(R.string.storage_on)
+                        SharedStorageStatus.Active ->
+                            stringResource(if (partial) R.string.storage_on_partial else R.string.storage_on)
                     },
                 style = MaterialTheme.typography.bodySmall,
                 color = tone,
@@ -254,6 +301,8 @@ private fun OffBody() {
     )
     // Worth knowing before turning it on, not only after.
     Spacer(Modifier.height(10.dp))
+    ExposureWarning(prospective = true)
+    Spacer(Modifier.height(10.dp))
     NoteRow(
         icon = Icons.Rounded.Info,
         text = codeSpans(stringResource(R.string.storage_caveat), stringResource(R.string.guest_private_projects), "node_modules"),
@@ -264,6 +313,8 @@ private fun OffBody() {
 private fun NeedsPermissionBody(
     onAllowAccess: () -> Unit,
     onCheckAgain: () -> Unit,
+    /** Legacy partial mode: the banner above already explains; no claim about Codex/Claude here. */
+    partial: Boolean = false,
 ) {
     // Access can be granted while the folder still can't be created (storage unavailable). Asking
     // for access again wouldn't help then, so say what is actually wrong. Re-checked on resume.
@@ -302,6 +353,11 @@ private fun NeedsPermissionBody(
 
     // Android 11+ grants "All files access" in system settings; older versions show a dialog.
     val allFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    if (!partial) {
+        // Consent is given; the folders become public once access is granted.
+        ExposureWarning(prospective = true)
+        Spacer(Modifier.height(12.dp))
+    }
     Text(
         text = if (allFiles) stringResource(R.string.storage_needs_all_files) else stringResource(R.string.storage_needs_legacy),
         style = MaterialTheme.typography.bodyMedium,
@@ -327,10 +383,31 @@ private fun NeedsPermissionBody(
 }
 
 @Composable
-private fun ActiveBody(hostRoot: String) {
-    FolderLayout(hostRoot = hostRoot)
+private fun ActiveBody(
+    hostRoot: String,
+    /** Legacy partial mode: only projects/ and opencode/ are live; Codex and Claude stay in the app. */
+    partial: Boolean = false,
+) {
+    if (!partial) {
+        // The risk first: it is live, not a past choice.
+        ExposureWarning()
+        Spacer(Modifier.height(12.dp))
+    }
+    FolderLayout(hostRoot = hostRoot, partial = partial)
     Spacer(Modifier.height(12.dp))
-    NoteRow(icon = Icons.Rounded.Lock, text = codeSpans(stringResource(R.string.storage_private), stringResource(R.string.guest_private_projects)))
+    NoteRow(
+        icon = Icons.Rounded.Lock,
+        text =
+            codeSpans(
+                stringResource(if (partial) R.string.storage_kept_private_partial else R.string.storage_kept_private),
+                stringResource(R.string.guest_private_projects),
+                stringResource(R.string.guest_codex),
+                stringResource(R.string.guest_claude),
+                "~/.claude.json",
+                "~/.local/share/opencode",
+                "node_modules",
+            ),
+    )
     Spacer(Modifier.height(6.dp))
     NoteRow(
         icon = Icons.Rounded.Info,
@@ -340,7 +417,10 @@ private fun ActiveBody(hostRoot: String) {
 
 /** The shared folder and what each part becomes inside T3 Code, drawn as a small tree. */
 @Composable
-private fun FolderLayout(hostRoot: String) {
+private fun FolderLayout(
+    hostRoot: String,
+    partial: Boolean = false,
+) {
     val copy = rememberCopyAction()
     val rail = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
     Surface(
@@ -373,31 +453,44 @@ private fun FolderLayout(hostRoot: String) {
                     )
                 }
             }
-            FolderRow(name = stringResource(R.string.storage_projects_dir), railColor = rail, first = true, last = false) {
-                Text(
-                    text = stringResource(R.string.guest_projects),
-                    style = ChamberTextStyles.code,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            FolderRow(name = stringResource(R.string.storage_opencode_dir), railColor = rail, first = false, last = true) {
-                Text(
-                    text = stringResource(R.string.storage_opencode_target),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // Only what is actually mapped: partial mode never lists codex/ or claude/ as active.
+            val folders = sharedFolders().filterNot { partial && it.sensitive }
+            folders.forEachIndexed { index, folder ->
+                FolderRow(
+                    folder = folder,
+                    railColor = rail,
+                    first = index == 0,
+                    last = index == folders.lastIndex,
                 )
             }
         }
     }
 }
 
+/** One shared folder: its name in CoCode/, where the guest sees it, and what is in it. */
+private data class SharedFolder(
+    val host: String,
+    val guest: String,
+    val caption: String,
+    /** Holds sign-ins and history: drawn in the warning colour. */
+    val sensitive: Boolean,
+)
+
+@Composable
+private fun sharedFolders(): List<SharedFolder> =
+    listOf(
+        SharedFolder(stringResource(R.string.storage_projects_dir), stringResource(R.string.guest_projects), stringResource(R.string.storage_projects_caption), false),
+        SharedFolder(stringResource(R.string.storage_opencode_dir), stringResource(R.string.guest_opencode), stringResource(R.string.storage_opencode_caption), false),
+        SharedFolder(stringResource(R.string.storage_codex_dir), stringResource(R.string.guest_codex), stringResource(R.string.storage_codex_caption), true),
+        SharedFolder(stringResource(R.string.storage_claude_dir), stringResource(R.string.guest_claude), stringResource(R.string.storage_claude_caption), true),
+    )
+
 @Composable
 private fun FolderRow(
-    name: String,
+    folder: SharedFolder,
     railColor: Color,
     first: Boolean,
     last: Boolean,
-    target: @Composable () -> Unit,
 ) {
     Row(
         modifier =
@@ -415,25 +508,208 @@ private fun FolderRow(
                         } else {
                             (size.width - trunk) to (size.width - branch)
                         }
-                    val mid = size.height / 2f
+                    // The branch meets the first line (name and guest path), not the caption.
+                    val mid = 15.dp.toPx()
                     val top = if (first) -RailReach.toPx() else 0f
                     drawLine(railColor, Offset(x, top), Offset(x, if (last) mid else size.height), stroke, StrokeCap.Round)
                     drawLine(railColor, Offset(x, mid), Offset(branchEnd, mid), stroke, StrokeCap.Round)
                 },
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         Spacer(Modifier.width(26.dp))
-        Text(text = name, style = ChamberTextStyles.code, color = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.width(10.dp))
-        Icon(
-            Icons.AutoMirrored.Rounded.ArrowForward,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(10.dp))
-        target()
+        Column(modifier = Modifier.weight(1f).padding(top = 6.dp, bottom = 4.dp, end = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = folder.host, style = ChamberTextStyles.code, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.AutoMirrored.Rounded.ArrowForward,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(text = folder.guest, style = ChamberTextStyles.code, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.Top) {
+                if (folder.sensitive) {
+                    Icon(
+                        Icons.Rounded.Key,
+                        contentDescription = null,
+                        tint = ChamberTheme.colors.warning,
+                        modifier = Modifier.padding(top = 2.dp, end = 4.dp).size(12.dp),
+                    )
+                }
+                Text(
+                    text = folder.caption,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (folder.sensitive) ChamberTheme.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
+}
+
+/**
+ * The standing warning: Codex and Claude Code sign-ins and sessions are in the public folder and
+ * other apps with storage access can read them. Drawn as an error-tinted box so it is never mistaken
+ * for a footnote.
+ */
+@Composable
+private fun ExposureWarning(
+    modifier: Modifier = Modifier,
+    /** Not on yet: says what turning it on does, rather than what is in the folder now. */
+    prospective: Boolean = false,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Rounded.WarningAmber, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = stringResource(if (prospective) R.string.storage_public_warning_off else R.string.storage_public_warning),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+/**
+ * Legacy users: shared storage is on, but only for projects/ and opencode/. Explains that, and offers
+ * the full Codex and Claude Code sharing as an explicit choice (it opens the consent dialog).
+ */
+@Composable
+private fun ConsentNeededBanner(
+    onReview: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Rounded.Info, contentDescription = null, modifier = Modifier.padding(top = 1.dp).size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(stringResource(R.string.storage_consent_title), style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text =
+                            codeSpans(
+                                stringResource(R.string.storage_consent_body),
+                                stringResource(R.string.storage_projects_dir),
+                                stringResource(R.string.storage_opencode_dir),
+                            ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = onReview,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                ) {
+                    Text(stringResource(R.string.storage_consent_action), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Asked before shared storage is turned on. Shows exactly which folders become public and where the
+ * agents see them, warns in plain words that sign-ins and sessions are included, and only enables
+ * Turn on once the user ticks that they understand. Cancel changes nothing.
+ */
+@Composable
+private fun EnableSharedStorageDialog(
+    hostRoot: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var acknowledged by rememberSaveable { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text(stringResource(R.string.storage_on_dialog_title), style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(stringResource(R.string.storage_on_dialog_intro), style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Text(text = hostRoot, style = ChamberTextStyles.codeSmall, color = MaterialTheme.colorScheme.onSurface)
+                        sharedFolders().forEach { folder ->
+                            Text(
+                                text = "  " + folder.host + "  →  " + folder.guest,
+                                style = ChamberTextStyles.codeSmall,
+                                color = if (folder.sensitive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.storage_on_dialog_warning),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    stringResource(R.string.storage_on_dialog_rest),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(value = acknowledged, role = Role.Checkbox, onValueChange = { acknowledged = it })
+                            .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = acknowledged, onCheckedChange = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.storage_on_dialog_ack),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = acknowledged,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) {
+                Text(stringResource(R.string.storage_on_dialog_confirm), fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
 
 @Composable

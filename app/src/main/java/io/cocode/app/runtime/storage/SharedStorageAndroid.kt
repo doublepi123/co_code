@@ -20,9 +20,16 @@ class PrefsSharedStoragePrefs(
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
+    override fun fullDirectoryConsentVersion(): Int = prefs.getInt(KEY_FULL_DIRECTORY_CONSENT_VERSION, 0)
+
+    override fun setFullDirectoryConsentVersion(version: Int) {
+        prefs.edit().putInt(KEY_FULL_DIRECTORY_CONSENT_VERSION, version).apply()
+    }
+
     companion object {
         const val FILE = "cocode_shared_storage"
         private const val KEY_ENABLED = "enabled"
+        const val KEY_FULL_DIRECTORY_CONSENT_VERSION = "full_directory_consent_version"
 
         fun open(context: Context): PrefsSharedStoragePrefs =
             PrefsSharedStoragePrefs(context.getSharedPreferences(FILE, Context.MODE_PRIVATE))

@@ -2,13 +2,14 @@
 
 ## Project Responsibility
 
-CoCode is an Android app (`io.cocode.app`, Kotlin + Jetpack Compose, minSdk 26, target 35) that runs the T3 Code server and user-selected coding-agent CLIs natively on the phone and shows the web UI in a profile-isolated full-screen WebView (AndroidX WebKit 1.14.0). It builds an Alpine Linux 3.24 userland (Node.js 24) in app-private storage, runs it under PRoot (no root), keeps the server alive with a foreground service, signs the bound WebView profile in automatically, and can also connect to remote T3 Code servers.
+CoCode is an Android app (`io.cocode.app`, Kotlin + Jetpack Compose, minSdk 26, target 35) that installs T3 Code, OpenChamber, or both alongside user-selected agent CLIs in one Alpine Linux 3.24/Node.js 24 environment under PRoot (no root). One server runs at a time, kept alive by a foreground service. Both share the persistent home and OpenCode configuration; explicit server kinds select separate ports, passwords, logs, authentication protocols and isolated WebView profiles (AndroidX WebKit 1.14.0). Remote servers support both kinds too.
 
 Key constraints:
 - On-device mode runs on arm64-v8a and x86_64 (PRoot 5.1.107.98 rewrites the guest's raw `fork` to `clone`, which Android's x86_64 app seccomp policy allows). Other ABIs can only use remote servers. The x86_64 gate is the emulator probe in `docs/testing-x86-runtime.md`; it is not yet verified on a physical x86_64 device.
 - The T3 Code server is a GitHub release bundle (`doublepi123/t3code`, `t3-<ver>-android-linux-<arch>-musl.tar.gz`) verified against the release's `SHA256SUMS`. The manifest's version is the offline fallback; updates always take the latest release. Agent CLIs are installed from npm without version locks (`codex`, `claude`, `opencode`), and at least one must be selected.
-- Optional shared storage `/sdcard/CoCode`: `projects/` → `~/projects`, `opencode/` → `~/.config/opencode`. Secrets (`service.json`, `auth.json`, session DB, T3 Code data) and `node_modules` stay private. The private workspace is `~/projects-private`.
-- Guest paths: home `~` = `/root` (bind of `<runtime>/home`), server working directory `/root`, T3 Code home `/root/.t3`.
+- Optional shared storage `/sdcard/CoCode`: `projects/` → `~/projects`, `opencode/` → `~/.config/opencode`, `codex/` → `~/.codex`, `claude/` → `~/.claude`. Codex and Claude directories intentionally include credentials/history after explicit risk acknowledgement. OpenCode service secrets/plugin modules, `~/.local/share/opencode`, `~/.claude.json` and both servers' data stay private. Disabling sharing reveals older private copies; no automatic copy-back. The private workspace is `~/projects-private`.
+- OpenChamber is installed from npm and requires the shared OpenCode CLI. Its own node-pty is rebuilt for musl and smoke-tested separately from T3's bundled node-pty. All environment package mutations stage, verify survivors and swap atomically; metadata schema 2 records both servers and migrates legacy T3-only installs.
+- Guest paths: home `~` = `/root` (bind of `<runtime>/home`), server working directory `/root`, T3 Code home `/root/.t3`; OpenChamber state is separate under the same home. T3 port 3773, OpenChamber port 3000, both loopback-only. Local target IDs are `local-t3` and `local-openchamber`; legacy `local` migrates to T3.
 - All embedded pages require `WebViewFeature.MULTI_PROFILE`: unsupported or failed binding blocks page loading before authentication. Home and the local runtime remain available; remote addresses can be opened explicitly in a browser without adding credentials.
 - Profiles are keyed by target ID and canonical origin. Old default-profile data is neither cleared nor migrated; isolation between target profiles does not change browser Cookie rules for subresources inside one profile.
 - Native HTTP downloads use controlled redirects and the app process; they do not resume after process death.
@@ -26,10 +27,10 @@ Key constraints:
 | `app/src/main/AndroidManifest.xml` | Components, permissions (FGS, notifications, all-files access, microphone), locale config |
 | `app/src/main/assets/runtime-manifest.json` | Pinned runtime: Alpine rootfs per ABI (URL + SHA-256), T3 Code repository/fallback version/asset pattern/arch map, agent CLI list, port 3773 |
 | `app/build.gradle.kts` | App build; offline Exec task `buildCoCodeRuntimeNative` compiles PRoot JNI libs from prepared sources (NDK 29.0.14206865); Sync task `syncNativeLicenseAssets` packages `third_party/native-runtime/` as `assets/licenses/native/` in every variant; env-driven release signing (`COCODE_*`); debug-only `cocode.testApplicationId` override |
-| `gradle.properties` | Canonical release version as literal `cocode.versionName` / `cocode.versionCode` (currently 0.1.0 / 1); the release workflow checks them against the tag |
+| `gradle.properties` | Canonical release version as literal `cocode.versionName` / `cocode.versionCode` (currently 0.1.0 / 100); the release workflow checks them against the tag |
 | `build.gradle.kts`, `settings.gradle.kts` | AGP 8.5.2, Kotlin 2.0.21; single `:app` module |
 | `.github/workflows/ci.yml` | Push/PR: offline Python tests, JVM unit tests and debug APK |
-| `.github/workflows/release.yml` | Tag `v*`: Python/JVM tests, signed release APK, `apksigner` verify, sha256, GitHub release (generated notes) |
+| `.github/workflows/release.yml` | Tag `v*`: Python/JVM tests, signed release APK, `apksigner` verify, sha256, GitHub release (versioned notes or generated fallback) |
 
 ## Architecture at a Glance
 
@@ -62,7 +63,7 @@ have no native notification bridge; agent notifications are not implemented yet.
 | `…/app/runtime/` | Lifecycle of the on-device runtime (install, start, stop, repair, restart, uninstall, agent selection, crash recovery) and the contract types the UI and service depend on | [View Map](app/src/main/java/io/cocode/app/runtime/codemap.md) |
 | `…/app/runtime/install/` | Builds Alpine + Node + T3 Code + agent CLIs in staging, verifies it, activates it by atomic directory swap; verified downloads; interrupted-swap recovery | [View Map](app/src/main/java/io/cocode/app/runtime/install/codemap.md) |
 | `…/app/runtime/process/` | Runs, probes and stops the T3 Code server inside PRoot: command lines, guest env, readiness and process identity | [View Map](app/src/main/java/io/cocode/app/runtime/process/codemap.md) |
-| `…/app/runtime/storage/` | Optional shared storage `/sdcard/CoCode`: per-start bind decisions, shared folder preparation, git config for FUSE repos; secrets stay private | [View Map](app/src/main/java/io/cocode/app/runtime/storage/codemap.md) |
+| `…/app/runtime/storage/` | Optional shared storage `/sdcard/CoCode`: three CLI directory mappings, migration, explicit public credential exposure, git config for FUSE repos | [View Map](app/src/main/java/io/cocode/app/runtime/storage/codemap.md) |
 | `…/app/runtime/fs/` | Tree operations that never follow symbolic links (delete, size, copy, replace) | [View Map](app/src/main/java/io/cocode/app/runtime/fs/codemap.md) |
 | `…/app/runtime/network/` | Lifecycle-bound network observation and atomic guest `/etc/resolv.conf` updates from active-network DNS | [View Map](app/src/main/java/io/cocode/app/runtime/network/codemap.md) |
 | `…/app/runtime/manifest/` | Reads and validates `runtime-manifest.json` (rootfs pins, T3 release, agents, port) | [View Map](app/src/main/java/io/cocode/app/runtime/manifest/codemap.md) |
@@ -76,6 +77,7 @@ have no native notification bridge; agent notifications are not implemented yet.
 | `…/app/ui/web/` | Profile-bound WebView pool, session/page loading, navigation and JS bridge, HTTP download handoff, page remembering and isolation/error overlays | [View Map](app/src/main/java/io/cocode/app/ui/web/codemap.md) |
 | `…/app/ui/components/` | Stateless shared Compose widgets | [View Map](app/src/main/java/io/cocode/app/ui/components/codemap.md) |
 | `…/app/ui/theme/` | Material 3 color schemes, typography, shapes, extended `ChamberColors` | [View Map](app/src/main/java/io/cocode/app/ui/theme/codemap.md) |
+| `…/app/update/` | Independent CoCode APK release check: published releases including prereleases, numeric version comparison, bounded network calls, cooldown and dismissal; UI opens the official download page |
 | `app/src/main/assets/` | Runtime manifest pins and the Node preload shim | [View Map](app/src/main/assets/codemap.md) |
 | `scripts/` | Build-time tools: network source preparation for the native runtime, offline NDK compilation, the legacy Termux pipeline, and mirror health checks | [View Map](scripts/codemap.md) |
 | `runtime_tools/` | Python library and SHA-256 lock files for the PRoot build (Termux lock and runtime source lock) | [View Map](runtime_tools/codemap.md) |

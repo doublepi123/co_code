@@ -1,30 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status bar icon: the T3 Code cube in white + alpha only (the system tints it). The OpenCode
-     mark is simplified to a solid tile so it still reads at 17-24dp. -->
+<!-- Status bar icon: the CoCode phone with a ">_" prompt, white + alpha only (the system tints it).
+     The frame is thicker and the earpiece is dropped so it still reads at 17-24dp. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Left face -->
+    <!-- Phone frame -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:fillAlpha="0.35"
-        android:pathData="M12,12 L3.34,7 L3.34,17 L12,22 Z" />
-    <!-- Right face -->
+        android:fillType="evenOdd"
+        android:pathData="M8,1.5 H16 A3.5,3.5 0 0 1 19.5,5 V19 A3.5,3.5 0 0 1 16,22.5 H8 A3.5,3.5 0 0 1 4.5,19 V5 A3.5,3.5 0 0 1 8,1.5 Z M8.2,3.6 H15.8 A1.6,1.6 0 0 1 17.4,5.2 V18.8 A1.6,1.6 0 0 1 15.8,20.4 H8.2 A1.6,1.6 0 0 1 6.6,18.8 V5.2 A1.6,1.6 0 0 1 8.2,3.6 Z" />
+    <!-- Prompt chevron ">" -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:fillAlpha="0.6"
-        android:pathData="M12,12 L20.66,7 L20.66,17 L12,22 Z" />
-    <!-- Edges: silhouette + inner Y -->
-    <path
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineJoin="round"
-        android:strokeLineCap="round"
-        android:pathData="M12,2 L20.66,7 L20.66,17 L12,22 L3.34,17 L3.34,7 Z M3.34,7 L12,12 L20.66,7 M12,12 L12,22" />
-    <!-- OpenCode mark, simplified to a solid tile on the open top -->
+        android:pathData="M7.958,9.342 L10.115,11.5 L7.958,13.658 A1.05,1.05 0 0 0 9.442,15.142 L13.085,11.5 L9.442,7.858 A1.05,1.05 0 0 0 7.958,9.342 Z" />
+    <!-- Cursor "_" -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12.433,4.35 L16.59,6.75 L11.567,9.65 L7.41,7.25 Z" />
+        android:fillAlpha="0.75"
+        android:pathData="M13.3,13.4 H15.5 A0.5,0.5 0 0 1 16,13.9 V15 A0.5,0.5 0 0 1 15.5,15.5 H13.3 A0.5,0.5 0 0 1 12.8,15 V13.9 A0.5,0.5 0 0 1 13.3,13.4 Z" />
 </vector>

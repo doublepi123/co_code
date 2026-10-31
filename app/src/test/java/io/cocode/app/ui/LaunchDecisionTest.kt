@@ -3,6 +3,7 @@ package io.cocode.app.ui
 import io.cocode.app.runtime.FailurePhase
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.RuntimeState
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -106,11 +107,11 @@ class LaunchDecisionTest {
     @Test
     fun `resume target follows the remembered instance`() {
         val remotes = setOf("r1", "r2")
-        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes))
-        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes))
+        assertEquals(ResumeTarget.Local(), resumeTarget(null, remotes))
+        assertEquals(ResumeTarget.Local(ServerKind.T3), resumeTarget(ServerTarget.LOCAL_ID, remotes))
         assertEquals(ResumeTarget.Remote("r1"), resumeTarget("r1", remotes))
         // A removed server falls back to the local logic.
-        assertEquals(ResumeTarget.Local, resumeTarget("gone", remotes))
+        assertEquals(ResumeTarget.Local(), resumeTarget("gone", remotes))
     }
 
     @Test
@@ -118,9 +119,9 @@ class LaunchDecisionTest {
         // Both Home and the native phone page clear the remembered instance, exactly like a
         // remembered local id: the next launch never reopens a remote behind the person's back.
         val remotes = setOf("r1")
-        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes))
-        assertEquals(ResumeTarget.Local, resumeTarget(null, emptySet()))
-        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes))
+        assertEquals(ResumeTarget.Local(), resumeTarget(null, remotes))
+        assertEquals(ResumeTarget.Local(), resumeTarget(null, emptySet()))
+        assertEquals(ResumeTarget.Local(ServerKind.T3), resumeTarget(ServerTarget.LOCAL_ID, remotes))
     }
 
     @Test

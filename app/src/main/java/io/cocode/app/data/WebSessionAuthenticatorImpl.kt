@@ -1,5 +1,6 @@
 package io.cocode.app.data
 
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
 import io.cocode.app.runtime.WebSessionAuthenticator
 import io.cocode.app.runtime.WebSessionCookies
@@ -29,18 +30,24 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * The local server's trust for a login: the launch id, or null when that launch is not trustworthy
- * right now (child not confirmed listening, child dead, or stopped). See T3Server.readyLaunchId.
- * A provider that throws counts as null.
+ * The local server's trust for a login: the launch id of [kind], or null when that launch is not
+ * trustworthy right now (child not confirmed listening, child dead, stopped, or a different server
+ * is active). See RuntimeServer.readyLaunchId. A provider that throws counts as null.
  */
 fun interface LocalReadiness {
-    fun runningLaunchId(): Long?
+    fun runningLaunchId(kind: ServerKind): Long?
 }
 
 /**
- * Prepares a session for the WebView: checks `/.well-known/t3/environment`, logs in with the password
- * when one is known (POST /api/auth/browser-session), and stores the resulting Set-Cookie headers
- * through the caller's [WebSessionCookies] (the capability of that target's own WebView profile).
+ * Prepares a session for the WebView: checks the health document of [ServerTarget.kind], logs in with
+ * the password when one is known, and stores the resulting Set-Cookie headers through the caller's
+ * [WebSessionCookies] (the capability of that target's own WebView profile).
+ *
+ * T3 Code uses `GET /.well-known/t3/environment`, `GET /api/auth/session` and
+ * `POST /api/auth/browser-session` with `{"credential": ...}`. OpenChamber uses `GET /health`,
+ * `GET /auth/session` and `POST /auth/session` with `{"password": ...}` and the
+ * `oc_ui_session_<port>` cookie. The kind is always the target's explicit kind, never inferred from
+ * the port or address.
  *
  * Rules:
  *  - The cookies must belong to this target and its canonical origin. Otherwise: no HTTP request, no
@@ -49,8 +56,8 @@ fun interface LocalReadiness {
  *    NeedsLogin, its cookies are never stored, and nothing is re-sent with the password.
  *  - A password is never sent in cleartext to a non-loopback host unless the remote entry has
  *    allowInsecureHttp.
- *  - Local targets are trusted only while [LocalReadiness] reports the same non-null launch id before
- *    and right before the POST and again before cookies are stored. Default readiness denies.
+ *  - Local targets are trusted only while [LocalReadiness] reports the same non-null launch id for that
+ *    kind before and right before the POST and again before cookies are stored. Default readiness denies.
  *  - Auth for one identity is serialized. Cookies are stored only while the coroutine is still active,
  *    and a started store is completed (NonCancellable), so a cancelled older attempt cannot write over
  *    a newer login.
@@ -58,7 +65,7 @@ fun interface LocalReadiness {
  */
 class DefaultWebSessionAuthenticator(
     client: OkHttpClient,
-    private val localPassword: () -> String?,
+    private val localPassword: (ServerKind) -> String?,
     private val localReady: LocalReadiness = LocalReadiness { null },
     private val remoteStoredPassword: (ServerTarget.Remote) -> String? = { it.uiPassword },
 ) : WebSessionAuthenticator {
@@ -100,32 +107,34 @@ class DefaultWebSessionAuthenticator(
         url: HttpUrl,
         cookies: WebSessionCookies,
     ): WebSessionResult {
-        val health = health(base, cookies, target is ServerTarget.Remote)
+        val kind = target.kind
+        val health = health(base, cookies, target is ServerTarget.Remote, kind)
+        if (health.failure != null) return WebSessionResult.Unreachable(health.failure)
         if (health.gated && target is ServerTarget.Remote) return WebSessionResult.NeedsGatewayLogin(base)
-        if (!health.healthy) return WebSessionResult.Unreachable("No T3 Code server answered at $base")
+        if (!health.healthy) return WebSessionResult.Unreachable("No ${kind.displayName} server answered at $base")
 
         // The local password is released only while the same launch is trusted, checked before and
         // right before the POST. A child that died (or was replaced) in between sends nothing.
-        val launchId = if (target is ServerTarget.Local) readyLaunchId() else null
+        val launchId = if (target is ServerTarget.Local) readyLaunchId(kind) else null
         if (target is ServerTarget.Local && launchId == null) {
-            return WebSessionResult.Unreachable("The local T3 Code server is not running")
+            return WebSessionResult.Unreachable("The local ${kind.displayName} server is not running")
         }
         val password =
             when (target) {
-                is ServerTarget.Local -> localPassword()
+                is ServerTarget.Local -> localPassword(kind)
                 is ServerTarget.Remote -> remoteStoredPassword(target)
             }
 
         if (password.isNullOrEmpty()) {
             // No password: only a session the server already accepts (with this profile's cookies) counts.
-            return when (val probe = probeSession(base, cookies, target is ServerTarget.Remote)) {
+            return when (val probe = probeSession(base, cookies, target is ServerTarget.Remote, kind)) {
                 ProbeResult.Gateway -> if (target is ServerTarget.Remote) WebSessionResult.NeedsGatewayLogin(base) else WebSessionResult.NeedsLogin(base)
                 ProbeResult.Accepted -> WebSessionResult.Ready(base)
                 ProbeResult.Rejected -> WebSessionResult.NeedsLogin(base)
             }
         }
-        if (target is ServerTarget.Local && readyLaunchId() != launchId) {
-            return WebSessionResult.Unreachable("The local T3 Code server restarted; try again")
+        if (target is ServerTarget.Local && readyLaunchId(kind) != launchId) {
+            return WebSessionResult.Unreachable("The local ${kind.displayName} server restarted; try again")
         }
 
         val allowed = target !is ServerTarget.Remote || target.allowInsecureHttp || url.isTransportSafe()
@@ -134,38 +143,47 @@ class DefaultWebSessionAuthenticator(
                 "Refusing to send the password over plain http to ${url.host}. Enable insecure http for this server to allow it.",
             )
         }
-        return login(base, password, cookies, target, launchId)
+        return login(base, password, cookies, target, launchId, kind)
     }
 
-    private suspend fun health(base: String, cookies: WebSessionCookies, remote: Boolean): HealthResult {
+    private suspend fun health(
+        base: String,
+        cookies: WebSessionCookies,
+        remote: Boolean,
+        kind: ServerKind,
+    ): HealthResult {
         val header = if (remote) cookies.cookieHeader(base) else null
         return fetch(default = HealthResult(false, false)) {
-            val builder = Request.Builder().url("$base${HealthProbe.ENVIRONMENT_PATH}").get()
+            val builder = Request.Builder().url("$base${HealthProbe.healthPath(kind)}").get()
             if (header != null) builder.header("Cookie", header)
             val request = builder.build()
             authClient.newCall(request).execute().use { response ->
                 if (isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap())) return@use HealthResult(false, true)
                 if (!response.isSuccessful) return@use HealthResult(false, false)
-                val body = response.body?.string().orEmpty()
-                val environmentId =
-                    runCatching {
-                        json.parseToJsonElement(body).jsonObject["environmentId"]?.jsonPrimitive?.content
-                    }.getOrNull()
-                HealthResult(!environmentId.isNullOrBlank(), false)
+                val report = HealthProbe.parse(response.body?.string().orEmpty(), kind)
+                if (report?.openCodeFailed == true) {
+                    return@use HealthResult(
+                        false,
+                        false,
+                        "${kind.displayName} could not start OpenCode: ${report.lastOpenCodeError}",
+                    )
+                }
+                HealthResult(report?.ready == true, false)
             }
         }
     }
 
-    /** GET /api/auth/session with this profile's cookies. True when the server already accepts them. */
+    /** GET the session endpoint with this profile's cookies. True when the server already accepts them. */
     private suspend fun probeSession(
         base: String,
         cookies: WebSessionCookies,
         remote: Boolean,
+        kind: ServerKind,
     ): ProbeResult {
         val header = cookies.cookieHeader(base)
         val reply =
             fetch<SetCookieReply?>(default = null) {
-                val builder = Request.Builder().url("$base$SESSION_PATH").get()
+                val builder = Request.Builder().url("$base${sessionPath(kind)}").get()
                 if (header != null) builder.header("Cookie", header)
                 authClient.newCall(builder.build()).execute().use { response ->
                     SetCookieReply(
@@ -189,14 +207,15 @@ class DefaultWebSessionAuthenticator(
         cookies: WebSessionCookies,
         target: ServerTarget,
         launchId: Long?,
+        kind: ServerKind,
     ): WebSessionResult {
         val body =
             buildJsonObject {
-                put("credential", password)
+                put(loginField(kind), password)
             }.toString()
         val request =
             Request.Builder()
-                .url("$base$LOGIN_PATH")
+                .url("$base${loginPath(kind)}")
                 .apply { if (target is ServerTarget.Remote) cookies.cookieHeader(base)?.let { header("Cookie", it) } }
                 .post(body.toRequestBody(JSON_MEDIA))
                 .build()
@@ -215,15 +234,15 @@ class DefaultWebSessionAuthenticator(
         return when (reply.code) {
             in 200..299 -> {
                 // Launch may have changed while the POST was in flight: its cookies must not be stored.
-                if (target is ServerTarget.Local && readyLaunchId() != launchId) {
-                    WebSessionResult.Unreachable("The local T3 Code server restarted; try again")
+                if (target is ServerTarget.Local && readyLaunchId(kind) != launchId) {
+                    WebSessionResult.Unreachable("The local ${kind.displayName} server restarted; try again")
                 } else {
                     commit(base, reply.setCookies, cookies)
                     WebSessionResult.Ready(base)
                 }
             }
-            // 401/403 is a wrong password; any other 4xx means the request was not accepted. A
-            // redirect means the server wants us elsewhere. None of these store cookies.
+            // 401/403 is a wrong password, 429 a rate limit; any other 4xx means the request was not
+            // accepted. A redirect means the server wants us elsewhere. None of these store cookies.
             in 400..499 -> WebSessionResult.NeedsLogin(base)
             in 300..399 -> WebSessionResult.NeedsLogin(base)
             else -> WebSessionResult.Unreachable("Login failed with HTTP ${reply.code}")
@@ -244,7 +263,7 @@ class DefaultWebSessionAuthenticator(
         withContext(NonCancellable) { cookies.storeCookies(base, headers) }
     }
 
-    private fun readyLaunchId(): Long? = runCatching { localReady.runningLaunchId() }.getOrNull()
+    private fun readyLaunchId(kind: ServerKind): Long? = runCatching { localReady.runningLaunchId(kind) }.getOrNull()
 
     /** Blocking network work off the main thread. Ordinary failures become [default]; cancellation propagates. */
     private suspend fun <T> fetch(
@@ -273,13 +292,41 @@ class DefaultWebSessionAuthenticator(
             json.parseToJsonElement(body).jsonObject["authenticated"]?.jsonPrimitive?.content == "true"
         }.getOrDefault(false)
 
-    private data class HealthResult(val healthy: Boolean, val gated: Boolean)
+    private data class HealthResult(
+        val healthy: Boolean,
+        val gated: Boolean,
+        /** A clear failure reason for a server that answered but cannot become usable. */
+        val failure: String? = null,
+    )
+
     private enum class ProbeResult { Accepted, Rejected, Gateway }
+
+    private fun sessionPath(kind: ServerKind): String =
+        when (kind) {
+            ServerKind.T3 -> SESSION_PATH
+            ServerKind.OpenChamber -> OPENCHAMBER_SESSION_PATH
+        }
+
+    private fun loginPath(kind: ServerKind): String =
+        when (kind) {
+            ServerKind.T3 -> LOGIN_PATH
+            ServerKind.OpenChamber -> OPENCHAMBER_LOGIN_PATH
+        }
+
+    /** T3 Code calls it a credential; OpenChamber calls it a password. */
+    private fun loginField(kind: ServerKind): String =
+        when (kind) {
+            ServerKind.T3 -> "credential"
+            ServerKind.OpenChamber -> "password"
+        }
 
     private companion object {
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         const val SESSION_PATH = "/api/auth/session"
         const val LOGIN_PATH = "/api/auth/browser-session"
+        // Both OpenChamber endpoints live on /auth/session: GET status, POST password login.
+        const val OPENCHAMBER_SESSION_PATH = "/auth/session"
+        const val OPENCHAMBER_LOGIN_PATH = "/auth/session"
     }
 }
 

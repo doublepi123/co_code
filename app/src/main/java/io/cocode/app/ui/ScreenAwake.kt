@@ -12,7 +12,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import io.cocode.app.runtime.RuntimeState
-import io.cocode.app.runtime.ServerTarget
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,11 +46,11 @@ internal object ScreenAwakePolicy {
 
     /**
      * [viewedTargetId] is the instance the app records as being viewed ([UiPrefs.KEY_LAST_TARGET_ID]):
-     * null on Home, [ServerTarget.LOCAL_ID] on the local page, a remote's id on that remote's page.
-     * Anything that isn't Home or the local page counts as a remote, so an unknown id never holds the
-     * screen.
+     * null on Home, an on-device id (`local-t3`, `local-openchamber`, or the legacy `local`) on a local
+     * page, a remote's id on that remote's page. Anything that isn't Home or a local page counts as a
+     * remote, so an unknown id never holds the screen.
      */
-    fun remoteInView(viewedTargetId: String?): Boolean = viewedTargetId != null && viewedTargetId != ServerTarget.LOCAL_ID
+    fun remoteInView(viewedTargetId: String?): Boolean = viewedTargetId != null && !isLocalTargetId(viewedTargetId)
 }
 
 /**

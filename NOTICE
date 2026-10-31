@@ -14,8 +14,11 @@ released under the MIT License. This application contains code ported and adapte
 
 Software downloaded and executed at runtime (not bundled in this APK, licensed separately):
 
-  - OpenChamber (@openchamber/web)   - the web server and UI the app displays
+  - T3 Code (doublepi123/t3code)     - an optional coding-agent server and web UI
+  - OpenChamber (@openchamber/web)   - an optional coding-agent server and web UI
   - OpenCode (@opencode/cli)         - the agent runtime used by OpenChamber
+  - Codex (@openai/codex)            - an optional coding-agent CLI
+  - Claude Code (@anthropic-ai/claude-code) - an optional coding-agent CLI
   - Alpine Linux minirootfs 3.24.1   - the guest userland
   - Node.js, npm, git, ripgrep and other Alpine packages, each under its own license
 

@@ -2,31 +2,37 @@ package io.cocode.app.runtime.install
 
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.MessageKey
+import io.cocode.app.runtime.ServerKind
 import kotlinx.serialization.Serializable
 import java.io.File
 
 /** Persisted in `runtime/metadata.json`; describes the active environment. */
 @Serializable
 data class RuntimeMetadata(
+    /** 2 adds [servers]; 1 and 0 are the v0.1.0 shape with only [t3Version]. */
+    val schemaVersion: Int = 2,
     val runtimeVersion: String,
     val alpineVersion: String,
     val abi: String,
     val port: Int,
-    /** Installed T3 Code server bundle version (`0.1.6-pw.5`). */
+    /** Installed T3 Code server bundle version. Legacy field, still written for old readers. */
     val t3Version: String,
-    /** Installed agent versions, keyed by agent id. */
+    /** Installed server versions, keyed by [ServerKind.id]. Empty means legacy T3-only metadata. */
+    val servers: Map<String, String> = emptyMap(),
+    /** Installed agent versions, keyed by agent id. Includes required dependencies. */
     val agents: Map<String, String> = emptyMap(),
     val nodeVersion: String? = null,
     val installedAt: Long,
 )
 
 /**
- * Versions the update check compares: the T3 Code server plus one version per installed agent.
- * [agents] holds only the agents that are installed (and selected).
+ * Versions the update check compares: the installed servers plus one version per effective agent.
+ * [t3] is kept for existing code; [servers] carries every installed kind.
  */
 data class PackageVersions(
     val t3: String,
     val agents: Map<String, String> = emptyMap(),
+    val servers: Map<ServerKind, String> = emptyMap(),
 )
 
 /**
@@ -71,18 +77,19 @@ interface RuntimeInstaller {
     /**
      * Builds a fresh environment in staging, verifies it, then atomically activates it. The active
      * environment is untouched until that swap, so a failed install or repair keeps the old one.
-     * [agents] is the selected agent set and must not be empty; agents are installed at their latest
-     * npm version. Throws on failure.
+     * [agents] is the effective agent set (user selection plus required dependencies) and must not
+     * be empty; [servers] is the selected server set and must not be empty. Throws on failure.
      */
     suspend fun install(
         report: InstallReporter,
         agents: Set<String>,
+        servers: Set<ServerKind>,
     ): InstalledRuntime
 
     /**
-     * Updates T3 Code and the selected agents to [versions] without downloading a new Linux base:
-     * copies the active environment into staging, replaces the T3 bundle, reinstalls changed agents,
-     * verifies, then swaps it in like [install]. The active environment is untouched until that swap,
+     * Updates the installed servers and effective agents to [versions] without a new Linux base:
+     * copies the active environment into staging, updates/verifies each installed server and changed
+     * agent, then swaps it in like [install]. The active environment is untouched until that swap,
      * so a failed update keeps the old one. The server must be stopped first. Throws on failure (a
      * [io.cocode.app.runtime.UserFacingException] with `UpdateNotEnoughSpace` when the disk is too full).
      */
@@ -92,13 +99,27 @@ interface RuntimeInstaller {
     ): InstalledRuntime
 
     /**
-     * Applies an agent selection to the active environment in place (the server must be stopped).
-     * Removes agents that are no longer selected, installs the new ones, verifies every selected
-     * agent and rewrites `metadata.json`. Throws on failure, leaving the previous metadata untouched.
+     * Applies an effective agent selection to the active environment through a staging copy and an
+     * atomic swap (the server must be stopped). Only added agents are installed; agents that stay
+     * selected are left untouched. Every effective agent is verified before the swap, then agents
+     * no longer needed are removed. Throws on failure, leaving the active environment untouched.
      */
     suspend fun applyAgents(
         report: InstallReporter,
         selected: Set<String>,
+    ): InstalledRuntime
+
+    /**
+     * Applies a server selection through a staging copy and an atomic swap (the server must be
+     * stopped). Adds/removes only the selected server program trees, keeps both the other server and
+     * every effective agent, verifies all survivors, then swaps. [agents] is the effective agent set
+     * after the change (including the OpenChamber OpenCode dependency). Throws on failure, leaving
+     * the active environment untouched.
+     */
+    suspend fun applyServers(
+        report: InstallReporter,
+        selected: Set<ServerKind>,
+        agents: Set<String>,
     ): InstalledRuntime
 
     /**

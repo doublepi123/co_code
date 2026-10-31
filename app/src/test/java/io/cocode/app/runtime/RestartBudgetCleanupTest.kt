@@ -6,7 +6,7 @@ import io.cocode.app.runtime.install.RuntimeInstaller
 import io.cocode.app.runtime.install.RuntimeMetadata
 import io.cocode.app.runtime.process.HealthProbe
 import io.cocode.app.runtime.process.HealthReport
-import io.cocode.app.runtime.process.T3Server
+import io.cocode.app.runtime.process.RuntimeServer
 import io.cocode.app.service.RuntimeServicePolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,7 +38,7 @@ class RestartBudgetCleanupTest {
         private val stopThrows: Boolean = false,
         /** Called with the stop count after each stop() call, before any throw. Used for deterministic interleaving. */
         private val onStop: (Int) -> Unit = {},
-    ) : T3Server {
+    ) : RuntimeServer {
         var alive = false
         var stops = 0
         var starts = 0
@@ -79,6 +79,7 @@ class RestartBudgetCleanupTest {
         override suspend fun install(
             report: InstallReporter,
             agents: Set<String>,
+            servers: Set<ServerKind>,
         ): InstalledRuntime = runtime
 
         override suspend fun update(
@@ -89,6 +90,12 @@ class RestartBudgetCleanupTest {
         override suspend fun applyAgents(
             report: InstallReporter,
             selected: Set<String>,
+        ): InstalledRuntime = runtime
+
+        override suspend fun applyServers(
+            report: InstallReporter,
+            selected: Set<ServerKind>,
+            agents: Set<String>,
         ): InstalledRuntime = runtime
 
         override fun discardEnvironment() = Unit
@@ -103,8 +110,17 @@ class RestartBudgetCleanupTest {
             else null
     }
 
-    private fun runtimeFor(root: File) =
-        InstalledRuntime(
+    private fun runtimeFor(root: File): InstalledRuntime {
+        val rootfs = File(root, "rootfs")
+        File(rootfs, "opt/t3/bin.mjs").apply {
+            parentFile?.mkdirs()
+            writeText("")
+        }
+        File(rootfs, "opt/t3/client/index.html").apply {
+            parentFile?.mkdirs()
+            writeText("")
+        }
+        return InstalledRuntime(
             metadata =
                 RuntimeMetadata(
                     runtimeVersion = "r",
@@ -112,14 +128,16 @@ class RestartBudgetCleanupTest {
                     abi = "arm64-v8a",
                     port = 3773,
                     t3Version = "0.1.6-pw.5",
+                    servers = mapOf("t3" to "0.1.6-pw.5"),
                     agents = mapOf("opencode" to "2.2.5"),
                     installedAt = 1L,
                 ),
-            rootfs = File(root, "rootfs"),
+            rootfs = rootfs,
         )
+    }
 
     private fun TestScope.controller(
-        server: T3Server,
+        server: RuntimeServer,
         health: HealthProbe,
         killed: MutableList<Int>,
         root: File,
@@ -130,9 +148,9 @@ class RestartBudgetCleanupTest {
             paths = RuntimePaths(root),
             abi = "arm64-v8a",
             installer = Installer(runtimeFor(root)),
-            server = server,
-            health = health,
-            uiPassword = { "ui-secret" },
+            serverFor = { server },
+            healthFor = { health },
+            uiPassword = { _, _ -> "ui-secret" },
             listener = RuntimeStateListener {},
             foregroundStarter = ForegroundStarter {},
             killOwned = { killed.add(1) },

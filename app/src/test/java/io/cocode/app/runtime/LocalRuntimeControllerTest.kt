@@ -9,7 +9,7 @@ import io.cocode.app.runtime.install.RuntimeMetadata
 import io.cocode.app.runtime.manifest.AgentSpec
 import io.cocode.app.runtime.process.HealthProbe
 import io.cocode.app.runtime.process.HealthReport
-import io.cocode.app.runtime.process.T3Server
+import io.cocode.app.runtime.process.RuntimeServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +23,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -42,19 +41,45 @@ private val pins = PackageVersions(t3 = "0.1.6-pw.5", agents = mapOf("opencode" 
 private fun runtimeWith(
     root: File,
     versions: PackageVersions = pins,
-) = InstalledRuntime(
-    metadata =
-        RuntimeMetadata(
-            runtimeVersion = "r",
-            alpineVersion = "3.24.1",
-            abi = "arm64-v8a",
-            port = 3773,
-            t3Version = versions.t3,
-            agents = versions.agents,
-            installedAt = 1L,
-        ),
-    rootfs = File(root, "rootfs"),
-)
+): InstalledRuntime {
+    val rootfs = File(root, "rootfs")
+    File(rootfs, "opt/t3/bin.mjs").apply {
+        parentFile?.mkdirs()
+        writeText("")
+    }
+    File(rootfs, "opt/t3/client/index.html").apply {
+        parentFile?.mkdirs()
+        writeText("")
+    }
+    val servers =
+        versions.servers.takeIf { it.isNotEmpty() }
+            ?: mapOf(ServerKind.T3 to versions.t3)
+    if (ServerKind.OpenChamber in servers) {
+        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/bin/cli.js").apply {
+            parentFile?.mkdirs()
+            writeText("")
+        }
+        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/dist/index.html").apply {
+            parentFile?.mkdirs()
+            writeText("")
+        }
+        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/node_modules/node-pty").mkdirs()
+    }
+    return InstalledRuntime(
+        metadata =
+            RuntimeMetadata(
+                runtimeVersion = "r",
+                alpineVersion = "3.24.1",
+                abi = "arm64-v8a",
+                port = 3773,
+                t3Version = servers[ServerKind.T3] ?: versions.t3,
+                servers = servers.mapKeys { (kind, _) -> kind.id },
+                agents = versions.agents,
+                installedAt = 1L,
+            ),
+        rootfs = rootfs,
+    )
+}
 
 /**
  * Controller state machine tests. The watchdog is driven with bounded virtual-time steps, and the
@@ -89,9 +114,13 @@ class LocalRuntimeControllerTest {
         var failWith: Throwable? = null
         var updateFailWith: Throwable? = null
         var applyFailWith: Throwable? = null
+        /** Hook run inside applyAgents, used to interleave a Stop with the maintenance operation. */
+        var onApply: (() -> Unit)? = null
         val installCalls = mutableListOf<Set<String>>()
+        val installServerCalls = mutableListOf<Set<ServerKind>>()
         val updateCalls = mutableListOf<PackageVersions>()
         val applyCalls = mutableListOf<Set<String>>()
+        val applyServerCalls = mutableListOf<Set<ServerKind>>()
         var discarded = 0
         var removed = 0
         var recovered = 0
@@ -106,13 +135,20 @@ class LocalRuntimeControllerTest {
         override suspend fun install(
             report: InstallReporter,
             agents: Set<String>,
+            servers: Set<ServerKind>,
         ): InstalledRuntime {
             installCalls += agents
+            installServerCalls += servers
             report.step(InstallStep.DownloadRootfs, 0.5f, "half")
             failWith?.let { throw it }
             if (installFails) error("network down")
-            return runtimeWith(root, PackageVersions(t3 = "0.1.6-pw.5", agents = agents.associateWith { "2.2.5" }))
-                .also { installed = it }
+            val versions =
+                PackageVersions(
+                    t3 = "0.1.6-pw.5",
+                    agents = agents.associateWith { "2.2.5" },
+                    servers = servers.associateWith { kind -> if (kind == ServerKind.T3) "0.1.6-pw.5" else "2.5.3" },
+                )
+            return runtimeWith(root, versions).also { installed = it }
         }
 
         override suspend fun update(
@@ -122,7 +158,17 @@ class LocalRuntimeControllerTest {
             updateCalls += versions
             report.step(InstallStep.CopyEnvironment, null, null, MessageKey.ProgressCopyingEnvironment)
             updateFailWith?.let { throw it }
-            return runtimeWith(root, versions).also { installed = it }
+            val current = checkNotNull(installed)
+            val currentServers =
+                current.metadata.servers.mapNotNull { (id, version) -> ServerKind.fromId(id)?.let { it to version } }.toMap()
+            val nextServers =
+                buildMap {
+                    putAll(currentServers)
+                    if (ServerKind.T3 in currentServers) put(ServerKind.T3, versions.t3)
+                    putAll(versions.servers)
+                }
+            val next = versions.copy(servers = nextServers)
+            return runtimeWith(root, next).also { installed = it }
         }
 
         override suspend fun applyAgents(
@@ -131,12 +177,38 @@ class LocalRuntimeControllerTest {
         ): InstalledRuntime {
             applyCalls += selected
             applyFailWith?.let { throw it }
+            onApply?.invoke()
             val current = checkNotNull(installed)
             val next =
                 current.copy(
                     metadata =
                         current.metadata.copy(
                             agents = selected.associateWith { current.metadata.agents[it] ?: "2.3.0" },
+                        ),
+                )
+            installed = next
+            return next
+        }
+
+        override suspend fun applyServers(
+            report: InstallReporter,
+            selected: Set<ServerKind>,
+            agents: Set<String>,
+        ): InstalledRuntime {
+            applyServerCalls += selected
+            applyFailWith?.let { throw it }
+            val current = checkNotNull(installed)
+            val next =
+                current.copy(
+                    metadata =
+                        current.metadata.copy(
+                            servers =
+                                selected
+                                    .associateWith { kind ->
+                                        current.metadata.servers[kind.id]
+                                            ?: if (kind == ServerKind.T3) "0.1.6-pw.5" else "2.5.3"
+                                    }.mapKeys { (kind, _) -> kind.id },
+                            agents = agents.associateWith { current.metadata.agents[it] ?: "2.2.5" },
                         ),
                 )
             installed = next
@@ -156,12 +228,14 @@ class LocalRuntimeControllerTest {
 
     private class FakeServer(
         var startError: Throwable? = null,
-    ) : T3Server {
+    ) : RuntimeServer {
         val passwords = mutableListOf<String>()
         var startAttempts = 0
         var failNextStarts = 0
         var alive = false
         var stops = 0
+        /** Runs inside stop(), so a later Stop can be interleaved with a maintenance stop stage. */
+        var onStop: (() -> Unit)? = null
         private var launch = 0L
 
         override fun start(
@@ -184,6 +258,7 @@ class LocalRuntimeControllerTest {
         override fun stop() {
             stops++
             alive = false
+            onStop?.invoke()
         }
 
         override fun isAlive(): Boolean = alive
@@ -199,16 +274,18 @@ class LocalRuntimeControllerTest {
 
     private fun TestScope.controller(
         installer: FakeInstaller,
-        server: T3Server,
+        server: RuntimeServer,
         health: HealthProbe = FakeHealth(),
         abi: String = "arm64-v8a",
         states: MutableList<RuntimeState>? = null,
         killed: MutableList<Int>? = null,
         requested: MutableList<RuntimeOperation>? = null,
         selection: AgentSelectionStore = InMemoryAgentSelectionStore(),
+        serverSelection: ServerSelectionStore = InMemoryServerSelectionStore(),
         policy: RestartPolicy = RestartPolicy(listOf(1_000L, 2_000L), healthyResetMillis = 120_000L),
         watchdogPollMillis: Long = 500L,
         versionSource: PackageVersionSource? = null,
+        serverFor: ((ServerKind) -> RuntimeServer)? = null,
     ): DefaultLocalRuntimeController {
         val job = SupervisorJob()
         val scope = CoroutineScope(job + StandardTestDispatcher(testScheduler))
@@ -217,11 +294,12 @@ class LocalRuntimeControllerTest {
             paths = RuntimePaths(folder.root),
             abi = abi,
             installer = installer,
-            server = server,
-            health = health,
-            uiPassword = { "ui-secret" },
+            serverFor = serverFor ?: { server },
+            healthFor = { health },
+            uiPassword = { _, _ -> "ui-secret" },
             manifestAgents = agents,
             selectionStore = selection,
+            serverSelectionStore = serverSelection,
             pinnedT3Version = "0.1.6-pw.5",
             listener = RuntimeStateListener { state -> states?.add(state) },
             foregroundStarter = ForegroundStarter { op -> requested?.add(op) },
@@ -276,6 +354,7 @@ class LocalRuntimeControllerTest {
             step()
 
             assertEquals(listOf(setOf("opencode")), installer.installCalls)
+            assertEquals(listOf(setOf(ServerKind.T3)), installer.installServerCalls)
             assertTrue(controller.state.value is RuntimeState.Running)
             assertEquals("ui-secret", server.passwords.single())
             assertEquals("0.1.6-pw.5", controller.info.value?.t3Version)
@@ -307,13 +386,55 @@ class LocalRuntimeControllerTest {
         }
 
     @Test
-    fun `an empty agent selection is rejected`() =
+    fun `an empty agent selection is ignored and keeps the saved selection`() =
         controllerTest {
-            val controller = controller(FakeInstaller(folder.root), FakeServer())
-            assertThrows(IllegalArgumentException::class.java) { controller.setAgents(emptySet()) }
+            val selection = InMemoryAgentSelectionStore(initial = setOf("codex"))
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller = controller(FakeInstaller(folder.root), FakeServer(), selection = selection, requested = requested)
             controller.initialize()
             step()
+
+            controller.setAgents(emptySet())
+
+            assertEquals(setOf("codex"), controller.agents.value.selected)
+            assertEquals(setOf("codex"), selection.selected())
+            assertTrue("nothing usable was chosen: no apply is queued", requested.isEmpty())
+        }
+
+    @Test
+    fun `an unknown-only selection is ignored instead of falling back to defaults`() =
+        controllerTest {
+            val selection = InMemoryAgentSelectionStore(initial = setOf("codex"))
+            val controller = controller(FakeInstaller(folder.root), FakeServer(), selection = selection)
+            controller.initialize()
+            step()
+
+            controller.setAgents(setOf("not-an-agent"))
+
+            assertEquals(setOf("codex"), controller.agents.value.selected)
+            assertEquals(setOf("codex"), selection.selected())
+        }
+
+    @Test
+    fun `an empty selection on an installed runtime queues no apply`() =
+        controllerTest {
+            val requested = mutableListOf<RuntimeOperation>()
+            val selection = InMemoryAgentSelectionStore(initial = setOf("opencode"))
+            val controller =
+                controller(
+                    FakeInstaller(folder.root, installed = runtimeWith(folder.root)),
+                    FakeServer(),
+                    selection = selection,
+                    requested = requested,
+                )
+            controller.initialize()
+            step()
+
+            controller.setAgents(emptySet())
+
             assertEquals(setOf("opencode"), controller.agents.value.selected)
+            assertEquals(setOf("opencode"), selection.selected())
+            assertTrue("an empty draft must not start an operation", requested.isEmpty())
         }
 
     @Test
@@ -377,6 +498,40 @@ class LocalRuntimeControllerTest {
             assertEquals(MessageKey.AgentInstallFailed, controller.updates.value.lastFailure?.messageKey)
             assertEquals("EAI_AGAIN", controller.updates.value.lastFailure?.detail)
             assertEquals(mapOf("opencode" to "2.2.5"), controller.info.value?.agents)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `retrying the same selection after a failed apply queues apply again`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root, installed = runtimeWith(folder.root))
+            val requested = mutableListOf<RuntimeOperation>()
+            val selection = InMemoryAgentSelectionStore()
+            val controller = controller(installer, FakeServer(), selection = selection, requested = requested)
+            controller.initialize()
+            step()
+
+            controller.setAgents(setOf("codex"))
+            assertEquals(listOf(RuntimeOperation.ApplyAgents), requested)
+
+            installer.applyFailWith = UserFacingException(MessageKey.AgentInstallFailed, "npm failed")
+            controller.perform(RuntimeOperation.ApplyAgents)
+            step()
+            assertEquals("the draft is persisted even though the apply failed", setOf("codex"), selection.selected())
+            assertEquals("the installed environment is still the old one", mapOf("opencode" to "2.2.5"), controller.agents.value.installed)
+
+            // The persisted selection now equals the draft, but it was never installed. The UI can
+            // still offer Apply (installed keys differ), so the same selection must run again.
+            requested.clear()
+            installer.applyFailWith = null
+            controller.setAgents(setOf("codex"))
+
+            assertEquals(listOf(RuntimeOperation.ApplyAgents), requested)
+            controller.perform(RuntimeOperation.ApplyAgents)
+            step()
+
+            assertEquals(2, installer.applyCalls.size)
+            assertEquals(mapOf("codex" to "2.3.0"), controller.agents.value.installed)
             assertEquals(RuntimeState.Stopped, controller.state.value)
         }
 
@@ -628,6 +783,161 @@ class LocalRuntimeControllerTest {
         }
 
     @Test
+    fun `both servers install together and T3 stays the default active server`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root)
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+
+            controller.perform(RuntimeOperation.Install)
+            step()
+
+            assertEquals(setOf(ServerKind.T3, ServerKind.OpenChamber), installer.installServerCalls.single())
+            assertEquals(setOf(ServerKind.T3, ServerKind.OpenChamber), controller.servers.value.installed.keys)
+            assertEquals(ServerKind.T3, controller.servers.value.active)
+            val running = controller.state.value as RuntimeState.Running
+            assertEquals(3773, running.port)
+            controller.perform(RuntimeOperation.Stop)
+            step()
+        }
+
+    @Test
+    fun `a failed server change keeps the previous installed servers`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            installer.applyFailWith = UserFacingException(MessageKey.Generic, "staging failed")
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+
+            controller.setServers(setOf(ServerKind.T3))
+            controller.perform(RuntimeOperation.ApplyServers)
+            step()
+
+            assertEquals(
+                "the old installed set survives a failed change",
+                setOf(ServerKind.T3, ServerKind.OpenChamber),
+                controller.servers.value.installed.keys,
+            )
+            assertEquals("staging failed", controller.updates.value.lastFailure?.reason)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `an OpenChamber update is offered only when OpenChamber is installed`() =
+        controllerTest {
+            val both =
+                runtimeWith(
+                    folder.root,
+                    PackageVersions(
+                        "0.1.6-pw.5",
+                        mapOf("opencode" to "2.2.5"),
+                        mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                    ),
+                )
+            val source =
+                FixedSource(
+                    answer =
+                        PackageVersions(
+                            t3 = "0.1.6-pw.5",
+                            agents = mapOf("opencode" to "2.2.5"),
+                            servers = mapOf(ServerKind.OpenChamber to "2.5.4"),
+                        ),
+                )
+            val installer = FakeInstaller(folder.root, installed = both)
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    versionSource = source,
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+
+            assertEquals("2.5.4", controller.updates.value.available?.servers?.get(ServerKind.OpenChamber)?.target)
+            controller.perform(RuntimeOperation.Update)
+            step()
+            assertEquals(
+                "the OC target is passed with the installed server map",
+                mapOf(ServerKind.OpenChamber to "2.5.4"),
+                installer.updateCalls.single().servers,
+            )
+            assertEquals("2.5.4", controller.info.value?.serverVersions?.get(ServerKind.OpenChamber))
+        }
+
+    @Test
+    fun `an OC-only update never offers or installs T3`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val source =
+                FixedSource(
+                    answer =
+                        PackageVersions(
+                            t3 = "9.9.9",
+                            agents = mapOf("opencode" to "2.2.5"),
+                            servers = mapOf(ServerKind.OpenChamber to "2.5.4"),
+                        ),
+                )
+            val controller = controller(installer, FakeServer(), versionSource = source)
+            controller.initialize()
+            step()
+
+            assertEquals("no T3 offer without T3 installed", false, controller.updates.value.available?.t3?.changed)
+            controller.perform(RuntimeOperation.Update)
+            step()
+
+            assertTrue(installer.installServerCalls.isEmpty())
+            assertEquals(mapOf(ServerKind.OpenChamber to "2.5.4"), installer.updateCalls.single().servers)
+            assertEquals(setOf(ServerKind.OpenChamber), controller.info.value?.serverVersions?.keys)
+            assertEquals(null, controller.info.value?.t3Version)
+        }
+
+    @Test
     fun `automatic checks are throttled and manual checks ignore the throttle`() =
         controllerTest {
             val source = FixedSource(answer = pins)
@@ -644,5 +954,328 @@ class LocalRuntimeControllerTest {
             controller.checkForUpdates()
             step()
             assertEquals(2, source.calls)
+        }
+
+    @Test
+    fun `an OpenChamber-only install adds the required OpenCode dependency`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root)
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    selection = InMemoryAgentSelectionStore(setOf("codex")),
+                    serverSelection = InMemoryServerSelectionStore(ServerSelection(setOf(ServerKind.OpenChamber), ServerKind.OpenChamber)),
+                )
+            controller.initialize()
+            step()
+            assertEquals(setOf(ServerKind.OpenChamber), controller.servers.value.selected)
+            assertEquals(setOf("opencode"), controller.agents.value.required)
+
+            controller.perform(RuntimeOperation.Install)
+            step()
+
+            assertEquals(listOf(setOf(ServerKind.OpenChamber)), installer.installServerCalls)
+            assertEquals("user Codex plus the OpenChamber dependency", setOf("codex", "opencode"), installer.installCalls.single())
+            assertEquals(setOf(ServerKind.OpenChamber), controller.servers.value.installed.keys)
+            assertEquals("2.5.3", controller.info.value?.serverVersions?.get(ServerKind.OpenChamber))
+            controller.perform(RuntimeOperation.Stop)
+            step()
+        }
+
+    @Test
+    fun `selectServer ignores a kind that is not installed`() =
+        controllerTest {
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller =
+                controller(
+                    FakeInstaller(folder.root, installed = runtimeWith(folder.root)),
+                    FakeServer(),
+                    requested = requested,
+                )
+            controller.initialize()
+            step()
+
+            controller.selectServer(ServerKind.OpenChamber)
+
+            assertTrue("OpenChamber is not installed", requested.isEmpty())
+            assertEquals(ServerKind.T3, controller.servers.value.active)
+        }
+
+    @Test
+    fun `selectServer stops the former server and runs the chosen kind on its port`() =
+        controllerTest {
+            val t3 = FakeServer()
+            val openChamber = FakeServer()
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller =
+                controller(
+                    installer,
+                    t3,
+                    requested = requested,
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                    serverFor = { if (it == ServerKind.T3) t3 else openChamber },
+                )
+            controller.initialize()
+            step()
+            assertEquals(setOf(ServerKind.T3, ServerKind.OpenChamber), controller.servers.value.installed.keys)
+
+            controller.selectServer(ServerKind.OpenChamber)
+            assertEquals(listOf(RuntimeOperation.SelectServer), requested)
+            controller.perform(RuntimeOperation.SelectServer)
+            step()
+
+            assertEquals(ServerKind.OpenChamber, controller.servers.value.active)
+            assertEquals(1, openChamber.startAttempts)
+            assertTrue("the former server was stopped", t3.stops > 0)
+            val running = controller.state.value as RuntimeState.Running
+            assertEquals(3000, running.port)
+            controller.perform(RuntimeOperation.Stop)
+            step()
+        }
+
+    @Test
+    fun `setServers after install queues a transactional server change`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    requested = requested,
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+
+            controller.setServers(setOf(ServerKind.T3))
+            assertEquals(listOf(RuntimeOperation.ApplyServers), requested)
+            controller.perform(RuntimeOperation.ApplyServers)
+            step()
+
+            assertEquals(listOf(setOf(ServerKind.T3)), installer.applyServerCalls)
+            assertEquals(setOf(ServerKind.T3), controller.servers.value.installed.keys)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `removing T3 preserves OpenChamber and the agent set`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+
+            controller.setServers(setOf(ServerKind.OpenChamber))
+            controller.perform(RuntimeOperation.ApplyServers)
+            step()
+
+            assertEquals(listOf(setOf(ServerKind.OpenChamber)), installer.applyServerCalls)
+            assertEquals(setOf(ServerKind.OpenChamber), controller.servers.value.installed.keys)
+            assertEquals(setOf("opencode"), controller.agents.value.installed.keys)
+            assertEquals(ServerKind.OpenChamber, controller.servers.value.active)
+        }
+
+    @Test
+    fun `retrying the same server draft after a failure queues ApplyServers again`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val requested = mutableListOf<RuntimeOperation>()
+            val selection =
+                InMemoryServerSelectionStore(
+                    ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                )
+            val controller = controller(installer, FakeServer(), requested = requested, serverSelection = selection)
+            controller.initialize()
+            step()
+
+            controller.setServers(setOf(ServerKind.T3))
+            installer.applyFailWith = UserFacingException(MessageKey.Generic, "staging failed")
+            controller.perform(RuntimeOperation.ApplyServers)
+            step()
+            assertEquals("the draft is persisted", setOf(ServerKind.T3), selection.load().selected)
+            assertEquals(
+                "the installed set is still the old one",
+                setOf(ServerKind.T3, ServerKind.OpenChamber),
+                controller.servers.value.installed.keys,
+            )
+
+            requested.clear()
+            installer.applyFailWith = null
+            controller.setServers(setOf(ServerKind.T3))
+
+            assertEquals(listOf(RuntimeOperation.ApplyServers), requested)
+            controller.perform(RuntimeOperation.ApplyServers)
+            step()
+            assertEquals(setOf(ServerKind.T3), controller.servers.value.installed.keys)
+        }
+
+    @Test
+    fun `the OpenCode dependency cannot be removed while OpenChamber is installed`() =
+        controllerTest {
+            val installer =
+                FakeInstaller(
+                    folder.root,
+                    installed =
+                        runtimeWith(
+                            folder.root,
+                            PackageVersions(
+                                "0.1.6-pw.5",
+                                mapOf("codex" to "0.166.0", "opencode" to "2.2.5"),
+                                mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
+                            ),
+                        ),
+                )
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller =
+                controller(
+                    installer,
+                    FakeServer(),
+                    requested = requested,
+                    selection = InMemoryAgentSelectionStore(setOf("codex")),
+                    serverSelection =
+                        InMemoryServerSelectionStore(
+                            ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.T3),
+                        ),
+                )
+            controller.initialize()
+            step()
+            assertEquals(setOf("opencode"), controller.agents.value.required)
+
+            controller.setAgents(setOf("codex"))
+
+            assertTrue("the dependency still satisfies the effective set", requested.isEmpty())
+            assertEquals(setOf("codex"), controller.agents.value.selected)
+            assertEquals(setOf("codex", "opencode"), controller.agents.value.installed.keys)
+        }
+
+    @Test
+    fun `a Stop queued after Repair suppresses the repair auto-start`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root, installed = runtimeWith(folder.root))
+            val requested = mutableListOf<RuntimeOperation>()
+            val controller = controller(installer, FakeServer(), requested = requested)
+            controller.initialize()
+            step()
+
+            controller.repair()
+            controller.stop()
+            assertEquals(listOf(RuntimeOperation.Repair, RuntimeOperation.Stop), requested)
+
+            controller.perform(RuntimeOperation.Repair)
+            step()
+
+            assertEquals("the user-requested repair still installs", 1, installer.installCalls.size)
+            assertFalse(controller.state.value is RuntimeState.Running)
+            assertFalse(controller.state.value is RuntimeState.Starting)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `a Stop during Restart's stop stage suppresses the new start`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root, installed = runtimeWith(folder.root))
+            val server = FakeServer()
+            val controller = controller(installer, server)
+            controller.initialize()
+            step()
+            controller.perform(RuntimeOperation.Start)
+            step()
+            assertTrue(controller.state.value is RuntimeState.Running)
+            assertEquals(1, server.startAttempts)
+
+            server.onStop = { controller.stop() }
+            controller.restart()
+            controller.perform(RuntimeOperation.Restart)
+            step()
+
+            assertEquals("the stopped server must not be started again", 1, server.startAttempts)
+            assertFalse(controller.state.value is RuntimeState.Running)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `a Stop during an agent change suppresses the automatic restart`() =
+        controllerTest {
+            val installer = FakeInstaller(folder.root, installed = runtimeWith(folder.root))
+            val controller = controller(installer, FakeServer())
+            controller.initialize()
+            step()
+            controller.perform(RuntimeOperation.Start)
+            step()
+            assertTrue(controller.state.value is RuntimeState.Running)
+
+            controller.setAgents(setOf("codex"))
+            installer.onApply = { controller.stop() }
+            controller.perform(RuntimeOperation.ApplyAgents)
+            step()
+
+            assertFalse("a maintenance operation must not restart after Stop", controller.state.value is RuntimeState.Running)
+            assertFalse(controller.state.value is RuntimeState.Starting)
+            assertEquals(RuntimeState.Stopped, controller.state.value)
         }
 }

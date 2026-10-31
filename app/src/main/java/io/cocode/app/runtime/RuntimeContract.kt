@@ -72,7 +72,7 @@ sealed interface RuntimeState {
 
     data class Starting(val detail: String?) : RuntimeState
 
-    /** [url] is the loopback base URL of the T3 Code web server, e.g. http://127.0.0.1:3773 */
+    /** [url] is the loopback base URL of the active server, e.g. http://127.0.0.1:3773 or :3000. */
     data class Running(val url: String, val port: Int, val sinceEpochMs: Long) : RuntimeState
 
     data class Stopping(val detail: String?) : RuntimeState
@@ -188,10 +188,13 @@ data class AgentChange(
 
 /** Newer T3 Code and agent CLI versions the installed runtime can move to. */
 data class RuntimeUpdate(
+    /** T3 Code's change. [current] equals [target] when T3 is not installed. */
     val t3: VersionChange,
     val agents: List<AgentChange> = emptyList(),
+    /** Changes for other installed servers, keyed by kind. OpenChamber is the only extra today. */
+    val servers: Map<ServerKind, VersionChange> = emptyMap(),
 ) {
-    val hasChanges: Boolean get() = t3.changed || agents.any { it.change.changed }
+    val hasChanges: Boolean get() = t3.changed || agents.any { it.change.changed } || servers.values.any { it.changed }
 }
 
 /** Why the last update attempt failed. The previous environment is kept and still usable. */
@@ -220,7 +223,10 @@ data class RuntimeUpdateState(
 data class RuntimeInfo(
     val abi: String,
     val alpineVersion: String,
+    /** T3 Code's version, kept for the old UI; null when T3 is not installed. */
     val t3Version: String?,
+    /** Installed server versions, keyed by kind. */
+    val serverVersions: Map<ServerKind, String> = emptyMap(),
     /** Installed agent versions, keyed by agent id. */
     val agents: Map<String, String>,
     val nodeVersion: String?,
@@ -243,13 +249,26 @@ interface LocalRuntimeController {
 
     val info: StateFlow<RuntimeInfo?>
 
-    /** Available agents, the saved selection and the installed versions. */
+    /** Available agents, the saved selection, required dependencies and the installed versions. */
     val agents: StateFlow<AgentsState>
 
+    /** Selected/installed servers and the one active server. */
+    val servers: StateFlow<ServersState>
+
+    /** Persists the server selection; after setup the diff is applied transactionally. */
+    fun setServers(selected: Set<ServerKind>)
+
+    /** Stops the former server and starts [kind]; ignored unless [kind] is installed. */
+    fun selectServer(kind: ServerKind)
+
     /**
-     * Persists a new agent selection. Rejects an empty set (at least one agent is required). When a
-     * runtime is installed, queues [RuntimeOperation.ApplyAgents]: stops the server, installs/removes
-     * the diff in place, verifies, updates metadata and restarts the server if it was running.
+     * Persists a new agent selection. An empty set, or one with no agent this build offers, is
+     * ignored: the previous valid selection is kept, because the UI calls this straight from a
+     * click and a draft may briefly select nothing. When a runtime is installed, queues
+     * [RuntimeOperation.ApplyAgents]: stops the server, installs additions and removes deselected
+     * agents in place, verifies, updates metadata and restarts the server if it was running. The
+     * same selection is applied again when the installed set still differs from it, so retrying
+     * after a failed apply works even though the selection was already persisted.
      */
     fun setAgents(selected: Set<String>)
 
@@ -294,9 +313,13 @@ sealed interface ServerTarget {
     val id: String
     val displayName: String
     val baseUrl: String
+    val kind: ServerKind
 
-    data class Local(override val baseUrl: String) : ServerTarget {
-        override val id: String = LOCAL_ID
+    data class Local(
+        override val baseUrl: String,
+        override val kind: ServerKind = ServerKind.T3,
+    ) : ServerTarget {
+        override val id: String = kind.localTargetId
         override val displayName: String = "This device"
     }
 
@@ -311,9 +334,12 @@ sealed interface ServerTarget {
          * confirm UI sets it. Without it a password is never sent in cleartext.
          */
         val allowInsecureHttp: Boolean = false,
+        /** Remote servers are T3 Code unless persistence records otherwise. */
+        override val kind: ServerKind = ServerKind.T3,
     ) : ServerTarget
 
     companion object {
+        /** Historical local id; new local targets use [ServerKind.localTargetId]. */
         const val LOCAL_ID = "local"
     }
 }

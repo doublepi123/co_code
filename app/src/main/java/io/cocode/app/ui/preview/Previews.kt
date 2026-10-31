@@ -25,6 +25,8 @@ import io.cocode.app.runtime.SharedStorageState
 import io.cocode.app.runtime.SharedStorageStatus
 import io.cocode.app.runtime.UpdateFailure
 import io.cocode.app.runtime.VersionChange
+import io.cocode.app.update.AppReleaseUpdate
+import io.cocode.app.ui.AppUpdateDialog
 import io.cocode.app.ui.CoCodeApp
 import io.cocode.app.ui.LaunchCoverContent
 import io.cocode.app.ui.home.AutoOpenRow
@@ -73,6 +75,7 @@ private fun HomePreview(
             storage = storage,
             updates = updates,
             agents = PreviewData.agents,
+            localServers = PreviewData.localServers,
         )
     }
 }
@@ -181,7 +184,7 @@ private fun UpdateCheckFailedPreview() =
 private fun WebUpdatingPreview() {
     CoCodeTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
-            LocalServerPanel(state = UpdatePreviewData.updating, onStart = {}, onHome = {})
+            LocalServerPanel(state = UpdatePreviewData.updating, serverName = "T3 Code", onStart = {}, onHome = {})
         }
     }
 }
@@ -348,6 +351,7 @@ private fun WebStartFailedPreview() {
                         recoverable = true,
                         phase = FailurePhase.Start,
                     ),
+                serverName = "T3 Code",
                 onStart = {},
                 onHome = {},
             )
@@ -383,7 +387,7 @@ private fun ScreenAwakeRowPreview() {
 private fun WebLocalStoppedPreview() {
     CoCodeTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
-            LocalServerPanel(state = RuntimeState.Stopped, onStart = {}, onHome = {})
+            LocalServerPanel(state = RuntimeState.Stopped, serverName = "OpenChamber", onStart = {}, onHome = {})
         }
     }
 }
@@ -397,4 +401,22 @@ private fun AppPreview() {
         auth = FakeWebSessionAuthenticator(),
         storage = FakeSharedStorageController(),
     )
+}
+
+@Preview(name = "App update dialog", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES, widthDp = 360)
+@Composable
+private fun AppUpdateDialogPreview() {
+    CoCodeTheme {
+        AppUpdateDialog(
+            update =
+                AppReleaseUpdate(
+                    version = "0.2.0",
+                    pageUrl = "https://github.com/example/co_code/releases/tag/v0.2.0",
+                    notes = "## What's new\n- Pick OpenChamber, T3 Code or both\n- **Fixed**: unchecking OpenCode no longer closes the app",
+                ),
+            currentVersion = "0.1.0",
+            onLater = {},
+            onViewRelease = {},
+        )
+    }
 }

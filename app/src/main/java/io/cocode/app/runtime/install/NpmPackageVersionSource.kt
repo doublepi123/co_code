@@ -1,5 +1,6 @@
 package io.cocode.app.runtime.install
 
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.manifest.AgentSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -95,14 +96,25 @@ class DefaultPackageVersionSource(
     private val t3: T3ReleaseSource,
     private val agents: List<AgentSpec>,
     private val fallbackT3Version: String,
+    private val openChamberPackage: String = "@openchamber/web",
 ) : PackageVersionSource {
     override suspend fun latest(pinned: PackageVersions): PackageVersions {
-        val t3Version = t3.latest()?.version ?: fallbackT3Version
+        val t3Version =
+            if (pinned.servers.isEmpty() || ServerKind.T3 in pinned.servers) {
+                t3.latest()?.version ?: fallbackT3Version
+            } else {
+                pinned.t3
+            }
         val installedAgents =
             agents
+                .filter { it.id in pinned.agents }
                 .map { spec -> spec.id to npm.latest(spec.npmPackage, pinned.agents[spec.id]) }
                 .filter { (_, version) -> !version.isNullOrBlank() }
                 .associate { (id, version) -> id to version!! }
-        return PackageVersions(t3 = t3Version, agents = installedAgents)
+        val openChamber =
+            pinned.servers[ServerKind.OpenChamber]?.let { current ->
+                npm.latest(openChamberPackage, current)?.let { mapOf(ServerKind.OpenChamber to it) }
+            } ?: emptyMap()
+        return PackageVersions(t3 = t3Version, agents = installedAgents, servers = openChamber)
     }
 }

@@ -57,11 +57,13 @@ import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.RuntimeInfo
 import io.cocode.app.runtime.RuntimeState
 import io.cocode.app.runtime.RuntimeUpdateState
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
+import io.cocode.app.runtime.ServersState
 import io.cocode.app.runtime.SharedStorageState
 import io.cocode.app.runtime.SharedStorageStatus
 import io.cocode.app.ui.components.ChamberCard
-import io.cocode.app.ui.components.ChamberMark
+import io.cocode.app.ui.components.CoCodeMark
 import io.cocode.app.ui.components.IconTile
 import io.cocode.app.ui.components.SectionHeader
 import io.cocode.app.ui.ScreenAwakeSetting
@@ -92,6 +94,10 @@ internal class HomeActions(
     val onCheckForUpdates: () -> Unit = {},
     val onDismissUpdateFailure: () -> Unit = {},
     val onAgentsChange: (Set<String>) -> Unit = {},
+    /** Saves or applies the T3 Code / OpenChamber selection (never called with an empty set). */
+    val onServersChange: (Set<ServerKind>) -> Unit = {},
+    /** Makes another installed server the active one, after the card has asked. */
+    val onSelectServer: (ServerKind) -> Unit = {},
 )
 
 /** The storage card only makes sense where the local server can exist at all. */
@@ -120,6 +126,8 @@ internal fun HomeScreen(
     updates: RuntimeUpdateState = RuntimeUpdateState(),
     /** Available agents, the saved selection and the installed versions. */
     agents: AgentsState = AgentsState(),
+    /** Local servers: picked, installed and active. */
+    localServers: ServersState = ServersState(),
     /**
      * "Keep screen on while the local server runs"; null hides the setting. By default the app's
      * own setting (the process-wide [io.cocode.app.ui.ScreenAwakeController]), null in previews.
@@ -189,6 +197,9 @@ internal fun HomeScreen(
                         onDismissUpdateFailure = actions.onDismissUpdateFailure,
                         agents = agents,
                         onAgentsChange = actions.onAgentsChange,
+                        servers = localServers,
+                        onServersChange = actions.onServersChange,
+                        onSelectServer = actions.onSelectServer,
                         modifier = Modifier.revealOnEnter(1, animate),
                     )
                     AnimatedVisibility(
@@ -281,7 +292,7 @@ private fun HomeHeader(modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxWidth().padding(top = 28.dp, start = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChamberMark(size = 36.dp)
+        CoCodeMark(size = 36.dp)
         Spacer(Modifier.width(14.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(

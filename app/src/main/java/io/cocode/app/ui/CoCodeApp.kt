@@ -55,6 +55,7 @@ import io.cocode.app.runtime.FailurePhase
 import io.cocode.app.runtime.LocalRuntimeController
 import io.cocode.app.runtime.RemoteServerStore
 import io.cocode.app.runtime.RuntimeState
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
 import io.cocode.app.runtime.SharedStorageController
 import io.cocode.app.runtime.WebSessionAuthenticator
@@ -161,8 +162,27 @@ private class LocalActions(
     fun repair() {
         askForNotifications()
         inSetup = true
-        pool.discard(ServerTarget.LOCAL_ID)
+        discardLocalPages()
         runtime.repair()
+    }
+
+    /** Both on-device servers share the pool's local slot; whichever page is there goes. */
+    private fun discardLocalPages() = LOCAL_TARGET_IDS.forEach(pool::discard)
+
+    /**
+     * Makes [kind] the active local server. The runtime stops the current one and starts [kind];
+     * its page is a different identity, so the pool rebinds the local slot to [kind]'s own profile.
+     */
+    fun selectServer(kind: ServerKind) {
+        askForNotifications()
+        runtime.selectServer(kind)
+    }
+
+    /** Saves the server pick before setup, or applies it afterwards. Empty sets never reach the runtime. */
+    fun setServers(selected: Set<ServerKind>) {
+        if (selected.isEmpty()) return
+        if (runtime.state.value !is RuntimeState.NotInstalled) askForNotifications()
+        runtime.setServers(selected)
     }
 
     /**
@@ -172,7 +192,7 @@ private class LocalActions(
      */
     fun update() {
         askForNotifications()
-        pool.discard(ServerTarget.LOCAL_ID)
+        discardLocalPages()
         runtime.update()
     }
 
@@ -181,7 +201,7 @@ private class LocalActions(
     fun dismissUpdateFailure() = runtime.dismissUpdateFailure()
 
     fun uninstall() {
-        pool.discard(ServerTarget.LOCAL_ID)
+        discardLocalPages()
         runtime.uninstall()
     }
 }
@@ -268,7 +288,7 @@ internal fun CoCodeApp(
         LaunchedEffect(inspection) {
             if (inspection) return@LaunchedEffect
             remotes.servers.collect { servers ->
-                uiPrefs.retainPages(servers.mapTo(HashSet()) { it.id } + ServerTarget.LOCAL_ID)
+                uiPrefs.retainPages(servers.mapTo(HashSet()) { it.id } + LOCAL_TARGET_IDS)
             }
         }
         // Saved, so recreation never runs the decision again; Back to Home then stays on Home.
@@ -300,8 +320,9 @@ internal fun CoCodeApp(
                                 covered = stage != LaunchStage.Done,
                                 onOpening = { stage = LaunchStage.Opening },
                             )
-                        ResumeTarget.Local ->
+                        is ResumeTarget.Local ->
                             openLocalOnLaunch(
+                                remembered = choice.kind,
                                 runtime = runtime,
                                 nav = nav,
                                 lifecycle = lifecycle,
@@ -378,6 +399,7 @@ internal fun CoCodeApp(
                         val storageState by storage.state.collectAsStateWithLifecycle()
                         val updates by runtime.updates.collectAsStateWithLifecycle()
                         val agents by runtime.agents.collectAsStateWithLifecycle()
+                        val localServers by runtime.servers.collectAsStateWithLifecycle()
                         val actions =
                             remember(local, remotes, pool, nav, entry, storage, refreshStorage, requestStorageAccess, uiPrefs, webDeps) {
                                 HomeActions(
@@ -387,7 +409,12 @@ internal fun CoCodeApp(
                                     onStop = local::stop,
                                     onRepair = local::repair,
                                     onUninstall = local::uninstall,
-                                    onOpenLocal = { nav.openIfResumed(entry, Routes.web(ServerTarget.LOCAL_ID)) },
+                                    onOpenLocal = {
+                                        // The active server's own page (its own profile and last page).
+                                        runtime.servers.value.openableKind()?.let { kind ->
+                                            nav.openIfResumed(entry, Routes.web(kind.localTargetId))
+                                        }
+                                    },
                                     onOpenRemote = { server ->
                                         // A server being removed has no profile to open any more.
                                         if (server.id !in pendingRemovalIds) nav.openIfResumed(entry, Routes.web(server.id))
@@ -429,7 +456,12 @@ internal fun CoCodeApp(
                                             }
                                         }
                                     },
-                                    onSharedStorageChange = { on -> storageJobs.trySend { storage.setEnabled(on) } },
+                                    onSharedStorageChange = { on ->
+                                        storageJobs.trySend {
+                                            if (on) storage.setEnabledWithFullDirectoryConsent(true)
+                                            else storage.setEnabled(false)
+                                        }
+                                    },
                                     onAllowStorageAccess = requestStorageAccess,
                                     onCheckStorageAgain = refreshStorage,
                                     onRestartLocal = local::restart,
@@ -438,6 +470,8 @@ internal fun CoCodeApp(
                                     onCheckForUpdates = local::checkForUpdates,
                                     onDismissUpdateFailure = local::dismissUpdateFailure,
                                     onAgentsChange = runtime::setAgents,
+                                    onServersChange = local::setServers,
+                                    onSelectServer = local::selectServer,
                                 )
                             }
                         HomeScreen(
@@ -451,6 +485,7 @@ internal fun CoCodeApp(
                             autoOpenLocal = uiPrefs.autoOpenLocal,
                             updates = updates,
                             agents = agents,
+                            localServers = localServers,
                         )
                     }
 
@@ -460,19 +495,23 @@ internal fun CoCodeApp(
                     ) { entry ->
                         val state by runtime.state.collectAsStateWithLifecycle()
                         val servers by remotes.servers.collectAsStateWithLifecycle()
+                        val localServers by runtime.servers.collectAsStateWithLifecycle()
                         val targetId = entry.arguments?.getString(Routes.ARG_TARGET).orEmpty()
-                        val isLocal = targetId == ServerTarget.LOCAL_ID
-                        val running = state as? RuntimeState.Running
+                        // Each on-device server has its own id; the runtime state belongs to the active one.
+                        val pageKind = localKindOf(targetId)
+                        val isLocal = pageKind != null
+                        val pageIsActive = pageKind != null && pageKind == localServers.active
+                        val running = (state as? RuntimeState.Running)?.takeIf { pageIsActive }
                         val target: ServerTarget? =
                             if (isLocal) {
-                                running?.let { ServerTarget.Local(it.url) }
+                                running?.let { ServerTarget.Local(it.url, kind = pageKind!!) }
                             } else {
                                 servers.firstOrNull { it.id == targetId }
                             }
                         // A new key means a new server session: sign in again and reload the page.
                         val sessionKey =
                             when (target) {
-                                is ServerTarget.Local -> "local|${running?.sinceEpochMs}|${target.baseUrl}"
+                                is ServerTarget.Local -> "local|${target.kind.id}|${running?.sinceEpochMs}|${target.baseUrl}"
                                 is ServerTarget.Remote ->
                                     "remote|${target.id}|${target.baseUrl}|${target.uiPassword.orEmpty().hashCode()}"
                                 null -> null
@@ -480,7 +519,13 @@ internal fun CoCodeApp(
                         WebScreen(
                             targetId = targetId,
                             target = target,
-                            localState = if (isLocal) shownLocalState(state, local.pendingStartFrom) else null,
+                            // Another server's page while this one is active shows that server as stopped.
+                            localState =
+                                when {
+                                    !isLocal -> null
+                                    pageIsActive -> shownLocalState(state, local.pendingStartFrom)
+                                    else -> RuntimeState.Stopped
+                                },
                             checking = checking,
                             sessionKey = sessionKey,
                             auth = auth,
@@ -489,7 +534,10 @@ internal fun CoCodeApp(
                             onExit = {
                                 nav.closeIfResumed(entry)
                             },
-                            onStartLocal = local::startOrRetry,
+                            // Start on another server's page switches to it (the runtime stops the current one).
+                            onStartLocal = {
+                                if (pageKind == null || pageIsActive) local.startOrRetry() else local.selectServer(pageKind)
+                            },
                             onSystemBarColor = { webBarColor = it },
                             // This instance's own last page, applied when its page is loaded fresh
                             // (switching instances or a cold launch), and only if the server still
@@ -517,6 +565,10 @@ internal fun CoCodeApp(
                 LaunchCover()
             }
         }
+
+        // CoCode's own GitHub release check, apart from the T3 Code runtime updates. It never waits
+        // on the launch; its dialog appears over Home or a server's page once the cover is gone.
+        AppUpdatePrompt(ready = stage == LaunchStage.Done)
     }
 }
 
@@ -530,6 +582,8 @@ internal fun CoCodeApp(
  * the cover; [onReveal] drops the cover early, when detection is slow.
  */
 private suspend fun openLocalOnLaunch(
+    /** The local server the user last had open, if any; only reopened while it is installed. */
+    remembered: ServerKind?,
     runtime: LocalRuntimeController,
     nav: NavHostController,
     lifecycle: Lifecycle,
@@ -558,16 +612,22 @@ private suspend fun openLocalOnLaunch(
     // A launch starts from Home; any chat page already in front is left alone.
     val from = nav.currentBackStackEntry?.destination?.route
     if (from != Routes.HOME) return
+    // The remembered server only when it is installed; otherwise the active one. Not-installed never.
+    val servers = runtime.servers.value
+    val kind = localKindToOpen(remembered, servers) ?: return
     // Decide on the state as it is now; it may have moved on while the screens came up.
     when (launchTarget(runtime.state.value)) {
-        LaunchTarget.StartAndOpenLocal -> {
-            // If the start can't even be requested, Home shows the server as stopped, with Start.
-            if (runCatching { local.start() }.isFailure) return
-        }
-        LaunchTarget.OpenLocal -> Unit
+        LaunchTarget.StartAndOpenLocal, LaunchTarget.OpenLocal ->
+            if (kind != servers.active) {
+                // The other installed server: the runtime switches (stops the current one, starts this).
+                if (runCatching { local.selectServer(kind) }.isFailure) return
+            } else if (launchTarget(runtime.state.value) == LaunchTarget.StartAndOpenLocal) {
+                // If the start can't even be requested, Home shows the server as stopped, with Start.
+                if (runCatching { local.start() }.isFailure) return
+            }
         LaunchTarget.Home, LaunchTarget.Wait -> return
     }
-    nav.navigate(Routes.web(ServerTarget.LOCAL_ID)) {
+    nav.navigate(Routes.web(kind.localTargetId)) {
         launchSingleTop = true
     }
     if (underCover) {

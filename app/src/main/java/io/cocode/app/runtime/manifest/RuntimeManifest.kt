@@ -14,6 +14,7 @@ data class RuntimeManifest(
     val alpineVersion: String,
     val port: Int,
     val t3: T3Spec,
+    val openchamber: OpenChamberSpec = OpenChamberSpec(),
     val agents: List<AgentSpec>,
     val architectures: Map<String, RuntimeArchitecture>,
 ) {
@@ -34,6 +35,7 @@ data class RuntimeManifest(
         require(architectures.isNotEmpty()) { "Runtime manifest has no architectures" }
         architectures.forEach { (abi, item) -> item.validate(abi) }
         t3.validate()
+        openchamber.validate()
         require(t3.architectures.keys.containsAll(architectures.keys)) {
             "T3 Code has no bundle for: ${architectures.keys - t3.architectures.keys}"
         }
@@ -75,6 +77,32 @@ data class T3Spec(
         val TAG = Regex("""^v(\d+\.\d+\.\d+-pw\.\d+)$""")
         val VERSION = Regex("""^\d+\.\d+\.\d+-pw\.\d+$""")
         val REPOSITORY = Regex("""^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$""")
+    }
+}
+
+/** The on-device OpenChamber server, installed from npm. */
+@Serializable
+data class OpenChamberSpec(
+    val npmPackage: String = "@openchamber/web",
+    /** Bundled fallback when the registry cannot be reached during setup. */
+    val version: String = "2.5.3",
+    /** Fixed loopback port; must match [io.cocode.app.runtime.ServerKind.OpenChamber]. */
+    val port: Int = 3000,
+    /** Guest path of the CLI, after the npm global prefix. */
+    val cliPath: String = "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js",
+    /** Guest path of the built web UI. */
+    val uiPath: String = "/usr/local/lib/node_modules/@openchamber/web/dist/index.html",
+) {
+    fun validate() {
+        require(npmPackage.isNotBlank()) { "OpenChamber npm package is missing" }
+        require(VERSION.matches(version)) { "Invalid OpenChamber version: $version" }
+        require(port in 1024..65535) { "Invalid OpenChamber port: $port" }
+        require(cliPath.startsWith("/usr/local/lib/node_modules/")) { "Invalid OpenChamber CLI path: $cliPath" }
+        require(uiPath.startsWith("/usr/local/lib/node_modules/")) { "Invalid OpenChamber UI path: $uiPath" }
+    }
+
+    private companion object {
+        val VERSION = Regex("""^\d+(\.\d+)+$""")
     }
 }
 

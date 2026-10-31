@@ -9,11 +9,13 @@ import java.io.File
  * Order matters and is fixed:
  *  1. the persistent private home over /root,
  *  2. the project binds: `~/projects` and, in Active mode, `~/projects-private`,
- *  3. the whole shared OpenCode folder over `~/.config/opencode` (Active only),
- *  4. private exceptions nested on top of that folder: service.json, service.json.tmp, node_modules.
+ *  3. the shared config folders: OpenCode over `~/.config/opencode`, Codex over `~/.codex`, Claude
+ *     over `~/.claude` (full directories, so atomic config and credential saves land in shared),
+ *  4. private exceptions nested on top of the OpenCode folder: service.json, service.json.tmp,
+ *     node_modules.
  *
- * Step 4 must come after step 3, otherwise the directory bind would hide the private files. The server's
- * working directory is always `~` (see ProotCommands).
+ * Step 4 must come after step 3, otherwise the directory bind would hide the private files. The
+ * server's working directory is always `~` (see ProotCommands).
  */
 data class GuestBinds(
     /** Persistent private home, bound over /root. Always present. */
@@ -24,8 +26,12 @@ data class GuestBinds(
     val privateProjectsHostPath: File?,
     /** Shared OpenCode config folder, bound over the guest config dir. Null when shared config is off. */
     val sharedOpencodeHostPath: File?,
-    /** Private exceptions nested over the shared folder: (host path, guest path). Empty when off. */
+    /** OpenCode private exceptions nested over the shared folder: (host path, guest path). */
     val privateExceptions: List<Pair<File, String>>,
+    /** Shared Codex folder, bound over `~/.codex`. Null when shared config is off. */
+    val sharedCodexHostPath: File? = null,
+    /** Shared Claude folder, bound over `~/.claude`. Null when shared config is off. */
+    val sharedClaudeHostPath: File? = null,
 ) {
     /** Ordered `host:guest` specs for PRoot `-b`, following the fixed order above. */
     fun specs(): List<String> =
@@ -34,6 +40,8 @@ data class GuestBinds(
             add("${projectsHostPath.absolutePath}:${SharedStorageLayout.GUEST_PROJECTS}")
             privateProjectsHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_PRIVATE_PROJECTS}") }
             sharedOpencodeHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_OPENCODE_CONFIG}") }
+            sharedCodexHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_CODEX_CONFIG}") }
+            sharedClaudeHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_CLAUDE_CONFIG}") }
             privateExceptions.forEach { (host, guest) -> add("${host.absolutePath}:$guest") }
         }
 
@@ -48,12 +56,34 @@ data class GuestBinds(
             privateProjectsHostPath = null,
             sharedOpencodeHostPath = null,
             privateExceptions = emptyList(),
+            sharedCodexHostPath = null,
+            sharedClaudeHostPath = null,
         )
 
         /**
-         * Shared: ~/projects is the shared projects folder, ~/projects-private the private workspace, and
-         * the shared opencode folder over ~/.config/opencode with the private exceptions on top.
-         * [privateExceptionsDir] holds the empty placeholder files and the node_modules directory.
+         * Off, but with the OpenCode private exceptions nested over the private config folder. This
+         * keeps service.json/service.json.tmp/node_modules in one canonical place when the switch is
+         * toggled: the running server reads and writes the same private files in both modes.
+         */
+        fun privateWithOpencodeExceptions(
+            home: File,
+            privateWorkspace: File,
+            privateExceptionsDir: File,
+            nodeModulesHostPath: File = File(privateExceptionsDir, SharedStorageLayout.NODE_MODULES),
+        ) = GuestBinds(
+            homeHostPath = home,
+            projectsHostPath = privateWorkspace,
+            privateProjectsHostPath = null,
+            sharedOpencodeHostPath = null,
+            privateExceptions = SharedStorageLayout.opencodePrivateExceptions(privateExceptionsDir, nodeModulesHostPath),
+            sharedCodexHostPath = null,
+            sharedClaudeHostPath = null,
+        )
+
+        /**
+         * Shared: ~/projects is the shared projects folder, ~/projects-private the private workspace,
+         * and the whole OpenCode, Codex and Claude folders over their guest config dirs.
+         * [privateExceptionsDir] holds the OpenCode private files (service.json and node_modules).
          */
         fun shared(
             home: File,
@@ -61,20 +91,19 @@ data class GuestBinds(
             sharedProjects: File,
             sharedOpencode: File,
             privateExceptionsDir: File,
+            nodeModulesHostPath: File = File(privateExceptionsDir, SharedStorageLayout.NODE_MODULES),
+            sharedCodex: File? = null,
+            sharedClaude: File? = null,
         ): GuestBinds {
-            val guestConfig = SharedStorageLayout.GUEST_OPENCODE_CONFIG
-            val exceptions =
-                listOf(SharedStorageLayout.SERVICE_FILE, SharedStorageLayout.SERVICE_TMP).map { name ->
-                    File(privateExceptionsDir, name) to "$guestConfig/$name"
-                } +
-                    (File(privateExceptionsDir, SharedStorageLayout.NODE_MODULES) to
-                        "$guestConfig/${SharedStorageLayout.NODE_MODULES}")
+            val exceptions = SharedStorageLayout.opencodePrivateExceptions(privateExceptionsDir, nodeModulesHostPath)
             return GuestBinds(
                 homeHostPath = home,
                 projectsHostPath = sharedProjects,
                 privateProjectsHostPath = privateWorkspace,
                 sharedOpencodeHostPath = sharedOpencode,
                 privateExceptions = exceptions,
+                sharedCodexHostPath = sharedCodex,
+                sharedClaudeHostPath = sharedClaude,
             )
         }
     }

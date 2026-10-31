@@ -8,7 +8,9 @@ import io.cocode.app.runtime.RuntimeInfo
 import io.cocode.app.runtime.RuntimeOperation
 import io.cocode.app.runtime.RuntimeState
 import io.cocode.app.runtime.RuntimeUpdateState
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
+import io.cocode.app.runtime.ServersState
 import io.cocode.app.runtime.SharedStorageController
 import io.cocode.app.runtime.SharedStorageState
 import io.cocode.app.runtime.SharedStorageStatus
@@ -26,6 +28,7 @@ internal class FakeRuntimeController(
     info: RuntimeInfo? = PreviewData.info,
     log: List<String> = PreviewData.log,
     updates: RuntimeUpdateState = RuntimeUpdateState(),
+    servers: ServersState = PreviewData.localServers,
 ) : LocalRuntimeController {
     private val mutableState = MutableStateFlow(initial)
     override val state: StateFlow<RuntimeState> = mutableState.asStateFlow()
@@ -46,6 +49,20 @@ internal class FakeRuntimeController(
 
     override fun setAgents(selected: Set<String>) {
         mutableAgents.value = mutableAgents.value.copy(selected = selected)
+    }
+
+    private val mutableServers = MutableStateFlow(servers)
+    override val servers: StateFlow<ServersState> = mutableServers.asStateFlow()
+
+    override fun setServers(selected: Set<ServerKind>) {
+        if (selected.isEmpty()) return
+        mutableServers.value = mutableServers.value.copy(selected = selected)
+    }
+
+    override fun selectServer(kind: ServerKind) {
+        if (kind !in mutableServers.value.installed) return
+        mutableServers.value = mutableServers.value.copy(active = kind)
+        mutableState.value = PreviewData.running
     }
 
     override fun checkForUpdates() = Unit
@@ -87,6 +104,7 @@ internal class FakeRuntimeController(
             RuntimeOperation.Restart -> restart()
             RuntimeOperation.Update -> update()
             RuntimeOperation.ApplyAgents -> setAgents(agents.value.selected)
+            RuntimeOperation.ApplyServers, RuntimeOperation.SelectServer -> Unit
         }
     }
 
@@ -151,6 +169,14 @@ internal object PreviewData {
             nodeVersion = "24.14.0",
             diskUsageBytes = 1_262_485_504L,
             freeSpaceBytes = 38_654_705_664L,
+        )
+
+    /** Both servers installed, T3 Code in use. */
+    val localServers =
+        ServersState(
+            selected = setOf(ServerKind.T3, ServerKind.OpenChamber),
+            installed = mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "1.4.0"),
+            active = ServerKind.T3,
         )
 
     val agents =

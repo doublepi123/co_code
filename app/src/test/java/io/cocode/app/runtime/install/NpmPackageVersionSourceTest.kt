@@ -1,5 +1,6 @@
 package io.cocode.app.runtime.install
 
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.manifest.AgentSpec
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -123,5 +124,42 @@ class NpmPackageVersionSourceTest {
 
             assertEquals("0.1.6-pw.5", latest.t3)
             assertEquals(mapOf("codex" to "0.167.0"), latest.agents)
+        }
+
+    @Test
+    fun `an OpenChamber-only pinned set never asks the T3 release source`() =
+        runBlocking {
+            var t3Calls = 0
+            val t3 =
+                object : T3ReleaseSource {
+                    override suspend fun latest(): T3Release? {
+                        t3Calls++
+                        error("T3 must not be fetched for an OC-only update")
+                    }
+
+                    override suspend fun sha256Sums(release: T3Release): Map<String, String> = emptyMap()
+                }
+            server.enqueue(MockResponse().setBody(metadata("2.5.3", "2.5.4")))
+            val combined =
+                DefaultPackageVersionSource(
+                    npm = source(),
+                    t3 = t3,
+                    agents = emptyList(),
+                    fallbackT3Version = "0.1.6-pw.5",
+                    openChamberPackage = "@openchamber/web",
+                )
+
+            val latest =
+                combined.latest(
+                    PackageVersions(
+                        t3 = "0.1.6-pw.5",
+                        agents = emptyMap(),
+                        servers = mapOf(ServerKind.OpenChamber to "2.5.3"),
+                    ),
+                )
+
+            assertEquals(0, t3Calls)
+            assertEquals("0.1.6-pw.5", latest.t3)
+            assertEquals(mapOf(ServerKind.OpenChamber to "2.5.4"), latest.servers)
         }
 }

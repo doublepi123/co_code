@@ -1,6 +1,7 @@
 package io.cocode.app.ui.web
 
 import io.cocode.app.data.canonicalWebOrigin
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.ServerTarget
 import io.cocode.app.runtime.WebSessionIdentity
 import org.junit.Assert.assertEquals
@@ -14,8 +15,8 @@ import org.junit.Test
 class WebViewSlotTest {
     @Test
     fun `the local target owns the local slot`() {
-        assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.LOCAL_ID))
         assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.Local("http://localhost:49152").id))
+        assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.Local("http://localhost:49153", ServerKind.OpenChamber).id))
     }
 
     @Test

@@ -8,6 +8,8 @@ Files:
 - `CoCodeApp.kt`: `CoCodeApp(...)` root, `Routes`, `LocalActions`, launch and record-keeping coroutines.
 - `LaunchDecision.kt`: pure rules (`launchTarget`, `resumeTarget`, `initialLaunchStage`, `shownLocalState`, `sanitizedPagePath`). No Android or Compose imports (okhttp only, via `canonicalWebOrigin`), so unit tests call them directly.
 - `LaunchFlow.kt`: launch timing constants, `UiPrefs`, `LaunchCover`, `isLauncherLaunch()`.
+- `LocalServers.kt`: on-device target ids (`local-t3`, `local-openchamber`; legacy `local` = T3 Code), `localKindOf`, `isLocalTargetId`, `migratedTargetId`, `ServersState.openableKind()` (active, or the installed one; never a non-installed server), `ServerKind.label()`.
+- `AppUpdatePrompt.kt`: `AppUpdatePrompt` (CoCode's own GitHub release check: one process-wide `update.AppReleaseChecker` on `BuildConfig.VERSION_NAME`, checked on every `ON_START`, dialog over Home or a server page once the launch cover is gone), `AppUpdateDialog` (Later / View release, which opens the official https GitHub release page in the browser; nothing is downloaded or installed), `releaseNotesPreview` (Markdown notes as short plain text).
 - `SystemUi.kt`: `findActivity()`, `SystemBarsEffect`, `WindowBackgroundEffect`.
 - `ScreenAwake.kt`: opt-in local-runtime screen hold. `ScreenAwakeController` shares `ui_prefs` with `UiPrefs` and exposes the setting and recorded target as StateFlows; `MainActivity` combines them with runtime and lifecycle state and sets `FLAG_KEEP_SCREEN_ON` only while Running, foreground and not on a remote page. No WakeLock.
 - `StorageAccess.kt`: `rememberStorageAccessRequest`, `hasStorageAccess`.
@@ -34,7 +36,7 @@ Files:
 Cold launch to the last used T3 Code:
 0. `resumeTarget(rememberedId, remoteIds)` picks the instance: a remembered remote opens it directly (no detection wait, no local start); a remembered remote that no longer exists falls back to local; otherwise the local logic below runs. The launch cover covers a remote resume from frame one (`remoteResume`). The instance's remembered page (`page_path:<id>`) is loaded only if the target's canonical origin still matches `page_origin:<id>`.
 1. `CoCodeApp` composes with `launchPending = true`. `initialLaunchStage` yields `Waiting` (Detecting, auto-open on), `Opening` (Running, Starting or Stopped, auto-open on, or a remembered remote), or `Done`.
-2. `Waiting` shows only `LaunchCover` (background plus `ChamberMark`). `NavHost` is not composed yet.
+2. `Waiting` shows only `LaunchCover` (background plus `CoCodeMark`). `NavHost` is not composed yet.
 3. `openLocalOnLaunch` waits for `state != Detecting`, up to `LAUNCH_DETECT_TIMEOUT_MS` (8 s). On timeout it reveals Home (stage `Done`) and keeps waiting.
 4. `launchTarget` returns `Home`: stage `Done`, return. Otherwise `onOpening()` sets `Opening`, composing `NavHost` under the cover.
 5. Waits up to `NAV_READY_TIMEOUT_MS` (2 s) for the back stack, then for `RESUMED` (a service start needs the foreground). Checks the top route is still Home.
@@ -69,3 +71,10 @@ Shared-storage permission:
 - `runtime.SharedStorageController`: `state` flow, `setEnabled`, `refreshPermission`. Drives `SharedStorageState` and `SharedStorageStatus`.
 - `i18n.UserMessages.stepLabel(InstallStep)` maps install steps to `R.string`.
 - All user-facing text is `R.string` and `R.plurals`, resolved with `stringResource` in composition or `context.getString` in WebView callbacks.
+
+## Local servers
+
+- `CoCodeApp` collects `runtime.servers`. Home opens `Routes.web(active.localTargetId)`. The web route builds `ServerTarget.Local(url, kind)` only for the active kind; another local server's page shows it as stopped and its Start calls `selectServer`. Session keys include the kind.
+- Launch: `ResumeTarget.Local(kind)` remembers which local server was open; `localKindToOpen` reopens it only while installed (switching via `selectServer` instead of starting the old one), else the active one.
+- `UiPrefs` migrates the legacy `local` last-target and page to `local-t3` once. Pages are kept per unique target id.
+- `WebViewSlot.of` puts both local ids in the Local slot: one pooled WebView, rebound (destroyed and recreated) per identity, so each server keeps its own profile and cookies.

@@ -8,7 +8,12 @@
 
 **CoCode runs a coding-agent server locally on an Android phone — no computer, no root.**
 
-CoCode is derived from AndChamber (MIT). The on-device runtime starts the T3 Code server (port 3773) inside Alpine Linux under PRoot (no root) and installs the coding-agent CLIs you select from npm. A foreground service keeps the server running, each WebView profile signs in separately, and remote T3 Code servers, shared storage and downloads are also supported.
+CoCode is derived from AndChamber (MIT). Install **T3 Code, OpenChamber, or both** in one Alpine Linux environment under PRoot (no root). One server runs at a time; switching requires confirmation before stopping the current server. They share the guest home, projects and OpenCode configuration, but keep separate passwords, WebView profiles and server data. Both remote server types are supported too.
+
+- **Pick your agents**: Codex, Claude Code and OpenCode. Adding one preserves the others; removal needs confirmation. OpenCode is marked required when OpenChamber needs it.
+- **App update prompt**: checks this project's GitHub Releases on opening, including 0.x prereleases, and offers the download page. No automatic installation or task interruption.
+- **Distinct icon**: a phone with a terminal prompt, not the AndChamber cube.
+- No phone-control or browser-control tools.
 
 Runtime errors are notified natively; agent notifications from the web UI are not implemented yet.
 
@@ -19,11 +24,29 @@ Runtime errors are notified natively; agent notifications from the web UI are no
 | Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
 | Node.js | Alpine 24.x |
 | T3 Code server | GitHub release from `doublepi123/t3code`, default 0.1.6-pw.5 |
+| OpenChamber server (optional) | npm `@openchamber/web`, latest at install time |
 | Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode); latest at install time |
 | PRoot | locally built 5.1.107.98 |
-| Port | 3773 (loopback only) |
+| Ports | T3 Code 3773, OpenChamber 3000 (loopback only) |
 
-`opencode/` in the shared `CoCode/` folder is still bound to `~/.config/opencode`; `projects/` is bound to `~/projects`.
+### Shared folders (optional)
+
+After explicit consent and storage permission, these directories are live-bound. Restart the server to apply binding changes.
+
+| Under `/sdcard/CoCode/` | Guest path |
+|---|---|
+| `projects/` | `~/projects` |
+| `opencode/` | `~/.config/opencode` |
+| `codex/` | `~/.codex` (entire directory) |
+| `claude/` | `~/.claude` (entire directory) |
+
+**Privacy warning: Codex and Claude login credentials, sessions and history are public too. Other storage-authorized apps can read or copy credentials and access your accounts. Enabling requires acknowledging this risk.** Configuration files may also contain API keys.
+
+First enable copies existing files without overwriting shared files or deleting private originals. Disabling does not copy changes back: the older private copies become visible and may be stale. Public data remains; re-enable to use it again. Shared storage cannot preserve symbolic links or executable permissions; use `~/projects-private` for projects needing them.
+
+Upgrading with sharing already enabled preserves the older projects/OpenCode-only mappings until the new credential-sharing warning is acknowledged. Migration retains private originals and uses private snapshots and recovery records for interrupted writes. Existing public files are not replaced, and incomplete copies are not silently accepted as successful migrations.
+
+`~/.claude.json`, OpenCode's `~/.local/share/opencode`, service secrets, plugin `node_modules`, and both servers' data remain private. Sharing OpenCode configuration between the two servers does not require public storage.
 
 ## Build
 

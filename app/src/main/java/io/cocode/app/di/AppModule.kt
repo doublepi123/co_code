@@ -17,8 +17,10 @@ import io.cocode.app.runtime.DefaultLocalRuntimeController
 import android.system.Os
 import io.cocode.app.runtime.ForegroundStarter
 import io.cocode.app.runtime.PrefsAgentSelectionStore
+import io.cocode.app.runtime.PrefsServerSelectionStore
 import io.cocode.app.runtime.process.ProcessScanner
-import io.cocode.app.runtime.process.T3Server
+import io.cocode.app.runtime.process.RuntimeServer
+import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.process.killOwnedRuntime
 import io.cocode.app.runtime.SharedStorageController
 import io.cocode.app.runtime.storage.PrefsSharedStoragePrefs
@@ -44,7 +46,7 @@ import io.cocode.app.runtime.install.VerifiedRuntimeDownloader
 import io.cocode.app.runtime.manifest.RuntimeManifestReader
 import io.cocode.app.runtime.process.EmbeddedCommandSuite
 import io.cocode.app.runtime.process.HealthProbe
-import io.cocode.app.runtime.process.ProotT3Server
+import io.cocode.app.runtime.process.ProotRuntimeServer
 import io.cocode.app.runtime.process.ProotStaleServerCleaner
 import io.cocode.app.ui.ScreenAwakeController
 import io.cocode.app.ui.UiPrefs
@@ -107,41 +109,44 @@ val appModule =
 
         single<SharedStorageController> { get<SharedStorageControllerImpl>() }
 
-        // One long-lived server.
-        single<T3Server> {
+        // Shared environment, distinct process identities. The controller runs only one at a time.
+        single<Map<ServerKind, RuntimeServer>> {
             val context = get<Context>()
             val paths = RuntimePaths.under(context.filesDir)
             val nativeDir = File(context.applicationInfo.nativeLibraryDir)
             val suite = { EmbeddedCommandSuite(nativeDir, paths).resolve() }
             val scanner = ProcessScanner(myUid = Os.getuid(), myPid = Os.getpid().toLong())
             val storage = get<SharedStorageControllerImpl>()
-            ProotT3Server(
-                paths = paths,
-                suite = suite,
-                health = HealthProbe.Loopback,
-                scanner = scanner,
-                signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
-                refreshDns = { runtime -> ResolvConf.write(runtime.rootfs, AndroidSystemDnsProvider(context).dnsServers()) },
-                dnsMonitor =
-                    DnsRefresherMonitor(
-                        DnsRefresher(
-                            dnsProvider = AndroidSystemDnsProvider(context),
-                            events = AndroidNetworkEvents(context),
-                            reporter = RuntimeDnsReporter { message -> Log.w("CoCodeDns", message) },
+            ServerKind.entries.associateWith { kind ->
+                ProotRuntimeServer(
+                    paths = paths,
+                    kind = kind,
+                    suite = suite,
+                    health = HealthProbe.loopback(kind),
+                    scanner = scanner,
+                    signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
+                    refreshDns = { runtime -> ResolvConf.write(runtime.rootfs, AndroidSystemDnsProvider(context).dnsServers()) },
+                    dnsMonitor =
+                        DnsRefresherMonitor(
+                            DnsRefresher(
+                                dnsProvider = AndroidSystemDnsProvider(context),
+                                events = AndroidNetworkEvents(context),
+                                reporter = RuntimeDnsReporter { message -> Log.w("CoCodeDns", message) },
+                            ),
                         ),
-                    ),
-                cleanBeforeStart = { port, proot ->
-                    ProotStaleServerCleaner(
-                        paths = paths,
-                        scanner = scanner,
-                        signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
-                        isPortFree = HealthProbe.Companion::isPortFree,
-                    ).cleanBeforeStart(port, proot)
-                },
-                bindsForStart = { storage.prepareForStart() },
-                onStarted = { binds -> storage.recordStarted(binds) },
-                onStopped = { storage.recordStopped() },
-            )
+                    cleanBeforeStart = { port, proot ->
+                        ProotStaleServerCleaner(
+                            paths = paths,
+                            scanner = scanner,
+                            signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
+                            isPortFree = HealthProbe.Companion::isPortFree,
+                        ).cleanBeforeStart(port, proot)
+                    },
+                    bindsForStart = { storage.prepareForStart() },
+                    onStarted = { binds -> storage.recordStarted(binds) },
+                    onStopped = { storage.recordStopped() },
+                )
+            }
         }
 
         single<LocalRuntimeController> {
@@ -178,11 +183,14 @@ val appModule =
                 paths = paths,
                 abi = abi,
                 installer = installer,
-                server = get<T3Server>(),
-                health = HealthProbe.Loopback,
+                serverFor = { kind -> get<Map<ServerKind, RuntimeServer>>().getValue(kind) },
+                healthFor = { kind -> HealthProbe.loopback(kind) },
                 uiPassword = RuntimeSecrets::uiPassword,
                 manifestAgents = manifest.agents,
                 selectionStore = agentSelection,
+                serverSelectionStore = PrefsServerSelectionStore.open(
+                    context.getSharedPreferences(PrefsServerSelectionStore.FILE, Context.MODE_PRIVATE),
+                ),
                 pinnedT3Version = manifest.t3.version,
                 foregroundStarter = ForegroundStarter { op -> RuntimeService.request(context, op) },
                 killOwned = {
@@ -196,6 +204,7 @@ val appModule =
                         t3 = GithubT3ReleaseSource(get<OkHttpClient>(), manifest.t3.repository),
                         agents = manifest.agents,
                         fallbackT3Version = manifest.t3.version,
+                        openChamberPackage = manifest.openchamber.npmPackage,
                     ),
             ).also { it.initialize() }
         }
@@ -204,8 +213,14 @@ val appModule =
             val paths = RuntimePaths.under(get<Context>().filesDir)
             DefaultWebSessionAuthenticator(
                 client = get(),
-                localPassword = { RuntimeSecrets.existingUiPassword(paths) },
-                localReady = LocalReadiness { get<T3Server>().readyLaunchId() },
+                localPassword = { kind -> RuntimeSecrets.existingUiPassword(paths, kind) },
+                localReady = LocalReadiness { kind ->
+                    if (get<LocalRuntimeController>().servers.value.active == kind) {
+                        get<Map<ServerKind, RuntimeServer>>().getValue(kind).readyLaunchId()
+                    } else {
+                        null
+                    }
+                },
             )
         }
     }

@@ -27,13 +27,42 @@ class RuntimePaths(
     val prootTmp: File get() = File(root, "proot-tmp")
     val commandSuite: File get() = File(root, "command-suite")
     val metadataFile: File get() = File(environment, METADATA_FILE_NAME)
-    val uiPasswordFile: File get() = File(root, UI_PASSWORD_FILE_NAME)
+
+    /** T3 Code's UI password, the historical location. Use [uiPasswordFile] for another kind. */
+    val uiPasswordFile: File get() = uiPasswordFile(ServerKind.T3)
+
+    /** Per-server UI password file. A password is never shared between kinds. */
+    fun uiPasswordFile(kind: ServerKind): File = File(root, kind.uiPasswordFileName)
+
     val installLog: File get() = File(logs, "install.log")
-    val serverLog: File get() = File(logs, "t3.log")
+
+    /** T3 Code's log, the historical location. [kind] selects the server's own log. */
+    val serverLog: File get() = serverLog(ServerKind.T3)
+
+    /** Per-server log file. T3 keeps its historical `t3.log` name, so existing data stays readable. */
+    fun serverLog(kind: ServerKind): File = File(logs, kind.serverLogFileName)
+
+    private val ServerKind.serverLogFileName: String
+        get() =
+            when (this) {
+                ServerKind.T3 -> T3_LOG_FILE_NAME
+                ServerKind.OpenChamber -> OPENCHAMBER_LOG_FILE_NAME
+            }
+
+    private val ServerKind.uiPasswordFileName: String
+        get() =
+            when (this) {
+                // Preserved verbatim: existing installations already store their T3 password here.
+                ServerKind.T3 -> UI_PASSWORD_FILE_NAME
+                ServerKind.OpenChamber -> OPENCHAMBER_UI_PASSWORD_FILE_NAME
+            }
 
     companion object {
         const val METADATA_FILE_NAME = "metadata.json"
         const val UI_PASSWORD_FILE_NAME = "ui-password"
+        const val OPENCHAMBER_UI_PASSWORD_FILE_NAME = "openchamber-ui-password"
+        const val T3_LOG_FILE_NAME = "t3.log"
+        const val OPENCHAMBER_LOG_FILE_NAME = "openchamber.log"
 
         fun under(filesDir: File): RuntimePaths = RuntimePaths(File(filesDir, "runtime"))
     }

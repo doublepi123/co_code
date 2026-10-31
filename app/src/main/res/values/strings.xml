@@ -40,8 +40,7 @@
     <string name="section_servers">On other computers</string>
 
     <!-- Local runtime card -->
-    <string name="local_title">T3 Code</string>
-    <string name="local_subtitle">Local server</string>
+    <string name="local_subtitle">On this phone</string>
     <string name="status_checking">Checking</string>
     <string name="status_not_set_up">Not set up</string>
     <string name="status_setting_up">Setting up</string>
@@ -53,8 +52,8 @@
     <string name="status_problem">Problem</string>
     <string name="status_unsupported">Not supported</string>
 
-    <string name="setup_intro">Installs a small Linux system on this phone and runs T3 Code with your coding agents inside it. Your projects and sessions stay on the device.</string>
-    <string name="setup_fact_contents">Alpine Linux, Node.js, Git, T3 Code and agent CLIs</string>
+    <string name="setup_intro">Installs a small Linux system on this phone and runs T3 Code or OpenChamber with your coding agents inside it. Your projects and sessions stay on the device.</string>
+    <string name="setup_fact_contents">Alpine Linux, Node.js, Git, the servers you pick and agent CLIs</string>
     <string name="setup_fact_size">About 1.2 GB to download and store</string>
     <string name="setup_fact_wifi">Wi-Fi recommended</string>
     <string name="setup_fact_time">Takes a few minutes and keeps going in the background</string>
@@ -63,10 +62,10 @@
     <string name="set_up">Set up</string>
     <string name="step_of">Step %1$d of %2$d</string>
     <string name="setup_background_note">You can leave the app. Setup keeps going in the background and shows its progress in a notification.</string>
-    <string name="stopped_body">T3 Code is installed. Start the server to open it.</string>
+    <string name="stopped_body">%1$s is installed. Start the server to open it.</string>
     <string name="start">Start</string>
-    <string name="starting_title">Starting T3 Code…</string>
-    <string name="stopping_title">Stopping T3 Code…</string>
+    <string name="starting_title">Starting %1$s…</string>
+    <string name="stopping_title">Stopping %1$s…</string>
     <string name="open">Open</string>
     <string name="stop">Stop</string>
     <string name="uptime">Up %1$s</string>
@@ -77,12 +76,12 @@
     <string name="duration_days_hours">%1$dd %2$dh</string>
     <string name="copy_address">Copy address</string>
     <string name="copied">Copied</string>
-    <string name="failed_title">T3 Code ran into a problem</string>
+    <string name="failed_title">%1$s ran into a problem</string>
     <string name="try_again">Try again</string>
     <string name="repair">Repair</string>
     <string name="repair_explain">Repair reinstalls the Linux system. Your projects are kept when possible.</string>
     <string name="unsupported_title">Not available on this device</string>
-    <string name="unsupported_body">Running T3 Code on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a T3 Code server on your computer below.</string>
+    <string name="unsupported_body">Running a server on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a T3 Code or OpenChamber server on your computer below.</string>
     <string name="show_log">Log</string>
     <string name="details">Details</string>
     <string name="log_title">Log</string>
@@ -95,8 +94,21 @@
 
     <!-- Agent selection -->
     <string name="agents_title">Coding agents</string>
-    <string name="agents_hint">Choose at least one agent CLI to install. T3 Code finds them on PATH.</string>
+    <string name="agents_hint">Choose at least one agent CLI to install. The servers find them on PATH.</string>
     <string name="agents_apply">Apply</string>
+    <string name="agents_none_selected">Select at least one coding agent.</string>
+    <string name="agents_hint_installed">Checking an agent installs it next to the ones you have. Unchecking an installed agent and tapping Apply uninstalls it.</string>
+    <string name="agents_will_install">Will install</string>
+    <string name="agents_will_remove">Will uninstall</string>
+    <plurals name="agents_remove_title">
+        <item quantity="one">Uninstall %1$s?</item>
+        <item quantity="other">Uninstall %1$s?</item>
+    </plurals>
+    <string name="agents_remove_list">Uninstalled: %1$s</string>
+    <string name="agents_add_list">Installed: %1$s</string>
+    <string name="agents_keep_list">Kept as they are: %1$s</string>
+    <string name="agents_remove_body">Only the agents you unchecked are uninstalled; adding an agent never removes another. Their settings and sign-ins in the home folder and your projects are kept, so you can check them again later. The local server restarts if it is running.</string>
+    <string name="agents_remove_confirm">Uninstall</string>
 
     <!-- Details -->
     <string name="detail_abi">Processor</string>
@@ -112,7 +124,7 @@
     <!-- T3 Code and OpenCode updates -->
     <string name="update_available">Update available</string>
     <string name="update">Update</string>
-    <string name="updating_title">Updating T3 Code…</string>
+    <string name="updating_title">Updating on-device environment…</string>
     <string name="update_background_note">T3 Code is unavailable until the update is done. You can leave the app. The update keeps going in the background and shows its progress in a notification.</string>
     <string name="update_dialog_title">Update T3 Code?</string>
     <string name="update_dialog_body_running">T3 Code stops during the update and starts again afterwards, so running tasks are interrupted. The update downloads up to a few hundred MB and takes several minutes. Projects and settings are kept, and if anything fails, the current version keeps working.</string>
@@ -143,12 +155,12 @@
     </plurals>
 
     <!-- Shared storage -->
-    <string name="storage_title">Projects and settings folder</string>
+    <string name="storage_title">Projects and agent folders</string>
     <string name="storage_off">Off</string>
     <string name="storage_needs_access">Needs access</string>
     <string name="storage_on">On</string>
     <string name="storage_folder_name">CoCode/</string>
-    <string name="storage_intro">Keep projects and OpenCode settings in CoCode/ on your phone\'s storage, so you can edit them with a file manager or over USB.</string>
+    <string name="storage_intro">Keep projects and the OpenCode, Codex and Claude Code folders in CoCode/ on your phone\'s storage, so you can open them with a file manager or over USB. The Codex and Claude Code folders are shared in full, including sign-ins and session history.</string>
     <string name="storage_needs_all_files">CoCode needs all-files access to use this folder. You can turn it on in system settings.</string>
     <string name="storage_needs_legacy">CoCode needs access to your phone\'s storage to use this folder.</string>
     <string name="allow_access">Allow access</string>
@@ -158,25 +170,47 @@
     <string name="storage_opencode_dir">opencode/</string>
     <string name="guest_projects">~/projects</string>
     <string name="guest_private_projects">~/projects-private</string>
-    <string name="storage_opencode_target">OpenCode settings</string>
-    <string name="storage_private">Private: sessions, sign-ins, plugins, ~/projects-private</string>
+    <string name="storage_codex_dir" translatable="false">codex/</string>
+    <string name="storage_claude_dir" translatable="false">claude/</string>
+    <string name="guest_opencode" translatable="false">~/.config/opencode</string>
+    <string name="guest_codex" translatable="false">~/.codex</string>
+    <string name="guest_claude" translatable="false">~/.claude</string>
+    <string name="storage_projects_caption">Your projects</string>
+    <string name="storage_opencode_caption">OpenCode settings</string>
+    <string name="storage_codex_caption">All of Codex, including the sign-in (auth.json) and sessions</string>
+    <string name="storage_claude_caption">All of Claude Code, including the sign-in (.credentials.json) and sessions</string>
+    <string name="storage_public_warning">Codex and Claude Code sign-ins and session history are in this folder. File managers and other apps with storage access can read them and use your accounts.</string>
+    <string name="storage_kept_private">Kept inside the app: ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
+    <string name="storage_on_dialog_title">Share the agent folders, including sign-ins?</string>
+    <string name="storage_on_dialog_intro">These folders on your phone\'s storage become the real folders the agents use:</string>
+    <string name="storage_on_dialog_warning">The Codex and Claude Code folders are shared in full: their login credentials (auth.json, .credentials.json), sessions and history are stored there. File managers and other apps with storage access can read them, copy them and use your accounts.</string>
+    <string name="storage_on_dialog_rest">Your current settings and sign-ins are copied there once; nothing inside the app is deleted. Turning this off later doesn\'t copy changes back.</string>
+    <string name="storage_on_dialog_ack">I understand that other apps can read my sign-ins and sessions</string>
+    <string name="storage_on_dialog_confirm">Turn on</string>
+    <string name="storage_on_partial">On · projects and OpenCode only</string>
+    <string name="storage_public_warning_off">Turning this on puts the Codex and Claude Code sign-ins and session history in this folder. File managers and other apps with storage access can then read them and use your accounts.</string>
+    <string name="storage_consent_title">Codex and Claude Code aren\'t shared yet</string>
+    <string name="storage_consent_body">This folder was turned on in an earlier version, so only projects/ and opencode/ are shared. This version can also share the full Codex and Claude Code folders, including their sign-ins and sessions. Nothing changes until you agree.</string>
+    <string name="storage_consent_action">Review and share</string>
+    <string name="storage_kept_private_partial">Kept inside the app: ~/.codex, ~/.claude, ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
+    <string name="storage_off_dialog_body_partial">Your files stay in CoCode/ on your phone\'s storage; nothing there is deleted or copied back. From the next server start, projects and OpenCode settings come from the app again.</string>
     <string name="storage_unavailable">CoCode has access, but can\'t create CoCode/ on your phone\'s storage. Make sure the storage is available.</string>
     <string name="check_again">Check again</string>
     <string name="storage_caveat">Shared storage doesn\'t keep symlinks or executable bits — use ~/projects-private for projects that need node_modules.</string>
     <string name="copy_folder_path">Copy folder path</string>
     <string name="restart_to_apply">Restart the server to apply</string>
     <string name="restart">Restart</string>
-    <string name="storage_off_dialog_title">Stop using the shared folder?</string>
-    <string name="storage_off_dialog_body">Your files stay in CoCode/ on your phone\'s storage. From the next server start, T3 Code uses its private folders again and won\'t see them.</string>
+    <string name="storage_off_dialog_title">Stop using the shared folders?</string>
+    <string name="storage_off_dialog_body">Everything stays in CoCode/ on your phone\'s storage; nothing there is deleted or copied back. From the next server start, Codex and Claude Code use the copies inside the app again. Those are from before you turned this on, so they may be out of date: you may need to sign in again, and newer sessions and settings are only in CoCode/.</string>
     <string name="turn_off">Turn off</string>
     <string name="cant_open_settings">Couldn\'t open system settings</string>
 
     <!-- Runtime dialogs -->
     <string name="repair_dialog_title">Repair the Linux system?</string>
-    <string name="repair_dialog_body">This stops T3 Code, deletes the Linux system and installs it again, which downloads about 1.2 GB. Your projects are kept when possible.</string>
+    <string name="repair_dialog_body">This stops the local server, deletes the Linux system and installs it again with the servers and agents you picked, which downloads about 1.2 GB. Your projects are kept when possible.</string>
     <string name="uninstall_dialog_title">Uninstall the local server?</string>
-    <string name="uninstall_dialog_body">This stops T3 Code and deletes the Linux system from this phone, including projects, sessions and settings stored inside it. Saved servers are not affected.</string>
-    <string name="uninstall_dialog_body_shared">This stops T3 Code and deletes the Linux system from this phone, including everything stored inside it. The CoCode/ folder on your phone\'s storage is kept. Saved servers are not affected.</string>
+    <string name="uninstall_dialog_body">This stops the local server and deletes the Linux system from this phone, including both servers, projects, sessions and settings stored inside it. Saved servers are not affected.</string>
+    <string name="uninstall_dialog_body_shared">This stops the local server and deletes the Linux system from this phone, including everything stored inside it. The CoCode/ folder on your phone\'s storage is kept, including the Codex and Claude Code sign-ins and sessions in it. Saved servers are not affected.</string>
     <string name="cancel">Cancel</string>
 
     <!-- Remote servers -->
@@ -184,7 +218,7 @@
     <string name="add">Add</string>
     <string name="edit_server">Edit server</string>
     <string name="empty_servers_title">Connect to your computer</string>
-    <string name="empty_servers_body">Add the address of a T3 Code server on your computer or network, for example 192.0.2.20:3773.</string>
+    <string name="empty_servers_body">Add the address of a T3 Code or OpenChamber server on your computer or network, for example 192.0.2.20:3773.</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>
     <string name="more_options">More options</string>
@@ -216,9 +250,9 @@
 
     <!-- Web screen -->
     <string name="connecting_to">Connecting to %1$s</string>
-    <string name="opening_local">Opening T3 Code</string>
+    <string name="opening_local">Opening %1$s</string>
     <string name="cant_reach">Can\'t reach %1$s</string>
-    <string name="cant_reach_local">Can\'t open T3 Code</string>
+    <string name="cant_reach_local">Can\'t open %1$s</string>
     <string name="server_fallback_name">the server</string>
     <string name="connection_failed">The connection failed</string>
     <string name="repair_from_home">Open the home screen to repair the Linux system.</string>
@@ -229,10 +263,10 @@
     <string name="reload">Reload</string>
     <string name="open_in_browser">Open in browser</string>
     <string name="page_failed_title">The page didn\'t load</string>
-    <string name="local_stopped_title">T3 Code stopped</string>
+    <string name="local_stopped_title">%1$s stopped</string>
     <string name="local_stopped_body">The server on this device isn\'t running.</string>
-    <string name="local_failed_title">T3 Code stopped unexpectedly</string>
-    <string name="local_start_failed_title">T3 Code didn\'t start</string>
+    <string name="local_failed_title">%1$s stopped unexpectedly</string>
+    <string name="local_start_failed_title">%1$s didn\'t start</string>
     <string name="local_setup_failed_title">Setup didn\'t finish</string>
     <string name="start_again">Start again</string>
     <string name="local_not_set_up_title">The local server isn\'t set up</string>
@@ -255,14 +289,14 @@
     <string name="web_isolation_failed_body">CoCode couldn\'t give this server its own separate storage, so the page isn\'t opened. Try again, or update Android System WebView.</string>
     <string name="web_bad_address_title">Can\'t open this address</string>
     <string name="web_bad_address_body">Edit the server\'s address on the home screen. It must start with http:// or https:// and can\'t include a user name or password.</string>
-    <string name="web_local_keeps_running">T3 Code keeps running on this phone. The home screen works as before.</string>
+    <string name="web_local_keeps_running">%1$s keeps running on this phone. The home screen works as before.</string>
 
     <!-- Install steps -->
     <string name="step_download_rootfs">Download the Linux base</string>
     <string name="step_extract_rootfs">Unpack the Linux base</string>
     <string name="step_install_packages">Install system packages</string>
     <string name="step_copy_environment">Copy the current Linux system</string>
-    <string name="step_install_server">Install T3 Code</string>
+    <string name="step_install_server">Install selected servers</string>
     <string name="step_install_agents">Install agent CLIs</string>
     <string name="step_verify">Check the installation</string>
 
@@ -301,4 +335,35 @@
     <!-- Mouse mode status while any accessibility service is on. Keep it within two lines of the small window. -->
 
     <!-- %1$s: the exact address that will be opened, e.g. https://example.com -->
+
+    <!-- CoCode app update (GitHub releases) -->
+    <string name="app_update_title">CoCode %1$s is available</string>
+    <string name="app_update_body">A newer version of CoCode has been released. Download the APK from the release page and install it over this one; your servers, projects and settings are kept.</string>
+    <string name="app_update_notes">What\'s new</string>
+    <string name="app_update_later">Later</string>
+    <string name="app_update_view">View release</string>
+
+    <!-- Local servers (T3 Code / OpenChamber). Product names are not translated. -->
+    <string name="server_t3" translatable="false">T3 Code</string>
+    <string name="server_openchamber" translatable="false">OpenChamber</string>
+    <string name="servers_title">Servers</string>
+    <string name="servers_hint">Pick one or both. Only one runs at a time; both use the same home folder and OpenCode settings.</string>
+    <string name="servers_hint_installed">Checking a server installs it next to the other one. Unchecking an installed server and tapping Apply uninstalls only that server.</string>
+    <string name="servers_none_selected">Select at least one server.</string>
+    <string name="servers_needs_opencode">Needs OpenCode</string>
+    <string name="servers_active_label">Use on this phone</string>
+    <string name="servers_switch_title">Switch to %1$s?</string>
+    <string name="servers_switch_body_running">%1$s stops and %2$s starts in its place, so tasks running in %1$s are interrupted. Projects, the home folder and OpenCode settings are shared and stay as they are.</string>
+    <string name="servers_switch_body">%2$s is used from now on. %1$s stays installed, and projects, the home folder and OpenCode settings are shared.</string>
+    <string name="servers_switch_confirm">Switch</string>
+    <plurals name="servers_remove_title">
+        <item quantity="one">Uninstall %1$s?</item>
+        <item quantity="other">Uninstall %1$s?</item>
+    </plurals>
+    <string name="servers_remove_body">Only the unchecked server is uninstalled. The other server, your projects, the home folder and the OpenCode, Codex and Claude Code settings are kept. The local server restarts if it is running.</string>
+    <string name="agents_required_by_openchamber">Required by OpenChamber</string>
+
+    <!-- Remote server protocol -->
+    <string name="field_server_kind">Server type</string>
+    <string name="server_kind_hint">Pick what runs at this address, so CoCode signs in the right way.</string>
 </resources>

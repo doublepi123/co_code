@@ -1,5 +1,6 @@
 package io.cocode.app.runtime.process
 
+import io.cocode.app.runtime.ServerKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -91,6 +92,73 @@ class ProotCommandsTest {
         assertEquals("1", env["IS_SANDBOX"])
         assertEquals("--require /opt/cocode/android-shim.cjs", env["NODE_OPTIONS"])
         assertFalse(env.containsKey("OPENCODE_CONFIG_CONTENT"))
+        assertFalse("T3 must never receive OpenChamber secrets", env.keys.any { it.startsWith("OPENCHAMBER_") })
+    }
+
+    @Test
+    fun `openchamber command line serves the pinned cli on its own port`() {
+        val command =
+            ProotCommands.serverCommand(
+                proot = proot,
+                rootfs = rootfs,
+                home = home,
+                workspace = workspace,
+                storageArguments = emptyList(),
+                kind = ServerKind.OpenChamber,
+            )
+
+        assertEquals(proot.absolutePath, command.first())
+        assertEquals("/root", command[command.indexOf("-w") + 1])
+        assertEquals(
+            listOf(
+                "/usr/bin/node",
+                "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js",
+                "serve",
+                "--foreground",
+                "--port",
+                "3000",
+            ),
+            command.takeLast(6),
+        )
+        assertTrue(command.containsPair("-b", "${workspace.absolutePath}:/root/projects"))
+    }
+
+    @Test
+    fun `openchamber environment carries its own password and nothing from t3`() {
+        val env =
+            ProotCommands.serverEnvironment(
+                suiteEnvironment = mapOf("LD_LIBRARY_PATH" to "/native", "PROOT_LOADER" to "/native/loader"),
+                prootTmp = prootTmp,
+                port = ServerKind.OpenChamber.port,
+                uiPassword = "oc-password",
+                kind = ServerKind.OpenChamber,
+            )
+
+        assertEquals("127.0.0.1", env["OPENCHAMBER_HOST"])
+        assertEquals("oc-password", env["OPENCHAMBER_UI_PASSWORD"])
+        assertEquals("off", env["OPENCHAMBER_RELAY_HOST"])
+        assertEquals("/usr/local/bin/opencode", env["OPENCHAMBER_OPENCODE_BIN"])
+        assertEquals("15000", env["OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS"])
+        assertEquals("1", env["OPENCODE_DISABLE_AUTOUPDATE"])
+        assertEquals("--require /opt/cocode/android-shim.cjs", env["NODE_OPTIONS"])
+        assertEquals(prootTmp.absolutePath, env["PROOT_TMP_DIR"])
+        assertEquals("/root", env["HOME"])
+        assertFalse("OpenChamber must never receive the T3 password", env.containsKey("T3CODE_AUTH_PASSWORD"))
+        assertFalse(env.keys.any { it.startsWith("T3CODE_") })
+        assertFalse(env.containsKey("IS_SANDBOX"))
+        assertFalse(env.containsKey("OPENCHAMBER_DESKTOP_NOTIFY"))
+    }
+
+    @Test
+    fun `server envs of the two kinds are disjoint and never share a password variable`() {
+        val t3 = ProotCommands.serverEnvironment(emptyMap(), prootTmp, 3773, "t3-secret", ServerKind.T3)
+        val oc = ProotCommands.serverEnvironment(emptyMap(), prootTmp, 3000, "oc-secret", ServerKind.OpenChamber)
+
+        assertTrue(t3.keys.intersect(oc.keys).none { it.startsWith("T3CODE_") || it.startsWith("OPENCHAMBER_") })
+        assertEquals("t3-secret", t3["T3CODE_AUTH_PASSWORD"])
+        assertFalse(t3.containsValue("oc-secret"))
+        assertEquals("oc-secret", oc["OPENCHAMBER_UI_PASSWORD"])
+        assertFalse(oc.containsValue("t3-secret"))
     }
 
     @Test
