@@ -37,7 +37,7 @@ class LocalApiClientTest {
             localReady = LocalReadiness { 1L },
         )
 
-    private fun login(): MockResponse = MockResponse().setResponseCode(200).addHeader("Set-Cookie", "oc_ui_session_3000=tok; Path=/; HttpOnly")
+    private fun login(): MockResponse = MockResponse().setResponseCode(200).addHeader("Set-Cookie", "t3_session_3773=tok; Path=/; HttpOnly")
 
     @Test
     fun `reply posts the prompt text with the directory header and the session cookie`() =

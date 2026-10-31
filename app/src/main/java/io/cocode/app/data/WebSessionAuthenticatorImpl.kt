@@ -18,6 +18,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import io.cocode.app.runtime.WebSessionIdentity
+import io.cocode.app.runtime.process.HealthProbe
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -29,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The local server's trust for a login: the launch id, or null when that launch is not trustworthy
- * right now (child not confirmed listening, child dead, or stopped). See OpenChamberServer.readyLaunchId.
+ * right now (child not confirmed listening, child dead, or stopped). See T3Server.readyLaunchId.
  * A provider that throws counts as null.
  */
 fun interface LocalReadiness {
@@ -37,9 +38,9 @@ fun interface LocalReadiness {
 }
 
 /**
- * Prepares a session for the WebView: health-checks the server, logs in with the password when one is
- * known (POST /auth/session), and stores the resulting Set-Cookie headers through the caller's
- * [WebSessionCookies] (the capability of that target's own WebView profile).
+ * Prepares a session for the WebView: checks `/.well-known/t3/environment`, logs in with the password
+ * when one is known (POST /api/auth/browser-session), and stores the resulting Set-Cookie headers
+ * through the caller's [WebSessionCookies] (the capability of that target's own WebView profile).
  *
  * Rules:
  *  - The cookies must belong to this target and its canonical origin. Otherwise: no HTTP request, no
@@ -101,13 +102,13 @@ class DefaultWebSessionAuthenticator(
     ): WebSessionResult {
         val health = health(base, cookies, target is ServerTarget.Remote)
         if (health.gated && target is ServerTarget.Remote) return WebSessionResult.NeedsGatewayLogin(base)
-        if (!health.healthy) return WebSessionResult.Unreachable("No OpenChamber server answered at $base")
+        if (!health.healthy) return WebSessionResult.Unreachable("No T3 Code server answered at $base")
 
         // The local password is released only while the same launch is trusted, checked before and
         // right before the POST. A child that died (or was replaced) in between sends nothing.
         val launchId = if (target is ServerTarget.Local) readyLaunchId() else null
         if (target is ServerTarget.Local && launchId == null) {
-            return WebSessionResult.Unreachable("The local OpenChamber is not running")
+            return WebSessionResult.Unreachable("The local T3 Code server is not running")
         }
         val password =
             when (target) {
@@ -124,7 +125,7 @@ class DefaultWebSessionAuthenticator(
             }
         }
         if (target is ServerTarget.Local && readyLaunchId() != launchId) {
-            return WebSessionResult.Unreachable("The local OpenChamber restarted; try again")
+            return WebSessionResult.Unreachable("The local T3 Code server restarted; try again")
         }
 
         val allowed = target !is ServerTarget.Remote || target.allowInsecureHttp || url.isTransportSafe()
@@ -139,19 +140,23 @@ class DefaultWebSessionAuthenticator(
     private suspend fun health(base: String, cookies: WebSessionCookies, remote: Boolean): HealthResult {
         val header = if (remote) cookies.cookieHeader(base) else null
         return fetch(default = HealthResult(false, false)) {
-            val builder = Request.Builder().url("$base/health").get()
+            val builder = Request.Builder().url("$base${HealthProbe.ENVIRONMENT_PATH}").get()
             if (header != null) builder.header("Cookie", header)
             val request = builder.build()
             authClient.newCall(request).execute().use { response ->
                 if (isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap())) return@use HealthResult(false, true)
                 if (!response.isSuccessful) return@use HealthResult(false, false)
                 val body = response.body?.string().orEmpty()
-                HealthResult(json.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitive?.content == "ok", false)
+                val environmentId =
+                    runCatching {
+                        json.parseToJsonElement(body).jsonObject["environmentId"]?.jsonPrimitive?.content
+                    }.getOrNull()
+                HealthResult(!environmentId.isNullOrBlank(), false)
             }
         }
     }
 
-    /** GET /auth/session with this profile's cookies. True when the server accepts them (its cookies are stored). */
+    /** GET /api/auth/session with this profile's cookies. True when the server already accepts them. */
     private suspend fun probeSession(
         base: String,
         cookies: WebSessionCookies,
@@ -160,14 +165,20 @@ class DefaultWebSessionAuthenticator(
         val header = cookies.cookieHeader(base)
         val reply =
             fetch<SetCookieReply?>(default = null) {
-                val builder = Request.Builder().url("$base/auth/session").get()
+                val builder = Request.Builder().url("$base$SESSION_PATH").get()
                 if (header != null) builder.header("Cookie", header)
                 authClient.newCall(builder.build()).execute().use { response ->
-                    SetCookieReply(response.code, response.headers("Set-Cookie"), isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap()))
+                    SetCookieReply(
+                        code = response.code,
+                        setCookies = response.headers("Set-Cookie"),
+                        gated = isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap()),
+                        authenticated = authenticatedBody(response),
+                    )
                 }
             } ?: return ProbeResult.Rejected
         if (reply.gated) return ProbeResult.Gateway
         if (reply.code != 200) return ProbeResult.Rejected
+        if (!reply.authenticated) return ProbeResult.Rejected
         commit(base, reply.setCookies, cookies)
         return ProbeResult.Accepted
     }
@@ -181,19 +192,23 @@ class DefaultWebSessionAuthenticator(
     ): WebSessionResult {
         val body =
             buildJsonObject {
-                put("password", password)
-                put("trustDevice", true)
+                put("credential", password)
             }.toString()
         val request =
             Request.Builder()
-                .url("$base/auth/session")
+                .url("$base$LOGIN_PATH")
                 .apply { if (target is ServerTarget.Remote) cookies.cookieHeader(base)?.let { header("Cookie", it) } }
                 .post(body.toRequestBody(JSON_MEDIA))
                 .build()
         val reply =
             fetch<SetCookieReply?>(default = null) {
                 authClient.newCall(request).execute().use { response ->
-                    SetCookieReply(response.code, response.headers("Set-Cookie"), isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap()))
+                    SetCookieReply(
+                        code = response.code,
+                        setCookies = response.headers("Set-Cookie"),
+                        gated = isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap()),
+                        authenticated = authenticatedBody(response),
+                    )
                 }
             } ?: return WebSessionResult.Unreachable("Login request failed")
         if (reply.gated && target is ServerTarget.Remote) return WebSessionResult.NeedsGatewayLogin(base)
@@ -201,14 +216,15 @@ class DefaultWebSessionAuthenticator(
             in 200..299 -> {
                 // Launch may have changed while the POST was in flight: its cookies must not be stored.
                 if (target is ServerTarget.Local && readyLaunchId() != launchId) {
-                    WebSessionResult.Unreachable("The local OpenChamber restarted; try again")
+                    WebSessionResult.Unreachable("The local T3 Code server restarted; try again")
                 } else {
                     commit(base, reply.setCookies, cookies)
                     WebSessionResult.Ready(base)
                 }
             }
-            // 401 is a wrong password; a redirect means the server wants us elsewhere. Neither stores cookies.
-            401 -> WebSessionResult.NeedsLogin(base)
+            // 401/403 is a wrong password; any other 4xx means the request was not accepted. A
+            // redirect means the server wants us elsewhere. None of these store cookies.
+            in 400..499 -> WebSessionResult.NeedsLogin(base)
             in 300..399 -> WebSessionResult.NeedsLogin(base)
             else -> WebSessionResult.Unreachable("Login failed with HTTP ${reply.code}")
         }
@@ -247,13 +263,23 @@ class DefaultWebSessionAuthenticator(
         val code: Int,
         val setCookies: List<String>,
         val gated: Boolean = false,
+        val authenticated: Boolean = false,
     )
+
+    /** T3 Code reports `{"authenticated":true,...}` on a session probe and a successful login. */
+    private fun authenticatedBody(response: okhttp3.Response): Boolean =
+        runCatching {
+            val body = response.body?.string().orEmpty()
+            json.parseToJsonElement(body).jsonObject["authenticated"]?.jsonPrimitive?.content == "true"
+        }.getOrDefault(false)
 
     private data class HealthResult(val healthy: Boolean, val gated: Boolean)
     private enum class ProbeResult { Accepted, Rejected, Gateway }
 
     private companion object {
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        const val SESSION_PATH = "/api/auth/session"
+        const val LOGIN_PATH = "/api/auth/browser-session"
     }
 }
 

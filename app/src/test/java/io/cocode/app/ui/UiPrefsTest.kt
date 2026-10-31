@@ -9,7 +9,7 @@ import org.junit.Test
 
 class UiPrefsTest {
     private val local = "http://127.0.0.1:3000"
-    private val remote = "https://openchamber.example.com"
+    private val remote = "https://t3.example.com"
 
     @Test
     fun `each instance keeps its own page across switches and Home`() {

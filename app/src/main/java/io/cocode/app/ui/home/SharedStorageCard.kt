@@ -105,7 +105,7 @@ internal fun SharedStorageCard(
     val toggle: (Boolean) -> Unit = { on ->
         when {
             on -> onEnabledChange(true)
-            // Turning off makes OpenChamber stop seeing the files there, so say so first.
+            // Turning off makes T3 Code stop seeing the files there, so say so first.
             state.status == SharedStorageStatus.Active -> confirmOff = true
             else -> onEnabledChange(false)
         }
@@ -338,7 +338,7 @@ private fun ActiveBody(hostRoot: String) {
     )
 }
 
-/** The shared folder and what each part becomes inside OpenChamber, drawn as a small tree. */
+/** The shared folder and what each part becomes inside T3 Code, drawn as a small tree. */
 @Composable
 private fun FolderLayout(hostRoot: String) {
     val copy = rememberCopyAction()

@@ -76,38 +76,38 @@ class LaunchDecisionTest {
     @Test
     fun `origin address keeps the raw origin and refuses unusable bases`() {
         assertEquals("http://127.0.0.1:3000", originAddress("http://127.0.0.1:3000"))
-        assertEquals("http://127.0.0.1:3000", originAddress("http://127.0.0.1:3000/openchamber/?x=1"))
-        assertEquals("HTTPS://EXAMPLE.COM", originAddress("HTTPS://EXAMPLE.COM/openchamber"))
+        assertEquals("http://127.0.0.1:3000", originAddress("http://127.0.0.1:3000/t3/?x=1"))
+        assertEquals("HTTPS://EXAMPLE.COM", originAddress("HTTPS://EXAMPLE.COM/t3"))
         assertEquals("http://[::1]:3000", originAddress("http://[::1]:3000/"))
         assertNull(originAddress("not a url"))
-        assertNull(originAddress("ftp://example.com/openchamber"))
+        assertNull(originAddress("ftp://example.com/t3"))
         // Userinfo can never become a page target, matching the canonical origin rule.
-        assertNull(originAddress("http://user:pw@127.0.0.1:3000/openchamber"))
+        assertNull(originAddress("http://user:pw@127.0.0.1:3000/t3"))
     }
 
     @Test
     fun `remembered page restores on the origin without repeating the base path`() {
-        val base = "http://127.0.0.1:3000/openchamber"
+        val base = "http://127.0.0.1:3000/t3"
         assertEquals(
-            "http://127.0.0.1:3000/openchamber/?session=s1",
-            withRememberedPagePath(base, "/openchamber/?session=s1"),
+            "http://127.0.0.1:3000/t3/?session=s1",
+            withRememberedPagePath(base, "/t3/?session=s1"),
         )
         // A trailing slash on the saved base URL changes nothing.
         assertEquals(
-            "http://127.0.0.1:3000/openchamber/?session=s1",
-            withRememberedPagePath("$base/", "/openchamber/?session=s1"),
+            "http://127.0.0.1:3000/t3/?session=s1",
+            withRememberedPagePath("$base/", "/t3/?session=s1"),
         )
         // The root instance behaves exactly as before.
         assertEquals("http://127.0.0.1:3000/?session=s1", withRememberedPagePath("http://127.0.0.1:3000", "/?session=s1"))
         assertEquals("http://127.0.0.1:3000/", withRememberedPagePath("http://127.0.0.1:3000", "/"))
         // Escaping saved on disk is kept byte for byte.
         assertEquals(
-            "https://example.com/openchamber/chat?q=a%20b&x=%2F",
-            withRememberedPagePath("https://example.com/openchamber", "/openchamber/chat?q=a%20b&x=%2F"),
+            "https://example.com/t3/chat?q=a%20b&x=%2F",
+            withRememberedPagePath("https://example.com/t3", "/t3/chat?q=a%20b&x=%2F"),
         )
-        assertNull(withRememberedPagePath(base, "openchamber/?session=s1"))
-        assertNull(withRememberedPagePath("not a url", "/openchamber/?session=s1"))
-        assertNull(withRememberedPagePath("http://user:pw@127.0.0.1:3000/openchamber", "/openchamber/"))
+        assertNull(withRememberedPagePath(base, "t3/?session=s1"))
+        assertNull(withRememberedPagePath("not a url", "/t3/?session=s1"))
+        assertNull(withRememberedPagePath("http://user:pw@127.0.0.1:3000/t3", "/t3/"))
     }
 
     @Test
@@ -183,7 +183,7 @@ class LaunchDecisionTest {
     @Test
     fun `real states pass through`() {
         assertSame(running, shownLocalState(running, pendingStartFrom = RuntimeState.Stopped))
-        val starting = RuntimeState.Starting("Starting OpenChamber on port 3000")
+        val starting = RuntimeState.Starting("Starting T3 Code on port 3000")
         assertSame(starting, shownLocalState(starting, pendingStartFrom = RuntimeState.Stopped))
         assertSame(RuntimeState.Stopped, shownLocalState(RuntimeState.Stopped, pendingStartFrom = null))
         // A new failure after the start is the answer to it, not the old one.

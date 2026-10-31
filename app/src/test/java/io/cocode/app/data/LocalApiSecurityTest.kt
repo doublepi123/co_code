@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class LocalApiSecurityTest {
     private val fakePassword = "FAKE-PW-SECURITY-456"
-    private val loginCookie = "oc_ui_session_3000=TOKEN_A; Path=/; HttpOnly"
+    private val loginCookie = "t3_session_3773=TOKEN_A; Path=/; HttpOnly"
 
     /** Mutable readiness the tests flip to simulate restarts, stops and crashes. */
     private class Ready(initial: Long?) {
@@ -81,9 +81,9 @@ class LocalApiSecurityTest {
 
                 assertTrue(result.ok)
                 assertEquals(4, server.requestCount)
-                assertEquals("/auth/session", server.takeRequest().path)
+                assertEquals("/api/auth/browser-session", server.takeRequest().path)
                 assertEquals("/api/session/ses_1/prompt", server.takeRequest().path)
-                assertEquals("/auth/session", server.takeRequest().path)
+                assertEquals("/api/auth/browser-session", server.takeRequest().path)
                 assertEquals("/api/session/ses_1/prompt", server.takeRequest().path)
             } finally {
                 server.shutdown()
@@ -194,7 +194,7 @@ class LocalApiSecurityTest {
                 val ready = Ready(1L)
                 server.dispatcher =
                     dispatcher { request ->
-                        if (request.path == "/auth/session") {
+                        if (request.path == "/api/auth/browser-session") {
                             login200()
                         } else {
                             ready.value.set(2L) // the child is replaced while answering
@@ -222,7 +222,7 @@ class LocalApiSecurityTest {
                 server.dispatcher =
                     dispatcher { request ->
                         when (request.path) {
-                            "/auth/session" -> login200()
+                            "/api/auth/browser-session" -> login200()
                             else -> {
                                 ready.value.set(2L)
                                 MockResponse().setResponseCode(401)
@@ -262,7 +262,7 @@ class LocalApiSecurityTest {
                 server.takeRequest()
                 server.takeRequest()
                 val relogin = server.takeRequest()
-                assertEquals("/auth/session", relogin.path)
+                assertEquals("/api/auth/browser-session", relogin.path)
                 assertNull("no old cookie on the new launch", relogin.getHeader("Cookie"))
             } finally {
                 server.shutdown()
@@ -328,7 +328,7 @@ class LocalApiSecurityTest {
                 val elsewhere = MockWebServer()
                 elsewhere.start()
                 try {
-                    server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", elsewhere.url("/auth/session").toString()))
+                    server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", elsewhere.url("/api/auth/browser-session").toString()))
                     val ready = Ready(1L)
                     val client = clientFor({ server.url("/").toString().trimEnd('/') }, ready)
 
@@ -356,7 +356,7 @@ class LocalApiSecurityTest {
             try {
                 server.dispatcher =
                     dispatcher { request ->
-                        if (request.path == "/auth/session") {
+                        if (request.path == "/api/auth/browser-session") {
                             login200()
                         } else {
                             businessSeen.countDown()
@@ -403,7 +403,7 @@ class LocalApiSecurityTest {
 
                 assertEquals(503, result.status)
                 assertEquals("one login and one business POST only", 2, server.requestCount)
-                assertEquals("/auth/session", server.takeRequest().path)
+                assertEquals("/api/auth/browser-session", server.takeRequest().path)
                 val business = server.takeRequest()
                 assertEquals("POST", business.method)
                 assertEquals(expectedPath, business.path)

@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import io.cocode.app.runtime.AgentChange
 import io.cocode.app.runtime.FailurePhase
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.MessageKey
@@ -71,6 +72,7 @@ private fun HomePreview(
             actions = noActions,
             storage = storage,
             updates = updates,
+            agents = PreviewData.agents,
         )
     }
 }
@@ -79,8 +81,11 @@ private fun HomePreview(
 private object UpdatePreviewData {
     val available =
         RuntimeUpdate(
-            openChamber = VersionChange(current = "2.4.0", target = "2.5.0"),
-            openCode = VersionChange(current = "2.0.32", target = "2.1.0"),
+            t3 = VersionChange(current = "0.1.6-pw.5", target = "0.1.7-pw.1"),
+            agents =
+                listOf(
+                    AgentChange("opencode", "OpenCode", VersionChange(current = "2.2.5", target = "2.3.0")),
+                ),
         )
 
     val checkedAt = System.currentTimeMillis() - 42 * 60 * 1000L
@@ -91,20 +96,20 @@ private object UpdatePreviewData {
         offered.copy(
             lastFailure =
                 UpdateFailure(
-                    reason = "Unable to install OpenChamber from npm. (exit 1)",
-                    messageKey = MessageKey.OpenChamberInstallFailed,
+                    reason = "Unable to install T3 Code. (exit 1)",
+                    messageKey = MessageKey.ServerInstallFailed,
                     detail =
                         "npm error code ETIMEDOUT\n" +
-                            "npm error network request to https://registry.npmjs.org/@openchamber%2fweb failed\n" +
+                            "npm error network request to https://api.github.com failed\n" +
                             "npm error network This is a problem related to network connectivity.",
                 ),
         )
 
     val updating =
         RuntimeState.Installing(
-            step = InstallStep.BuildNativeModules,
+            step = InstallStep.InstallServer,
             progress = null,
-            detail = "node-pty for musl",
+            detail = "t3-0.1.7-pw.1-android-linux-arm64-musl.tar.gz",
             updating = true,
         )
 }
@@ -118,10 +123,10 @@ private fun HomeUpdateAvailablePreview() = HomePreview(PreviewData.running, upda
 private fun HomeUpdateAvailableLightPreview() =
     HomePreview(
         RuntimeState.Stopped,
-        // Only OpenChamber changes: only its line shows.
+        // Only T3 Code changes: only its line shows.
         updates =
             UpdatePreviewData.offered.copy(
-                available = UpdatePreviewData.available.copy(openCode = VersionChange(current = "2.0.32", target = "2.0.32")),
+                available = UpdatePreviewData.available.copy(agents = emptyList()),
             ),
     )
 
@@ -269,7 +274,7 @@ private fun CardPreview(state: RuntimeState) {
 @Preview(name = "Card · failed (recoverable)", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun CardFailedPreview() =
-    CardPreview(RuntimeState.Failed("OpenChamber stopped unexpectedly (exit code 1)", recoverable = true))
+    CardPreview(RuntimeState.Failed("T3 Code stopped unexpectedly (exit code 1)", recoverable = true))
 
 @Preview(name = "Card · failed (needs repair)", uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
@@ -278,7 +283,7 @@ private fun CardBrokenPreview() =
 
 @Preview(name = "Card · starting", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
-private fun CardStartingPreview() = CardPreview(RuntimeState.Starting("Starting OpenChamber on port 3000"))
+private fun CardStartingPreview() = CardPreview(RuntimeState.Starting("Starting T3 Code on port 3773"))
 
 @Preview(name = "Card · unsupported", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
@@ -311,7 +316,7 @@ private fun WebUnreachablePreview() {
                 icon = Icons.Rounded.CloudOff,
                 title = "Can't reach Workstation",
                 body = "Make sure the server is running and this phone can reach it, for example on the same Wi-Fi.",
-                detail = "No OpenChamber server answered at http://192.168.1.20:3000",
+                detail = "No T3 Code server answered at http://192.0.2.20:3773",
                 primary = PanelAction("Try again") {},
                 secondary = PanelAction("Back") {},
             )
@@ -339,7 +344,7 @@ private fun WebStartFailedPreview() {
             LocalServerPanel(
                 state =
                     RuntimeState.Failed(
-                        reason = "OpenChamber did not answer on port 3000 within 90 s",
+                        reason = "T3 Code did not answer on port 3773 within 180 s",
                         recoverable = true,
                         phase = FailurePhase.Start,
                     ),

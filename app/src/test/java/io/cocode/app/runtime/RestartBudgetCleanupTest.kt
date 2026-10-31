@@ -2,12 +2,11 @@ package io.cocode.app.runtime
 
 import io.cocode.app.runtime.install.InstallReporter
 import io.cocode.app.runtime.install.InstalledRuntime
-import io.cocode.app.runtime.install.PackageVersions
 import io.cocode.app.runtime.install.RuntimeInstaller
 import io.cocode.app.runtime.install.RuntimeMetadata
 import io.cocode.app.runtime.process.HealthProbe
 import io.cocode.app.runtime.process.HealthReport
-import io.cocode.app.runtime.process.OpenChamberServer
+import io.cocode.app.runtime.process.T3Server
 import io.cocode.app.service.RuntimeServicePolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -39,7 +38,7 @@ class RestartBudgetCleanupTest {
         private val stopThrows: Boolean = false,
         /** Called with the stop count after each stop() call, before any throw. Used for deterministic interleaving. */
         private val onStop: (Int) -> Unit = {},
-    ) : OpenChamberServer {
+    ) : T3Server {
         var alive = false
         var stops = 0
         var starts = 0
@@ -79,12 +78,17 @@ class RestartBudgetCleanupTest {
 
         override suspend fun install(
             report: InstallReporter,
-            versions: PackageVersions?,
+            agents: Set<String>,
         ): InstalledRuntime = runtime
 
         override suspend fun update(
             report: InstallReporter,
-            versions: PackageVersions,
+            versions: io.cocode.app.runtime.install.PackageVersions,
+        ): InstalledRuntime = runtime
+
+        override suspend fun applyAgents(
+            report: InstallReporter,
+            selected: Set<String>,
         ): InstalledRuntime = runtime
 
         override fun discardEnvironment() = Unit
@@ -95,7 +99,7 @@ class RestartBudgetCleanupTest {
     /** Health answers from a flag, so a test controls the watchdog's view of the child. */
     private class FlagProbe(var ok: Boolean = true) : HealthProbe {
         override fun read(port: Int): HealthReport? =
-            if (ok) HealthReport("ok", isOpenCodeReady = true, openCodeRunning = true, lastOpenCodeError = null, serverId = "a")
+            if (ok) HealthReport(environmentId = "a")
             else null
     }
 
@@ -106,16 +110,16 @@ class RestartBudgetCleanupTest {
                     runtimeVersion = "r",
                     alpineVersion = "3.24.1",
                     abi = "arm64-v8a",
-                    port = 3000,
-                    openChamberVersion = "2.4.0",
-                    openCodeVersion = "2.0.32",
+                    port = 3773,
+                    t3Version = "0.1.6-pw.5",
+                    agents = mapOf("opencode" to "2.2.5"),
                     installedAt = 1L,
                 ),
             rootfs = File(root, "rootfs"),
         )
 
     private fun TestScope.controller(
-        server: OpenChamberServer,
+        server: T3Server,
         health: HealthProbe,
         killed: MutableList<Int>,
         root: File,

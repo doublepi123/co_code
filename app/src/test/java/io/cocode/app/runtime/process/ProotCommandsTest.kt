@@ -22,7 +22,6 @@ class ProotCommandsTest {
                 home = home,
                 workspace = workspace,
                 storageArguments = emptyList(),
-                port = 3000,
             )
         val installer = ProotCommands.guestShellCommand(proot, rootfs, home, emptyList(), "true")
 
@@ -32,7 +31,7 @@ class ProotCommandsTest {
     }
 
     @Test
-    fun `server command line binds the rootfs and runs cli serve in the foreground`() {
+    fun `server command line runs the t3 bundle in the foreground`() {
         val command =
             ProotCommands.serverCommand(
                 proot = proot,
@@ -40,7 +39,6 @@ class ProotCommandsTest {
                 home = home,
                 workspace = workspace,
                 storageArguments = listOf("-b", "/storage/emulated/0:/sdcard"),
-                port = 3000,
             )
 
         assertEquals(proot.absolutePath, command.first())
@@ -57,26 +55,17 @@ class ProotCommandsTest {
         assertFalse(command.any { it.endsWith(":/workspace") || it.endsWith(":/workspace-private") })
         assertEquals("/root", command[command.indexOf("-w") + 1])
 
-        val guest = command.subList(command.size - 6, command.size)
-        assertEquals(
-            listOf(
-                "/usr/bin/node",
-                "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js",
-                "serve",
-                "--foreground",
-                "--port",
-                "3000",
-            ),
-            guest,
-        )
+        val guest = command.takeLast(2)
+        assertEquals(listOf("/usr/bin/node", "/opt/t3/bin.mjs"), guest)
     }
 
     @Test
-    fun `server environment is exactly the guest contract and carries the UI password`() {
+    fun `server environment is exactly the guest contract and carries the t3 password`() {
         val env =
             ProotCommands.serverEnvironment(
                 suiteEnvironment = mapOf("LD_LIBRARY_PATH" to "/native", "PROOT_LOADER" to "/native/loader"),
                 prootTmp = prootTmp,
+                port = 3773,
                 uiPassword = "secret-password",
             )
 
@@ -93,28 +82,21 @@ class ProotCommandsTest {
         assertEquals("/native", env["LD_LIBRARY_PATH"])
         assertEquals("/native/loader", env["PROOT_LOADER"])
 
-        assertEquals("127.0.0.1", env["OPENCHAMBER_HOST"])
-        assertEquals("secret-password", env["OPENCHAMBER_UI_PASSWORD"])
-        assertEquals("off", env["OPENCHAMBER_RELAY_HOST"])
-        // Native notifications: the server writes its one-line desktop-notify protocol to stdout.
-        assertEquals("true", env["OPENCHAMBER_DESKTOP_NOTIFY"])
+        assertEquals("127.0.0.1", env["T3CODE_HOST"])
+        assertEquals("3773", env["T3CODE_PORT"])
+        assertEquals("true", env["T3CODE_NO_BROWSER"])
+        assertEquals("/root/.t3", env["T3CODE_HOME"])
+        assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
         assertEquals("true", env["OPENCODE_DISABLE_AUTOUPDATE"])
-        assertEquals("/usr/local/bin/opencode", env["OPENCHAMBER_OPENCODE_BIN"])
         assertEquals("--require /opt/cocode/android-shim.cjs", env["NODE_OPTIONS"])
         assertFalse(env.containsKey("OPENCODE_CONFIG_CONTENT"))
-    }
-
-    @Test
-    fun `server environment never enables the relay`() {
-        val env = ProotCommands.serverEnvironment(emptyMap(), prootTmp, "pw")
-        assertEquals("off", env["OPENCHAMBER_RELAY_HOST"])
     }
 
     @Test
     fun `install environment has no server secrets and no node shim`() {
         val env = ProotCommands.installEnvironment(emptyMap(), prootTmp)
 
-        assertFalse(env.containsKey("OPENCHAMBER_UI_PASSWORD"))
+        assertFalse(env.containsKey("T3CODE_AUTH_PASSWORD"))
         assertFalse(env.containsKey("NODE_OPTIONS"))
         assertEquals("/root", env["HOME"])
     }

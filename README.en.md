@@ -8,7 +8,20 @@
 
 **CoCode runs a coding-agent server locally on an Android phone — no computer, no root.**
 
-CoCode is derived from AndChamber (MIT). This version keeps the on-device Alpine/PRoot runtime, foreground service, notifications, remote servers, shared storage and downloads; the bundled server and UI will be replaced in a later version, with details to follow.
+CoCode is derived from AndChamber (MIT). The on-device runtime starts the T3 Code server (port 3773) inside Alpine Linux under PRoot (no root) and installs the coding-agent CLIs you select from npm. A foreground service keeps the server running, each WebView profile signs in separately, and remote T3 Code servers, shared storage and downloads are also supported.
+
+### Runtime composition
+
+| Component | Version / source |
+|---|---|
+| Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
+| Node.js | Alpine 24.x |
+| T3 Code server | GitHub release from `doublepi123/t3code`, default 0.1.6-pw.5 |
+| Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode); latest at install time |
+| PRoot | locally built 5.1.107.98 |
+| Port | 3773 (loopback only) |
+
+`opencode/` in the shared `CoCode/` folder is still bound to `~/.config/opencode`; `projects/` is bound to `~/projects`.
 
 ## Build
 

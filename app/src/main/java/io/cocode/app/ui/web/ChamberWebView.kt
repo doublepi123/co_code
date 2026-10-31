@@ -458,23 +458,6 @@ internal class ChamberWebView(
             return routeOutside(request.url)
         }
 
-        override fun shouldInterceptRequest(
-            view: WebView,
-            request: WebResourceRequest,
-        ): WebResourceResponse? {
-            if (!LocalUpdateGate.interceptsLocalUpdateCheck(targetId, origin, request.method.orEmpty(), request.url.toString())) {
-                return null
-            }
-            return WebResourceResponse(
-                "application/json",
-                "utf-8",
-                200,
-                "OK",
-                mapOf("Cache-Control" to "no-store"),
-                LocalUpdateGate.UPDATE_CHECK_BODY.byteInputStream(Charsets.UTF_8),
-            )
-        }
-
         // pageError is cleared only by load()/reload(): some WebView versions start their own error
         // page right after a failure, which would otherwise hide the error again.
 
@@ -572,7 +555,7 @@ internal class ChamberWebView(
             reportPageLocation(url)
         }
 
-        // Fires for history-API navigations too (OpenChamber switches sessions via pushState).
+        // Fires for history-API navigations too (T3 Code switches sessions via pushState).
         override fun doUpdateVisitedHistory(
             view: WebView,
             url: String?,
@@ -916,7 +899,7 @@ internal class ChamberWebView(
 
     /**
      * Installed after each page load:
-     *  - OpenChamber saves files by clicking a blob: link and revoking it at once, which a WebView
+     *  - T3 Code saves files by clicking a blob: link and revoking it at once, which a WebView
      *    can't download; this reads the blob in the page and hands it to [Bridge] instead.
      *  - Reports the page background so the system bar areas can match it.
      */

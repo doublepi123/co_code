@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -98,6 +99,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.RuntimeInfo
 import io.cocode.app.runtime.RuntimeState
@@ -105,6 +107,7 @@ import io.cocode.app.runtime.RuntimeUpdate
 import io.cocode.app.runtime.RuntimeUpdateState
 import io.cocode.app.runtime.UpdateFailure
 import io.cocode.app.runtime.VersionChange
+import io.cocode.app.runtime.manifest.AgentSpec
 import io.cocode.app.ui.components.ChamberCard
 import io.cocode.app.ui.components.ConfirmDialog
 import io.cocode.app.ui.components.DetailRow
@@ -224,6 +227,10 @@ internal fun LocalRuntimeCard(
     onRetry: () -> Unit,
     onRepair: () -> Unit,
     onUninstall: () -> Unit,
+    /** Available agents, the saved selection and the installed versions. */
+    agents: AgentsState = AgentsState(),
+    /** Persists a new selection; with an installed runtime this also applies it. */
+    onAgentsChange: (Set<String>) -> Unit = {},
     modifier: Modifier = Modifier,
     checking: Boolean = false,
     /** True when projects live in the shared folder, which uninstall leaves in place. */
@@ -234,7 +241,7 @@ internal fun LocalRuntimeCard(
     /** Keep-screen-on setting shown in Details; null hides it. */
     keepScreenOn: Boolean? = null,
     onKeepScreenOnChange: (Boolean) -> Unit = {},
-    /** OpenChamber / OpenCode update check and the outcome of the last update. */
+    /** T3 Code / OpenCode update check and the outcome of the last update. */
     updates: RuntimeUpdateState = RuntimeUpdateState(),
     onUpdate: () -> Unit = {},
     onCheckForUpdates: () -> Unit = {},
@@ -272,6 +279,18 @@ internal fun LocalRuntimeCard(
             else -> null
         }
     val updatingNow = (state as? RuntimeState.Installing)?.updating == true
+
+    // Before an install a toggle is persisted immediately, so Set up uses it. Afterwards the toggles
+    // are staged locally until Apply asks the runtime to install/remove the diff.
+    var pendingAgents by remember(agents.selected) { mutableStateOf(agents.selected) }
+    val showAgents =
+        agents.available.isNotEmpty() &&
+            phase in setOf(
+                RuntimePhase.NotInstalled,
+                RuntimePhase.Stopped,
+                RuntimePhase.Running,
+                RuntimePhase.Failed,
+            )
 
     ChamberCard(
         modifier = modifier,
@@ -328,6 +347,23 @@ internal fun LocalRuntimeCard(
                         } ?: Spacer(Modifier.height(96.dp))
                 }
             }
+        }
+
+        if (showAgents) {
+            AgentSelectionSection(
+                available = agents.available,
+                selected = pendingAgents,
+                installed = agents.installed,
+                enabled = !phase.isBusy,
+                beforeInstall = phase == RuntimePhase.NotInstalled,
+                canApply = phase != RuntimePhase.NotInstalled && pendingAgents != agents.selected,
+                onToggle = { id ->
+                    pendingAgents = if (id in pendingAgents) pendingAgents - id else pendingAgents + id
+                    if (phase == RuntimePhase.NotInstalled) onAgentsChange(pendingAgents)
+                },
+                onApply = { onAgentsChange(pendingAgents) },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
         }
 
         // Below the main actions: an update offer, or why the last update didn't finish. The last
@@ -423,6 +459,7 @@ internal fun LocalRuntimeCard(
         ) {
             DetailsSection(
                 info = info,
+                agents = agents,
                 actionsEnabled = !phase.isBusy,
                 autoOpen = autoOpenLocal,
                 onAutoOpenChange = onAutoOpenChange,
@@ -1060,7 +1097,7 @@ private fun TitleWithAction(
     }
 }
 
-/** One line per package that changes: "OpenChamber 2.4.0 → 2.5.0", versions in mono. */
+/** One line per package that changes: "T3 Code 2.4.0 → 2.5.0", versions in mono. */
 @Composable
 private fun VersionChanges(
     update: RuntimeUpdate,
@@ -1068,11 +1105,10 @@ private fun VersionChanges(
     emphasis: Color = color,
     modifier: Modifier = Modifier,
 ) {
+    val t3Name = stringResource(R.string.detail_t3)
     val changes =
-        listOfNotNull(
-            update.openChamber.takeIf { it.changed }?.let { stringResource(R.string.detail_open_chamber) to it },
-            update.openCode.takeIf { it.changed }?.let { stringResource(R.string.detail_open_code) to it },
-        )
+        listOfNotNull(update.t3.takeIf { it.changed }?.let { t3Name to it }) +
+            update.agents.filter { it.change.changed }.map { it.displayName to it.change }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(1.dp)) {
         changes.forEach { (name, change) ->
             Text(
@@ -1388,7 +1424,7 @@ private fun FooterToggle(
 }
 
 /**
- * "Open OpenChamber when the app starts": a quiet switch row in the same box as the details
+ * "Open T3 Code when the app starts": a quiet switch row in the same box as the details
  * table below it; the whole row toggles.
  */
 @Composable
@@ -1460,9 +1496,86 @@ private fun SettingSwitchRow(
     }
 }
 
+/**
+ * Three (or however many the manifest offers) agent checkboxes with their installed versions. Keep
+ * this simple: the designer lane polishes layout and copy.
+ */
+@Composable
+private fun AgentSelectionSection(
+    available: List<AgentSpec>,
+    selected: Set<String>,
+    installed: Map<String, String>,
+    enabled: Boolean,
+    beforeInstall: Boolean,
+    canApply: Boolean,
+    onToggle: (String) -> Unit,
+    onApply: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                text = stringResource(R.string.agents_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = stringResource(R.string.agents_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            available.forEach { spec ->
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(
+                                value = spec.id in selected,
+                                enabled = enabled,
+                                role = Role.Checkbox,
+                                onValueChange = { onToggle(spec.id) },
+                            )
+                            .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = spec.id in selected, onCheckedChange = null, enabled = enabled)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = spec.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    installed[spec.id]?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = MonoFamily,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            if (!beforeInstall && canApply) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onApply, enabled = enabled) {
+                        Text(stringResource(R.string.agents_apply))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DetailsSection(
     info: RuntimeInfo?,
+    agents: AgentsState,
     actionsEnabled: Boolean,
     autoOpen: Boolean?,
     onAutoOpenChange: (Boolean) -> Unit,
@@ -1508,8 +1621,10 @@ private fun DetailsSection(
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                     val unknown = stringResource(R.string.unknown_value)
-                    DetailRow(stringResource(R.string.detail_open_chamber), info.openChamberVersion ?: unknown)
-                    DetailRow(stringResource(R.string.detail_open_code), info.openCodeVersion ?: unknown)
+                    DetailRow(stringResource(R.string.detail_t3), info.t3Version ?: unknown)
+                    agents.available.filter { it.id in info.agents }.forEach { spec ->
+                        DetailRow(spec.displayName, info.agents[spec.id] ?: unknown)
+                    }
                     DetailRow(stringResource(R.string.detail_node), info.nodeVersion ?: unknown)
                     DetailRow(stringResource(R.string.detail_alpine), info.alpineVersion)
                     DetailRow(stringResource(R.string.detail_abi), info.abi)

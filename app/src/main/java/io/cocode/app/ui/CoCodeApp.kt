@@ -168,7 +168,7 @@ private class LocalActions(
     }
 
     /**
-     * Updates OpenChamber / OpenCode. The runtime stops the server, swaps in the new versions and
+     * Updates T3 Code / OpenCode. The runtime stops the server, swaps in the new versions and
      * starts it again if it was running, so the local page is dropped like on Repair. A failed
      * update shows in [LocalRuntimeController.updates]; the old version keeps working.
      */
@@ -189,7 +189,7 @@ private class LocalActions(
 }
 
 /**
- * Root of the UI: a control-room home screen and a full-screen OpenChamber web screen per server.
+ * Root of the UI: a control-room home screen and a full-screen T3 Code web screen per server.
  *
  * Once the local server is set up, a launch goes straight to it (see [openLocalOnLaunch]); Home
  * is where setup, problems and the other servers live.
@@ -250,7 +250,7 @@ internal fun CoCodeApp(
         val runtimeState = runtime.state.collectAsState().value
         val checking = runtimeState == RuntimeState.Detecting
 
-        // --- Launch: decide once per launch whether to open the last used OpenChamber directly. ---
+        // --- Launch: decide once per launch whether to open the last used T3 Code directly. ---
         val uiPrefs = rememberUiPrefs()
         val inspection = LocalInspectionMode.current
         val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -350,7 +350,7 @@ internal fun CoCodeApp(
             }
         }
 
-        // --- Notification taps: open the notified session in the local OpenChamber. ---
+        // --- Notification taps: open the notified session in the local T3 Code. ---
         var linkRequest by remember { mutableIntStateOf(0) }
         LaunchedEffect(inspection) {
             if (inspection) return@LaunchedEffect
@@ -413,6 +413,7 @@ internal fun CoCodeApp(
                         val servers by remotes.servers.collectAsStateWithLifecycle()
                         val storageState by storage.state.collectAsStateWithLifecycle()
                         val updates by runtime.updates.collectAsStateWithLifecycle()
+                        val agents by runtime.agents.collectAsStateWithLifecycle()
                         val actions =
                             remember(local, remotes, pool, nav, entry, storage, refreshStorage, requestStorageAccess, uiPrefs, webDeps) {
                                 HomeActions(
@@ -472,6 +473,7 @@ internal fun CoCodeApp(
                                     onUpdate = local::update,
                                     onCheckForUpdates = local::checkForUpdates,
                                     onDismissUpdateFailure = local::dismissUpdateFailure,
+                                    onAgentsChange = runtime::setAgents,
                                 )
                             }
                         HomeScreen(
@@ -484,6 +486,7 @@ internal fun CoCodeApp(
                             storage = storageState,
                             autoOpenLocal = uiPrefs.autoOpenLocal,
                             updates = updates,
+                            agents = agents,
                         )
                     }
 
@@ -648,7 +651,7 @@ private suspend fun openRemoteOnLaunch(
 }
 
 /**
- * A notification tap: show the local OpenChamber, starting the server first if it is stopped. The
+ * A notification tap: show the local T3 Code, starting the server first if it is stopped. The
  * web screen then opens the session itself (on its first load, or in place if already loaded).
  * Setup, problems and unsupported devices land on Home, and the link is dropped ([onDiscard]).
  */

@@ -57,7 +57,7 @@ internal class UiPrefs(
 ) {
     private val autoOpen = mutableStateOf(prefs?.getBoolean(KEY_AUTO_OPEN_LOCAL, true) ?: true)
 
-    /** Open the last used OpenChamber when the app starts. On by default. */
+    /** Open the last used T3 Code when the app starts. On by default. */
     val autoOpenLocal: Boolean get() = autoOpen.value
 
     fun updateAutoOpenLocal(enabled: Boolean) {

@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
  *   opencode/          -> guest /root/.config/opencode/{opencode.jsonc,AGENTS.md,skills,agents,commands}
  * ```
  * Private (app-only) storage keeps: guest ~/projects-private, OpenCode's session database, auth.json
- * credentials, plugin node_modules, and OpenChamber's secrets. Shared storage is readable by other
+ * credentials, plugin node_modules, and T3 Code's secrets. Shared storage is readable by other
  * apps that hold all-files access, so secrets never go there.
  */
 enum class SharedStorageStatus {

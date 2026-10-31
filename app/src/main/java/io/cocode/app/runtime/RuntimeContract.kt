@@ -3,7 +3,7 @@ package io.cocode.app.runtime
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Contract between the runtime layer (PRoot + Alpine + OpenChamber server) and the UI layer.
+ * Contract between the runtime layer (PRoot + Alpine + T3 Code + agent CLIs) and the UI layer.
  * The UI only depends on this file; implementations live in io.cocode.app.runtime.*.
  */
 
@@ -15,19 +15,23 @@ enum class InstallStep {
 
     /** Update only: copy the active environment into staging. */
     CopyEnvironment,
-    InstallOpenChamber,
-    BuildNativeModules,
+
+    /** Download, verify and extract the T3 Code server bundle. */
+    InstallServer,
+
+    /** Install the selected agent CLIs from npm. */
+    InstallAgents,
     Verify,
     ;
 
     companion object {
         /** Steps of a first setup or a repair, in order. */
         val setupSteps: List<InstallStep> =
-            listOf(DownloadRootfs, ExtractRootfs, InstallPackages, InstallOpenChamber, BuildNativeModules, Verify)
+            listOf(DownloadRootfs, ExtractRootfs, InstallPackages, InstallServer, InstallAgents, Verify)
 
-        /** Steps of an OpenChamber / OpenCode update, in order. */
+        /** Steps of a T3 Code / agent CLI update, in order. */
         val updateSteps: List<InstallStep> =
-            listOf(CopyEnvironment, InstallOpenChamber, BuildNativeModules, Verify)
+            listOf(CopyEnvironment, InstallServer, InstallAgents, Verify)
     }
 }
 
@@ -60,7 +64,7 @@ sealed interface RuntimeState {
         val detail: String?,
         /** Localised progress phrase for the current sub-step, when there is one. */
         val messageKey: MessageKey? = null,
-        /** True while updating OpenChamber/OpenCode in an existing environment, not a first setup or repair. */
+        /** True while updating the installed environment, not a first setup or repair. */
         val updating: Boolean = false,
     ) : RuntimeState
 
@@ -68,16 +72,16 @@ sealed interface RuntimeState {
 
     data class Starting(val detail: String?) : RuntimeState
 
-    /** [url] is the loopback base URL of the OpenChamber web server, e.g. http://127.0.0.1:3000 */
+    /** [url] is the loopback base URL of the T3 Code web server, e.g. http://127.0.0.1:3773 */
     data class Running(val url: String, val port: Int, val sinceEpochMs: Long) : RuntimeState
 
     data class Stopping(val detail: String?) : RuntimeState
 
-    /** [recoverable] true -> offer "Retry/Start", false -> offer "Repair (reinstall)". [phase] says what Retry should redo. */
     /**
      * [reason] is the English, technical text (logs, tests, fallbacks). [messageKey] names the
      * localised headline the UI should show instead; [detail] is raw technical output (logs, command
-     * text) and is never translated.
+     * text) and is never translated. [recoverable] true -> offer "Retry/Start", false -> offer
+     * "Repair (reinstall)". [phase] says what Retry should redo.
      */
     data class Failed(
         val reason: String,
@@ -99,32 +103,35 @@ enum class MessageKey {
     /** Linux packages (apk) failed to install. */
     PackagesFailed,
 
-    /** OpenChamber could not be installed from npm. */
-    OpenChamberInstallFailed,
+    /** The T3 Code server bundle could not be downloaded, verified or extracted. */
+    ServerInstallFailed,
 
-    /** The OpenChamber port is held by another app. */
+    /** One of the selected agent CLIs could not be installed from npm. */
+    AgentInstallFailed,
+
+    /** No agent is selected; at least one is required. */
+    AgentsRequired,
+
+    /** The T3 Code port is held by another app. */
     PortInUse,
 
-    /** OpenCode reported an error while starting. The detail carries its message. */
-    OpenCodeStartFailed,
+    /** T3 Code exited while starting. */
+    ServerExitedDuringStart,
 
-    /** OpenChamber exited while starting. */
-    ExitedDuringStart,
+    /** T3 Code did not start listening in time. */
+    ServerNotListeningInTime,
 
-    /** OpenChamber did not start listening in time. */
-    NotListeningInTime,
+    /** T3 Code did not become ready in time. */
+    ServerNotReadyInTime,
 
-    /** OpenChamber did not become ready in time. */
-    NotReadyInTime,
+    /** T3 Code stopped on its own and the restart budget is spent. */
+    ServerKeptStopping,
 
-    /** OpenChamber stopped on its own and the restart budget is spent. */
-    KeptStopping,
-
-    /** OpenChamber stopped unexpectedly. */
-    StoppedUnexpectedly,
+    /** T3 Code stopped unexpectedly. */
+    ServerStoppedUnexpectedly,
 
     /** A restart attempt failed. */
-    RestartFailed,
+    ServerRestartFailed,
 
     /** The embedded PRoot launcher is missing from the app. */
     EmbeddedProotMissing,
@@ -132,10 +139,7 @@ enum class MessageKey {
     /** Generic failure with no more specific message. */
     Generic,
 
-    /** The node-pty terminal module could not be built. */
-    NativeBuildFailed,
-
-    /** The rebuilt node-pty module does not work in the guest. */
+    /** The bundled node-pty terminal module does not work in the guest. */
     PtySmokeFailed,
 
     /** Install sub-step: unpacking the Linux base. */
@@ -144,11 +148,11 @@ enum class MessageKey {
     /** Install sub-step: installing system packages. */
     ProgressInstallingPackages,
 
-    /** Install sub-step: installing OpenChamber and OpenCode. */
-    ProgressInstallingOpenChamber,
+    /** Install sub-step: downloading and unpacking T3 Code. */
+    ProgressInstallingServer,
 
-    /** Install sub-step: building terminal support. */
-    ProgressBuildingNative,
+    /** Install sub-step: installing the selected agent CLIs. */
+    ProgressInstallingAgents,
 
     /** Install sub-step: checking the installation. */
     ProgressVerifying,
@@ -166,7 +170,7 @@ enum class MessageKey {
     UpdateNotEnoughSpace,
 }
 
-/** One package's installed version and the version an update would install. */
+/** One component's installed version and the version an update would install. */
 data class VersionChange(
     /** Installed version, or null when unknown. */
     val current: String?,
@@ -175,12 +179,19 @@ data class VersionChange(
     val changed: Boolean get() = current != target
 }
 
-/** Newer OpenChamber / OpenCode versions the installed runtime can move to. */
+/** One agent CLI that moves to a new version. */
+data class AgentChange(
+    val id: String,
+    val displayName: String,
+    val change: VersionChange,
+)
+
+/** Newer T3 Code and agent CLI versions the installed runtime can move to. */
 data class RuntimeUpdate(
-    val openChamber: VersionChange,
-    val openCode: VersionChange,
+    val t3: VersionChange,
+    val agents: List<AgentChange> = emptyList(),
 ) {
-    val hasChanges: Boolean get() = openChamber.changed || openCode.changed
+    val hasChanges: Boolean get() = t3.changed || agents.any { it.change.changed }
 }
 
 /** Why the last update attempt failed. The previous environment is kept and still usable. */
@@ -194,23 +205,24 @@ data class UpdateFailure(
 
 /** Update check and update outcome, separate from [RuntimeState] so a failed update never blocks the runtime. */
 data class RuntimeUpdateState(
-    /** A check against the npm registry is running. */
+    /** A check against GitHub and the npm registry is running. */
     val checking: Boolean = false,
     /** Non-null only when it has changes. */
     val available: RuntimeUpdate? = null,
     /** When the last check finished (success or failure), epoch ms. */
     val lastCheckedAtMs: Long? = null,
-    /** The last check could not reach the registry. [available] may still come from the app's bundled versions. */
+    /** The last check could not reach GitHub or the npm registry. [available] may still come from bundled versions. */
     val checkFailed: Boolean = false,
-    /** Set when the last update failed; cleared by a new update or [LocalRuntimeController.dismissUpdateFailure]. */
+    /** Set when the last update or agent change failed; cleared by a new one or [LocalRuntimeController.dismissUpdateFailure]. */
     val lastFailure: UpdateFailure? = null,
 )
 
 data class RuntimeInfo(
     val abi: String,
     val alpineVersion: String,
-    val openChamberVersion: String?,
-    val openCodeVersion: String?,
+    val t3Version: String?,
+    /** Installed agent versions, keyed by agent id. */
+    val agents: Map<String, String>,
     val nodeVersion: String?,
     val diskUsageBytes: Long?,
     val freeSpaceBytes: Long?,
@@ -231,6 +243,16 @@ interface LocalRuntimeController {
 
     val info: StateFlow<RuntimeInfo?>
 
+    /** Available agents, the saved selection and the installed versions. */
+    val agents: StateFlow<AgentsState>
+
+    /**
+     * Persists a new agent selection. Rejects an empty set (at least one agent is required). When a
+     * runtime is installed, queues [RuntimeOperation.ApplyAgents]: stops the server, installs/removes
+     * the diff in place, verifies, updates metadata and restarts the server if it was running.
+     */
+    fun setAgents(selected: Set<String>)
+
     fun install()
 
     fun start()
@@ -249,7 +271,7 @@ interface LocalRuntimeController {
     /** Update check state and the outcome of the last update. */
     val updates: StateFlow<RuntimeUpdateState>
 
-    /** Checks the npm registry for newer OpenChamber / OpenCode now (no-op while a check runs). */
+    /** Checks GitHub and npm for newer T3 Code / agent versions now (no-op while a check runs). */
     fun checkForUpdates()
 
     /**
@@ -282,10 +304,10 @@ sealed interface ServerTarget {
         override val id: String,
         override val displayName: String,
         override val baseUrl: String,
-        /** OpenChamber UI password, if the remote server requires one. Stored encrypted. */
+        /** T3 Code auth password, if the remote server requires one. Stored encrypted. */
         val uiPassword: String?,
         /**
-         * Allow sending the password over plain http to a non-loopback host. Off by default; R3's
+         * Allow sending the password over plain http to a non-loopback host. Off by default; the
          * confirm UI sets it. Without it a password is never sent in cleartext.
          */
         val allowInsecureHttp: Boolean = false,
@@ -310,7 +332,7 @@ sealed interface WebSessionResult {
     data class Ready(val url: String) : WebSessionResult
 
     /** Server reachable but no stored password / wrong password; UI may still load the page
-     *  and let OpenChamber show its own login screen. */
+     *  and let T3 Code show its own login screen. */
     data class NeedsLogin(val url: String) : WebSessionResult
 
     /** Remote server is protected by an interactive Cloudflare Access gateway. */
@@ -344,8 +366,8 @@ interface WebSessionCookies {
 }
 
 interface WebSessionAuthenticator {
-    /** Health-checks the target, logs in via POST /auth/session when a password is known, and stores
-     *  the session cookies through [cookies] (the capability of the target's bound profile). */
+    /** Health-checks the target, logs in via POST /api/auth/browser-session when a password is known,
+     *  and stores the session cookies through [cookies] (the capability of the target's bound profile). */
     suspend fun prepare(
         target: ServerTarget,
         cookies: WebSessionCookies,

@@ -12,7 +12,7 @@ Everything else lives in subpackages:
 - `data/`: local API client (`LocalApiClient`), WebView login (`WebSessionAuthenticatorImpl.kt`), per-target WebView profiles (`WebSessionProfiles.kt`), native http(s) downloads (`HttpDownloads*.kt`), encrypted remote server list (`EncryptedRemoteServerStore`).
 - `di/`: Koin module `appModule` (the only composition root).
 - `i18n/`: `UserMessages`, maps runtime keys to string resources.
-- `notify/`: OpenChamber stdout notification bridge, native notifications, notification actions, runtime alerts.
+- `notify/`: legacy notification bridge (its server stdout source is disconnected), native notification actions and runtime error alerts.
 - `service/`: `RuntimeService` (foreground service), its pure `RuntimeServicePolicy`, and `WakeHold`.
 - `runtime/`: runtime controller, install, embedded PRoot process, shared storage, network DNS, manifest, fs helpers (see `runtime/codemap.md`).
 - `ui/`: Compose screens, theme, components, web view, previews (see `ui/codemap.md`).
@@ -20,7 +20,7 @@ Everything else lives in subpackages:
 ## Design
 
 - Composition root is `di/AppModule.kt`. Koin `single`s only. Runtime lookups via `get()`/`inject()` happen in `CoCodeApplication`, `MainActivity`, `service/RuntimeService` (`inject`), and `notify/NotificationActionReceiver` (`KoinComponent`).
-- Process-wide singletons: `OkHttpClient` (connect 5 s, read 10 s), `RemoteServerStore`, `OpenChamberNotifier`, `LocalApiClient`, `NotificationSink`, `NotificationObserver`, `SharedStorageControllerImpl`, `OpenChamberServer`, `LocalRuntimeController`, `WebSessionAuthenticator`, `WebSessionProfiles`, `HttpDownloadStarter`.
+- Process-wide singletons: `OkHttpClient` (connect 5 s, read 10 s), `RemoteServerStore`, `OpenChamberNotifier`, `LocalApiClient`, `NotificationSink`, `NotificationObserver`, `SharedStorageControllerImpl`, `T3Server`, `LocalRuntimeController`, `WebSessionAuthenticator`, `WebSessionProfiles`, `HttpDownloadStarter`.
 - WebView session order: the page's profile is bound first (`WebSessionProfiles.acquire` → `WebViewPool.obtain`), and only then is `WebSessionAuthenticator.prepare(target, cookies)` called. A failed binding never reaches authentication.
 - `OpenSessionLink` is an `object` (process-wide `MutableStateFlow`) so a tap that launches a fresh activity still reaches the UI. It is consumed once via `take()`.
 - `MainActivity` reads a notification intent only when `savedInstanceState == null` (cold start) or in `onNewIntent` (singleTop). Intents with `FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY` (Recents replay) are ignored.
@@ -44,6 +44,6 @@ Everything else lives in subpackages:
 - Depends on `runtime/` (controllers, `RuntimePaths`, `RuntimeSecrets`, `ProcessScanner`, `HealthProbe`, storage, installer) and `ui/` (`CoCodeApp`).
 - `di/AppModule.kt` wires `data/`, `notify/`, `service/`, `runtime/*`, and `i18n` consumers.
 - `service/RuntimeService.kt` is started only through `RuntimeService.request` (from `runtime/` via `ForegroundStarter`).
-- `notify/NotificationSink.kt` receives server stdout lines through `ProotOpenChamberServer`'s `notificationSink` callback.
-- Local OpenChamber HTTP endpoints used from this folder tree (loopback only): `/auth/session`, `/health`, `/api/sessions/status`, `/api/config/settings`, `/api/session/:id/prompt`, `/api/session/:id/permission/:rid/reply`, `/api/session/:id/form/:fid/reply`.
+- `notify/NotificationSink.kt` is retained only for the notification bridge that is scheduled for removal; the T3 Code server produces no stdout notification lines.
+- Local T3 Code HTTP endpoints used from this folder tree (loopback only): `/api/auth/browser-session`, `/.well-known/t3/environment`, `/api/sessions/status`, `/api/config/settings`, `/api/session/:id/prompt`, `/api/session/:id/permission/:rid/reply`, `/api/session/:id/form/:fid/reply`.
 - Manifest is consumed by the Android system; `res/` strings are referenced as `R.string.*` across `notify/`, `service/`, `i18n/`, and `di/`.

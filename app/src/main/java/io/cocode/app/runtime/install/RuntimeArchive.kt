@@ -54,18 +54,25 @@ object RuntimeArchive {
         }
     }
 
+    /**
+     * Extracts a `.tar.gz`. [stripComponents] drops that many leading path segments from every
+     * entry, which removes a release tarball's single top-level directory and writes its contents
+     * straight into [destination].
+     */
     fun extractTarGz(
         input: InputStream,
         destination: File,
+        stripComponents: Int = 0,
     ) {
         GzipCompressorInputStream(input.buffered()).use { gzip ->
-            extractTar(gzip, destination)
+            extractTar(gzip, destination, stripComponents)
         }
     }
 
     private fun extractTar(
         input: InputStream,
         destination: File,
+        stripComponents: Int = 0,
     ) {
         destination.mkdirs()
         val canonicalRoot = destination.canonicalFile
@@ -73,7 +80,14 @@ object RuntimeArchive {
         TarArchiveInputStream(input).use { tar ->
             var entry = tar.nextEntry
             while (entry != null) {
-                val target = File(destination, entry.name).canonicalFile
+                val relativeName = stripLeadingSegments(entry.name, stripComponents)
+                // The archive's top-level directory (or anything above the kept depth) has no body
+                // of its own; destination already exists.
+                if (relativeName.isEmpty()) {
+                    entry = tar.nextEntry
+                    continue
+                }
+                val target = File(destination, relativeName).canonicalFile
                 require(target.path == canonicalRoot.path || target.path.startsWith(canonicalRoot.path + File.separator)) {
                     "Archive entry escapes destination: ${entry.name}"
                 }
@@ -89,7 +103,8 @@ object RuntimeArchive {
                         pendingSymlinks += target to entry.linkName
                     }
                     entry.isLink -> {
-                        val source = File(destination, entry.linkName).canonicalFile
+                        val linkRelative = stripLeadingSegments(entry.linkName, stripComponents)
+                        val source = File(destination, linkRelative).canonicalFile
                         require(source.path == canonicalRoot.path || source.path.startsWith(canonicalRoot.path + File.separator)) {
                             "Archive hard link escapes destination: ${entry.linkName}"
                         }
@@ -162,5 +177,15 @@ object RuntimeArchive {
         }
         // Some base images intentionally point at host-provided paths (for example /etc/mtab).
         // Those links are not needed inside the app sandbox and are left absent.
+    }
+
+    /** Drops [count] leading path segments; returns "" when nothing is left. */
+    internal fun stripLeadingSegments(
+        name: String,
+        count: Int,
+    ): String {
+        if (count <= 0) return name.trimStart('/')
+        val parts = name.trim('/').split('/')
+        return parts.drop(count).filter { it.isNotEmpty() }.joinToString("/")
     }
 }

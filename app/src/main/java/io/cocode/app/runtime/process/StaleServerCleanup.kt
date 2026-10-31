@@ -1,25 +1,16 @@
 package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.RuntimePaths
-import java.io.File
 
 /**
  * Clears what a crashed earlier run left behind before a new server start.
  *
- * OpenChamber refuses to start while `<data>/run/openchamber-<port>.pid` names a live instance, so
- * leftovers block every restart. Process ownership is decided by [ProcessScanner]; this object only
- * handles the pid file and the port wait.
+ * T3 Code keeps its state under `T3CODE_HOME` (`/root/.t3`) and does not use a pid file this app can
+ * trust. Cleanup is therefore owned-process-only: [ProcessScanner] proves which PRoot trees belong
+ * to this app (uid + launcher + rootfs) and only those are killed. The port wait then decides whether
+ * a foreign listener is in the way; a foreign listener is never touched.
  */
 object StaleServerCleanup {
-    /** OpenChamber's pid-file name for [port]: `openchamber-<port>.pid` (cli-lifecycle.js). */
-    fun pidFileName(port: Int): String = "openchamber-$port.pid"
-
-    /** Pid files under the guest run dir that name [port]. */
-    fun staleFiles(
-        runDir: File,
-        port: Int,
-    ): List<File> = listOf(File(runDir, pidFileName(port))).filter(File::exists)
-
     /**
      * Polls [isPortFree] every [POLL_MILLIS] for up to [timeoutMillis]. Returns true as soon as the
      * port is free. Time is injected so the wait is unit-tested without sleeping.
@@ -44,9 +35,8 @@ object StaleServerCleanup {
 }
 
 /**
- * Performs one pre-start cleanup: kills this app's owned runtime processes, removes the stale pid
- * file, and waits for the port. Returns whether the port is free afterwards; the caller must refuse
- * to launch when it is not.
+ * Performs one pre-start cleanup: kills this app's owned runtime processes and waits for the port.
+ * Returns whether the port is free afterwards; the caller must refuse to launch when it is not.
  */
 class ProotStaleServerCleaner(
     private val paths: RuntimePaths,
@@ -56,11 +46,9 @@ class ProotStaleServerCleaner(
 ) {
     fun cleanBeforeStart(
         port: Int,
-        guestRunDir: File,
         prootPath: String,
     ): Boolean {
         killOwnedRuntime(scanner, prootPath, paths.rootfs.absolutePath, signal)
-        StaleServerCleanup.staleFiles(guestRunDir, port).forEach { runCatching { it.delete() } }
         return StaleServerCleanup.awaitPortFree(port, isPortFree = isPortFree)
     }
 }

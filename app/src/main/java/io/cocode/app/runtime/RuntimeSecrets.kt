@@ -5,11 +5,11 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * The UI password that protects the on-device OpenChamber server.
+ * The password that protects the on-device T3 Code server.
  *
- * OpenChamber listens on loopback, which any app with INTERNET can reach. The password is
- * persisted in the app-private runtime directory (see the and-code LocalServerAuth) so the server
- * and the WebView login agree across restarts. It is passed to the server via OPENCHAMBER_UI_PASSWORD.
+ * T3 Code listens on loopback, which any app with INTERNET can reach. The password is persisted in
+ * the app-private runtime directory so the server and the WebView login agree across restarts. It is
+ * passed to the server via T3CODE_AUTH_PASSWORD; T3 requires at least 8 characters.
  */
 object RuntimeSecrets {
     private const val SECRET_BYTES = 32

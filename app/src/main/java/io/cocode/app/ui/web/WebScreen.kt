@@ -127,7 +127,7 @@ private fun WebOverlay?.kind(): Any? =
     }
 
 /**
- * Full-screen OpenChamber for one server.
+ * Full-screen T3 Code for one server.
  *
  * [target] is null while the server can't be shown: the local runtime isn't running, or a saved
  * server was removed. [sessionKey] identifies one server session; when it changes (e.g. the local
@@ -274,7 +274,7 @@ internal fun WebScreen(
         }
         phase =
             when (result) {
-                // NeedsLogin: OpenChamber shows its own sign-in page at the same address.
+                // NeedsLogin: T3 Code shows its own sign-in page at the same address.
                 is WebSessionResult.Ready, is WebSessionResult.NeedsLogin, is WebSessionResult.NeedsGatewayLogin -> {
                     val gateway = result is WebSessionResult.NeedsGatewayLogin
                     gatewayPending = gateway
@@ -362,13 +362,13 @@ internal fun WebScreen(
             inspection -> WebOverlay.Connecting
             else -> null
         }
-    // OpenChamber's own notifications are left to the page only while the local page is on screen.
+    // T3 Code's own notifications are left to the page only while the local page is on screen.
     LocalPageVisibilityEffect(isLocal = isLocal && !inspection, overlayShown = overlay != null)
 
     BackHandler {
         when {
             overlay == null && web != null && web.canGoBack() -> web.goBack()
-            // The local OpenChamber is the app's main screen: leaving it with Back behaves like
+            // The local T3 Code is the app's main screen: leaving it with Back behaves like
             // leaving any app (to the launcher), not a step back into the control room. The edge
             // handle still offers Home. Panels with an error or progress keep the old way out.
             isLocal && overlay == null -> context.findActivity()?.moveTaskToBack(true) ?: onExit()

@@ -11,8 +11,8 @@ import io.cocode.app.notify.LocalPageVisibility
 import io.cocode.app.notify.NotifyPolicy
 
 /**
- * Tells the notification code whether the local OpenChamber page is really on screen, so only then
- * are OpenChamber's events left to the page itself (see NotifyPolicy.localPageShowing).
+ * Tells the notification code whether the local T3 Code page is really on screen, so only then
+ * are T3 Code's events left to the page itself (see NotifyPolicy.localPageShowing).
  *
  * Uses this screen's own lifecycle (the navigation entry): RESUMED only while it is the current
  * screen, not during a transition, and not behind another activity such as a file picker. Any

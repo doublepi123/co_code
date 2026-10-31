@@ -7,7 +7,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 /*
- * OpenChamber defaults to a monospace UI font, so headings and labels use the system monospace
+ * T3 Code defaults to a monospace UI font, so headings and labels use the system monospace
  * face for the same "terminal" feel, while body copy stays in the system sans for readability.
  */
 internal val MonoFamily: FontFamily = FontFamily.Monospace

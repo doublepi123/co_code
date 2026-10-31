@@ -31,7 +31,7 @@ Files:
 
 ## Flow
 
-Cold launch to the last used OpenChamber:
+Cold launch to the last used T3 Code:
 0. `resumeTarget(rememberedId, remoteIds, linkPending)` picks the instance: a pending notification link always means local; a remembered remote opens it directly (no detection wait, no local start); a remembered remote that no longer exists falls back to local; otherwise the local logic below runs. The launch cover covers a remote resume from frame one (`remoteResume`). The instance's remembered page (`page_path:<id>`) is loaded only if the target's canonical origin still matches `page_origin:<id>`.
 1. `CoCodeApp` composes with `launchPending = true`. `initialLaunchStage` yields `Waiting` (Detecting, auto-open on), `Opening` (Running, Starting or Stopped, auto-open on, or a remembered remote), or `Done`.
 2. `Waiting` shows only `LaunchCover` (background plus `ChamberMark`). `NavHost` is not composed yet.

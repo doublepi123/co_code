@@ -72,7 +72,7 @@ internal fun initialLaunchStage(
 
 /** Where a launch that remembers the last used instance goes. */
 internal sealed interface ResumeTarget {
-    /** The local OpenChamber: the existing local launch logic (with its state rules) applies. */
+    /** The local T3 Code: the existing local launch logic (with its state rules) applies. */
     data object Local : ResumeTarget
 
     /** This remote server, opened directly; the local runtime is not started for it. */
@@ -149,7 +149,7 @@ internal fun originAddress(baseUrl: String): String? {
 }
 
 /**
- * A remembered page [path] (`/openchamber/?session=…`, already a same-origin path+query) restored on
+ * A remembered page [path] (`/t3/?session=…`, already a same-origin path+query) restored on
  * the origin of [baseUrl]. The saved path is absolute, so it already contains the instance's base
  * path: joining it to the full base URL (as a notification link is joined) would repeat that path.
  * The path is appended untouched, so the characters saved on disk keep their original escaping.

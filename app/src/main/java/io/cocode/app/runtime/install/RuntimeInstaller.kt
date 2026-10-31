@@ -12,27 +12,29 @@ data class RuntimeMetadata(
     val alpineVersion: String,
     val abi: String,
     val port: Int,
-    val openChamberVersion: String,
-    val openCodeVersion: String,
+    /** Installed T3 Code server bundle version (`0.1.6-pw.5`). */
+    val t3Version: String,
+    /** Installed agent versions, keyed by agent id. */
+    val agents: Map<String, String> = emptyMap(),
     val nodeVersion: String? = null,
     val installedAt: Long,
 )
 
-/** npm versions of the two packages the runtime installs (`@openchamber/web`, `@opencode/cli`). */
+/**
+ * Versions the update check compares: the T3 Code server plus one version per installed agent.
+ * [agents] holds only the agents that are installed (and selected).
+ */
 data class PackageVersions(
-    val openChamber: String,
-    val openCode: String,
+    val t3: String,
+    val agents: Map<String, String> = emptyMap(),
 )
 
 /**
- * Where newer package versions come from (the npm registry in the app). Implementations do network
- * I/O and must be called off the main thread. Throws when the registry cannot be read.
+ * Where newer versions come from (GitHub releases and the npm registry in the app). Implementations
+ * do network I/O and must be called off the main thread. Throws when a source cannot be read.
  */
 fun interface PackageVersionSource {
-    /**
-     * The newest stable versions allowed for this app: same major version as [pinned] (the manifest's
-     * versions), no pre-releases, OpenCode at least the app's minimum.
-     */
+    /** The newest versions for this environment, never below [pinned]. */
     suspend fun latest(pinned: PackageVersions): PackageVersions
 }
 
@@ -69,24 +71,34 @@ interface RuntimeInstaller {
     /**
      * Builds a fresh environment in staging, verifies it, then atomically activates it. The active
      * environment is untouched until that swap, so a failed install or repair keeps the old one.
-     * [versions] null installs the versions pinned in the app's runtime manifest.
-     * Throws on failure.
+     * [agents] is the selected agent set and must not be empty; agents are installed at their latest
+     * npm version. Throws on failure.
      */
     suspend fun install(
         report: InstallReporter,
-        versions: PackageVersions? = null,
+        agents: Set<String>,
     ): InstalledRuntime
 
     /**
-     * Updates OpenChamber / OpenCode to [versions] without downloading a new Linux base: copies the
-     * active environment into staging, reinstalls the npm packages there, rebuilds node-pty, verifies,
-     * then swaps it in like [install]. The active environment is untouched until that swap, so a failed
-     * update keeps the old one. The server must be stopped first. Throws on failure (a
+     * Updates T3 Code and the selected agents to [versions] without downloading a new Linux base:
+     * copies the active environment into staging, replaces the T3 bundle, reinstalls changed agents,
+     * verifies, then swaps it in like [install]. The active environment is untouched until that swap,
+     * so a failed update keeps the old one. The server must be stopped first. Throws on failure (a
      * [io.cocode.app.runtime.UserFacingException] with `UpdateNotEnoughSpace` when the disk is too full).
      */
     suspend fun update(
         report: InstallReporter,
         versions: PackageVersions,
+    ): InstalledRuntime
+
+    /**
+     * Applies an agent selection to the active environment in place (the server must be stopped).
+     * Removes agents that are no longer selected, installs the new ones, verifies every selected
+     * agent and rewrites `metadata.json`. Throws on failure, leaving the previous metadata untouched.
+     */
+    suspend fun applyAgents(
+        report: InstallReporter,
+        selected: Set<String>,
     ): InstalledRuntime
 
     /**

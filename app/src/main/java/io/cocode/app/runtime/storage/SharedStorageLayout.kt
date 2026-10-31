@@ -17,7 +17,7 @@ object SharedStorageLayout {
 
     /**
      * Guest paths, all under the persistent home `~` (= /root). The server's working directory is `~`,
-     * so OpenChamber's default project root and file browser start there.
+     * so T3 Code's default project root and file browser start there.
      */
     const val GUEST_HOME = "/root"
     const val GUEST_PROJECTS = "/root/projects"
@@ -180,7 +180,7 @@ object SharedStorageLayout {
           - service.json and its .tmp file: they contain a password,
           - node_modules: plugin installs need symlinks, which shared storage cannot hold,
           - OpenCode's session database, auth.json credentials,
-          - OpenChamber's data directory and secrets.
+          - T3 Code's data directory and secrets.
 
         Caveat: shared storage has no symlinks and no executable bits. Projects that rely on
         symlinks, node_modules or executable scripts can misbehave here, and git may report

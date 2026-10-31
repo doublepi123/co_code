@@ -54,10 +54,10 @@ class LocalApiClientCancellationTest {
         )
 
     private fun login(): MockResponse =
-        MockResponse().setResponseCode(200).addHeader("Set-Cookie", "oc_ui_session_3000=tok; Path=/; HttpOnly")
+        MockResponse().setResponseCode(200).addHeader("Set-Cookie", "t3_session_3773=tok; Path=/; HttpOnly")
 
     private fun loginCookie(value: String): MockResponse =
-        MockResponse().setResponseCode(200).addHeader("Set-Cookie", "oc_ui_session_3000=$value; Path=/; HttpOnly")
+        MockResponse().setResponseCode(200).addHeader("Set-Cookie", "t3_session_3773=$value; Path=/; HttpOnly")
 
     private fun delayed(
         body: String,
@@ -227,7 +227,7 @@ class LocalApiClientCancellationTest {
                 MockResponse()
                     .setResponseCode(200)
                     .setBody("{}")
-                    .addHeader("Set-Cookie", "oc_ui_session_3000=A2; Path=/; HttpOnly"),
+                    .addHeader("Set-Cookie", "t3_session_3773=A2; Path=/; HttpOnly"),
             )
 
             val a = async { client.send(ApiRequest("GET", "/a", null)) }
@@ -252,8 +252,8 @@ class LocalApiClientCancellationTest {
             repeat(4) { server.takeRequest() }
             val last = server.takeRequest()
             val cookie = last.getHeader("Cookie").orEmpty()
-            assertTrue("expected B session cookie, got: $cookie", cookie.contains("oc_ui_session_3000=B"))
-            assertFalse("A's late cookie must not win", cookie.contains("oc_ui_session_3000=A2"))
+            assertTrue("expected B session cookie, got: $cookie", cookie.contains("t3_session_3773=B"))
+            assertFalse("A's late cookie must not win", cookie.contains("t3_session_3773=A2"))
         }
 
     @Test

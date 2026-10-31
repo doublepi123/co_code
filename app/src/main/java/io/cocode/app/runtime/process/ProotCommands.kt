@@ -12,8 +12,8 @@ object ProotCommands {
     const val GUEST_HOME = "/root"
     const val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     const val GUEST_NODE = "/usr/bin/node"
-    const val GUEST_OPENCODE = "/usr/local/bin/opencode"
-    const val OPENCHAMBER_CLI = "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js"
+    const val T3_CLI = "/opt/t3/bin.mjs"
+    const val T3_HOME = "/root/.t3"
     const val SHIM_PATH = "/opt/cocode/android-shim.cjs"
 
     /** Shared PRoot prefix: kill-on-exit, link2symlink, fake root, rootfs and the Android mounts. */
@@ -61,8 +61,8 @@ object ProotCommands {
             listOf("/bin/sh", "-lc", script)
 
     /**
-     * The OpenChamber server, bound to loopback and running in the foreground. Private-only binds:
-     * ~/projects is the private workspace.
+     * The T3 Code server, bound to loopback, running in the foreground with the guest home as the
+     * working directory. Private-only binds: ~/projects is the private workspace.
      */
     fun serverCommand(
         proot: File,
@@ -70,54 +70,46 @@ object ProotCommands {
         home: File,
         workspace: File,
         storageArguments: List<String>,
-        port: Int,
     ): List<String> =
         serverCommand(
             proot = proot,
             rootfs = rootfs,
             binds = GuestBinds.privateOnly(home = home, privateWorkspace = workspace),
             extraBinds = storageArguments,
-            port = port,
         )
 
-    /**
-     * The OpenChamber server with an explicit bind set. The working directory is the home (`~`), so
-     * OpenChamber's default project root and file browser start there.
-     */
+    /** The T3 Code server with an explicit bind set; the port comes from the environment. */
     fun serverCommand(
         proot: File,
         rootfs: File,
         binds: GuestBinds,
         extraBinds: List<String>,
-        port: Int,
     ): List<String> =
         prootArguments(
             proot,
             rootfs,
             bindArguments(binds.specs() + extraBinds) + listOf("-w", SharedStorageLayout.GUEST_HOME),
         ) +
-            listOf(GUEST_NODE, OPENCHAMBER_CLI, "serve", "--foreground", "--port", port.toString())
+            listOf(GUEST_NODE, T3_CLI)
 
     /** Environment for the long-running server: cleared by the caller, then set to exactly this. */
     fun serverEnvironment(
         suiteEnvironment: Map<String, String>,
         prootTmp: File,
+        port: Int,
         uiPassword: String,
     ): Map<String, String> =
         buildMap {
             putAll(suiteEnvironment)
             put("PROOT_TMP_DIR", prootTmp.absolutePath)
             putAll(guestBaseEnvironment())
-            put("OPENCHAMBER_HOST", "127.0.0.1")
-            put("OPENCHAMBER_UI_PASSWORD", uiPassword)
-            // The relay phones home to a hosted service; this app never uses it.
-            put("OPENCHAMBER_RELAY_HOST", "off")
-            // Native notifications: the server writes one `[OpenChamberDesktopNotify] {json}` line per event.
-            put("OPENCHAMBER_DESKTOP_NOTIFY", "true")
+            put("T3CODE_HOST", "127.0.0.1")
+            put("T3CODE_PORT", port.toString())
+            put("T3CODE_NO_BROWSER", "true")
+            put("T3CODE_HOME", T3_HOME)
+            put("T3CODE_AUTH_PASSWORD", uiPassword)
+            // Codex/OpenCode must not try to update themselves over the pinned npm install.
             put("OPENCODE_DISABLE_AUTOUPDATE", "true")
-            put("OPENCHAMBER_OPENCODE_BIN", GUEST_OPENCODE)
-            // First boot can be slow (cold node + opencode); the 10 s default timed out while Dozing.
-            put("OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS", "15000")
             // Android's SELinux makes os.networkInterfaces() throw; the shim supplies a loopback list.
             put("NODE_OPTIONS", "--require $SHIM_PATH")
         }

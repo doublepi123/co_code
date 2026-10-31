@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
+import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.RuntimeInfo
 import io.cocode.app.runtime.RuntimeState
 import io.cocode.app.runtime.RuntimeUpdateState
@@ -86,10 +87,11 @@ internal class HomeActions(
     /** Stops the local server and starts it again, so new folder settings apply. */
     val onRestartLocal: () -> Unit = {},
     val onAutoOpenChange: (Boolean) -> Unit = {},
-    /** Installs the available OpenChamber / OpenCode update (after the card has asked). */
+    /** Installs the available T3 Code / OpenCode update (after the card has asked). */
     val onUpdate: () -> Unit = {},
     val onCheckForUpdates: () -> Unit = {},
     val onDismissUpdateFailure: () -> Unit = {},
+    val onAgentsChange: (Set<String>) -> Unit = {},
 )
 
 /** The storage card only makes sense where the local server can exist at all. */
@@ -112,10 +114,12 @@ internal fun HomeScreen(
     actions: HomeActions,
     checking: Boolean = false,
     storage: SharedStorageState? = null,
-    /** "Open OpenChamber when the app starts"; null hides the setting. */
+    /** "Open T3 Code when the app starts"; null hides the setting. */
     autoOpenLocal: Boolean? = null,
     /** Update check and the outcome of the last update of the local server. */
     updates: RuntimeUpdateState = RuntimeUpdateState(),
+    /** Available agents, the saved selection and the installed versions. */
+    agents: AgentsState = AgentsState(),
     /**
      * "Keep screen on while the local server runs"; null hides the setting. By default the app's
      * own setting (the process-wide [io.cocode.app.ui.ScreenAwakeController]), null in previews.
@@ -183,6 +187,8 @@ internal fun HomeScreen(
                         onUpdate = actions.onUpdate,
                         onCheckForUpdates = actions.onCheckForUpdates,
                         onDismissUpdateFailure = actions.onDismissUpdateFailure,
+                        agents = agents,
+                        onAgentsChange = actions.onAgentsChange,
                         modifier = Modifier.revealOnEnter(1, animate),
                     )
                     AnimatedVisibility(

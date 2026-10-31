@@ -36,7 +36,7 @@ internal class GuestOutputPump(
     private val input: InputStream,
     private val childAlive: () -> Boolean,
     private val onLine: (String) -> Unit,
-    threadName: String = "openchamber-install-output",
+    threadName: String = "t3-install-output",
     /** Source of deadlines. drain, abort and the teardown helper all read the same clock. */
     private val clock: () -> Long = System::nanoTime,
 ) {
@@ -119,7 +119,7 @@ internal class GuestOutputPump(
         closing = true
         // close() may itself block on some stream implementations, so it runs on a helper thread and
         // only the caller's wait is bounded. A close that never returns leaves that helper behind (daemon).
-        val closer = Thread({ runCatching { input.close() } }, "openchamber-output-close").apply { isDaemon = true }
+        val closer = Thread({ runCatching { input.close() } }, "t3-output-close").apply { isDaemon = true }
         var interrupted: InterruptedException? = null
         try {
             closer.start()

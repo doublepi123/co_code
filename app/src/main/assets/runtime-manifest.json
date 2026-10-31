@@ -1,10 +1,37 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "2026.10.18.1",
+  "runtimeVersion": "2026.10.31.1",
   "alpineVersion": "3.24.1",
-  "openChamberVersion": "2.4.0",
-  "openCodeVersion": "2.0.32",
-  "port": 3000,
+  "port": 3773,
+  "t3": {
+    "repository": "doublepi123/t3code",
+    "version": "0.1.6-pw.5",
+    "assetPattern": "t3-{version}-android-linux-{arch}-musl.tar.gz",
+    "architectures": {
+      "arm64-v8a": "arm64",
+      "x86_64": "x64"
+    }
+  },
+  "agents": [
+    {
+      "id": "codex",
+      "npmPackage": "@openai/codex",
+      "bin": "codex",
+      "displayName": "Codex"
+    },
+    {
+      "id": "claude",
+      "npmPackage": "@anthropic-ai/claude-code",
+      "bin": "claude",
+      "displayName": "Claude Code"
+    },
+    {
+      "id": "opencode",
+      "npmPackage": "@opencode/cli",
+      "bin": "opencode",
+      "displayName": "OpenCode"
+    }
+  ],
   "architectures": {
     "arm64-v8a": {
       "alpineUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.1-aarch64.tar.gz",

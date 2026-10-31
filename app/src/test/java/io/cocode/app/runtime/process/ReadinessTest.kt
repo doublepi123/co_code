@@ -8,39 +8,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReadinessTest {
-    private fun report(
-        status: String? = "ok",
-        ready: Boolean = false,
-        running: Boolean = false,
-        error: String? = null,
-        serverId: String? = "id-1",
-    ) = HealthReport(status, ready, running, error, serverId)
+    private fun report(environmentId: String? = "env-1", version: String? = "0.1.6-pw.5") =
+        HealthReport(environmentId, version)
 
     @Test
-    fun `running requires ok AND opencode ready`() {
-        assertEquals(Verdict.Ready, Readiness.verdict(report(ready = true, running = true)))
-        assertEquals(Verdict.Waiting, Readiness.verdict(report(ready = false, running = true)))
+    fun `an environment document is ready`() {
+        assertEquals(Verdict.Ready, Readiness.verdict(report()))
     }
 
     @Test
-    fun `web server not ok keeps waiting`() {
-        assertEquals(Verdict.Waiting, Readiness.verdict(report(status = "starting", ready = true)))
+    fun `no answer or no identity keeps waiting`() {
         assertEquals(Verdict.Waiting, Readiness.verdict(null))
+        assertEquals(Verdict.Waiting, Readiness.verdict(report(environmentId = null)))
+        assertEquals(Verdict.Waiting, Readiness.verdict(report(environmentId = " ")))
     }
 
     @Test
-    fun `opencode error while not running fails the start with its message`() {
-        val verdict = Readiness.verdict(report(ready = false, running = false, error = "port 4096 busy"))
-        assertEquals(Verdict.OpenCodeFailed("port 4096 busy"), verdict)
-    }
-
-    @Test
-    fun `an error while opencode is still running is not yet a failure`() {
-        assertEquals(Verdict.Waiting, Readiness.verdict(report(error = "transient", running = true)))
-    }
-
-    @Test
-    fun `identity is stable when the server id does not change`() {
+    fun `identity is stable when the environment id does not change`() {
         assertTrue(Readiness.identityStable(listOf("a", "a", null, "a")))
         assertTrue(Readiness.identityStable(listOf(null, null)))
     }
@@ -51,20 +35,28 @@ class ReadinessTest {
     }
 
     @Test
-    fun `health body parses the readiness fields`() {
+    fun `listen marker is the t3 pino line`() {
+        val line = "[12:00:00.000] INFO (#123): Listening on http://127.0.0.1:3773"
+        assertEquals("Listening on http://127.0.0.1:3773", Readiness.listenMarker(3773))
+        assertTrue(Readiness.childListening(listOf(line), 3773))
+        assertFalse(Readiness.childListening(listOf(line), 3774))
+    }
+
+    @Test
+    fun `health body parses the environment document`() {
         val parsed =
             HealthProbe.parse(
-                """{"status":"ok","isOpenCodeReady":true,"openCodeRunning":true,"serverId":"srv-9","lastOpenCodeError":null}""",
+                """{"environmentId":"5b0c8f4e-1a2b-4c3d-8e9f-0123456789ab","serverVersion":"0.1.6-pw.5","capabilities":{}}""",
             )!!
 
-        assertEquals("ok", parsed.status)
-        assertTrue(parsed.isOpenCodeReady)
-        assertEquals("srv-9", parsed.serverId)
-        assertNull(parsed.lastOpenCodeError)
+        assertEquals("5b0c8f4e-1a2b-4c3d-8e9f-0123456789ab", parsed.environmentId)
+        assertEquals("0.1.6-pw.5", parsed.serverVersion)
+        assertTrue(parsed.serverOk)
     }
 
     @Test
     fun `a non-json body is not a health report`() {
-        assertNull(HealthProbe.parse("<html>not openchamber</html>"))
+        assertNull(HealthProbe.parse("<html>not t3</html>"))
+        assertFalse(HealthProbe.parse("""{"serverVersion":"0.1.6-pw.5"}""")!!.serverOk)
     }
 }

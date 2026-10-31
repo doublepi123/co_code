@@ -23,9 +23,9 @@ Invariant: no operation follows a link. This also rules out loops.
 
 ## Flow
 
-1. Environment swap and cleanup: `install/EnvironmentActivation.kt` and `install/OpenChamberInstaller.kt` call `deleteTree` or `deleteTreeOrThrow` on `staging`, `rollback` and the leftover staging tree.
+1. Environment swap and cleanup: `install/EnvironmentActivation.kt` and `install/RuntimeEnvironmentInstaller.kt` call `deleteTree` or `deleteTreeOrThrow` on `staging`, `rollback` and the leftover staging tree.
 2. Disk usage: `LocalRuntimeController.refreshInfo` → `treeSize(paths.root)`.
-3. Home seeding: `OpenChamberInstaller.seedHome` → `copyTreeNoFollow` from the legacy `rootfs/root` or the Alpine skeleton, only when the home is empty. Update copy: `OpenChamberInstaller.update` → `copyTreeStrict(environment, staging)`.
+3. Home seeding: `RuntimeEnvironmentInstaller.seedHome` → `copyTreeNoFollow` from the legacy `rootfs/root` or the Alpine skeleton, only when the home is empty. Update copy: `RuntimeEnvironmentInstaller.update` → `copyTreeStrict(environment, staging)`.
 4. Git config and state files: `storage/GitConfigWriter` → `writeFileReplacing` for both `shared-storage.gitconfig` and `.gitconfig`.
 5. Removal: `RuntimeInstallerImpl.discardEnvironment/removeAll` use `deleteTreeOrThrow`. `ProotStaleServerCleaner` deletes only the stale pid file, with `File.delete`, not this package.
 

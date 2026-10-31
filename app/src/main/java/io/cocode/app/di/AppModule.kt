@@ -21,8 +21,9 @@ import io.cocode.app.notify.ProcessForeground
 import io.cocode.app.runtime.DefaultLocalRuntimeController
 import android.system.Os
 import io.cocode.app.runtime.ForegroundStarter
+import io.cocode.app.runtime.PrefsAgentSelectionStore
 import io.cocode.app.runtime.process.ProcessScanner
-import io.cocode.app.runtime.process.OpenChamberServer
+import io.cocode.app.runtime.process.T3Server
 import io.cocode.app.runtime.process.killOwnedRuntime
 import io.cocode.app.runtime.SharedStorageController
 import io.cocode.app.runtime.storage.PrefsSharedStoragePrefs
@@ -36,8 +37,9 @@ import io.cocode.app.runtime.RuntimeSecrets
 import io.cocode.app.runtime.RuntimeState
 import io.cocode.app.runtime.RuntimeStateListener
 import io.cocode.app.runtime.WebSessionAuthenticator
+import io.cocode.app.runtime.install.DefaultPackageVersionSource
+import io.cocode.app.runtime.install.GithubT3ReleaseSource
 import io.cocode.app.runtime.install.NpmPackageVersionSource
-import io.cocode.app.runtime.install.PackageVersions
 import io.cocode.app.runtime.install.RuntimeInstallerImpl
 import io.cocode.app.runtime.network.AndroidNetworkEvents
 import io.cocode.app.runtime.network.AndroidSystemDnsProvider
@@ -49,7 +51,7 @@ import io.cocode.app.runtime.install.VerifiedRuntimeDownloader
 import io.cocode.app.runtime.manifest.RuntimeManifestReader
 import io.cocode.app.runtime.process.EmbeddedCommandSuite
 import io.cocode.app.runtime.process.HealthProbe
-import io.cocode.app.runtime.process.ProotOpenChamberServer
+import io.cocode.app.runtime.process.ProotT3Server
 import io.cocode.app.runtime.process.ProotStaleServerCleaner
 import io.cocode.app.ui.ScreenAwakeController
 import io.cocode.app.ui.UiPrefs
@@ -92,7 +94,7 @@ val appModule =
                 baseUrl = { (get<LocalRuntimeController>().state.value as? RuntimeState.Running)?.url },
                 password = { RuntimeSecrets.existingUiPassword(paths) },
                 // Without this, LocalApiClient denies every request by default.
-                localReady = LocalReadiness { get<OpenChamberServer>().readyLaunchId() },
+                localReady = LocalReadiness { get<T3Server>().readyLaunchId() },
             )
         }
 
@@ -147,14 +149,14 @@ val appModule =
         single<SharedStorageController> { get<SharedStorageControllerImpl>() }
 
         // One long-lived server.
-        single<OpenChamberServer> {
+        single<T3Server> {
             val context = get<Context>()
             val paths = RuntimePaths.under(context.filesDir)
             val nativeDir = File(context.applicationInfo.nativeLibraryDir)
             val suite = { EmbeddedCommandSuite(nativeDir, paths).resolve() }
             val scanner = ProcessScanner(myUid = Os.getuid(), myPid = Os.getpid().toLong())
             val storage = get<SharedStorageControllerImpl>()
-            ProotOpenChamberServer(
+            ProotT3Server(
                 paths = paths,
                 suite = suite,
                 health = HealthProbe.Loopback,
@@ -169,15 +171,14 @@ val appModule =
                             reporter = RuntimeDnsReporter { message -> Log.w("CoCodeDns", message) },
                         ),
                     ),
-                cleanBeforeStart = { port, guestRunDir, proot ->
+                cleanBeforeStart = { port, proot ->
                     ProotStaleServerCleaner(
                         paths = paths,
                         scanner = scanner,
                         signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
                         isPortFree = HealthProbe.Companion::isPortFree,
-                    ).cleanBeforeStart(port, guestRunDir, proot)
+                    ).cleanBeforeStart(port, proot)
                 },
-                notificationSink = { line -> get<NotificationSink>().accept(line) },
                 bindsForStart = { storage.prepareForStart() },
                 onStarted = { binds -> storage.recordStarted(binds) },
                 onStopped = { storage.recordStopped() },
@@ -202,10 +203,15 @@ val appModule =
                     manifest = manifest,
                     suite = suite,
                     downloader = VerifiedRuntimeDownloader(get<OkHttpClient>()),
+                    releaseSource = GithubT3ReleaseSource(get<OkHttpClient>(), manifest.t3.repository),
                     shimAsset = {
                         context.assets.open("android-shim.cjs").bufferedReader().use { it.readText() }
                     },
                     dnsProvider = dnsProvider,
+                )
+            val agentSelection =
+                PrefsAgentSelectionStore.open(
+                    context.getSharedPreferences(PrefsAgentSelectionStore.FILE, Context.MODE_PRIVATE),
                 )
             val scanner = ProcessScanner(myUid = Os.getuid(), myPid = Os.getpid().toLong())
             val prootPath = { suite().proot.absolutePath }
@@ -213,20 +219,24 @@ val appModule =
                 paths = paths,
                 abi = abi,
                 installer = installer,
-                server = get<OpenChamberServer>(),
+                server = get<T3Server>(),
                 health = HealthProbe.Loopback,
                 uiPassword = RuntimeSecrets::uiPassword,
+                manifestAgents = manifest.agents,
+                selectionStore = agentSelection,
+                pinnedT3Version = manifest.t3.version,
                 foregroundStarter = ForegroundStarter { op -> RuntimeService.request(context, op) },
                 killOwned = {
                     killOwnedRuntime(scanner, prootPath(), paths.rootfs.absolutePath) { pid ->
                         android.os.Process.killProcess(pid.toInt())
                     }
                 },
-                versionSource = NpmPackageVersionSource(get<OkHttpClient>()),
-                pinnedVersions =
-                    PackageVersions(
-                        openChamber = manifest.openChamberVersion,
-                        openCode = manifest.openCodeVersion,
+                versionSource =
+                    DefaultPackageVersionSource(
+                        npm = NpmPackageVersionSource(get<OkHttpClient>()),
+                        t3 = GithubT3ReleaseSource(get<OkHttpClient>(), manifest.t3.repository),
+                        agents = manifest.agents,
+                        fallbackT3Version = manifest.t3.version,
                     ),
             ).also { it.initialize() }
         }
@@ -236,7 +246,7 @@ val appModule =
             DefaultWebSessionAuthenticator(
                 client = get(),
                 localPassword = { RuntimeSecrets.existingUiPassword(paths) },
-                localReady = LocalReadiness { get<OpenChamberServer>().readyLaunchId() },
+                localReady = LocalReadiness { get<T3Server>().readyLaunchId() },
             )
         }
     }

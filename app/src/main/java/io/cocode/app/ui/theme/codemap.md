@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Design tokens for the native shell: Material 3 color schemes, typography, shapes, and an extended `ChamberColors` set for values Material 3 has no slot for. Colors come from OpenChamber's web chrome so the native and web UIs read as one product.
+Design tokens for the native shell: Material 3 color schemes, typography, shapes, and an extended `ChamberColors` set for values Material 3 has no slot for. Colors come from T3 Code's web chrome so the native and web UIs read as one product.
 
 Files:
 - `Color.kt`: `DarkColors` and `LightColors` (Material `ColorScheme`), `ChamberColors`, `DarkChamberColors` and `LightChamberColors`.
@@ -12,7 +12,7 @@ Files:
 ## Design
 
 - Dark-first. `CoCodeTheme(darkTheme = isSystemInDarkTheme())` follows the system. Dynamic color is off on purpose.
-- Palette: warm ink and amber. Dark background `#151313` with primary `#EDB449` (OpenChamber's accent). Light background `#FBF5EA` with primary `#8F5A00`.
+- Palette: warm ink and amber. Dark background `#151313` with primary `#EDB449` (T3 Code's accent). Light background `#FBF5EA` with primary `#8F5A00`.
 - Dark and light are separate palettes, not inverted. Surface containers step from `surfaceContainerLowest` to `Highest` for depth without shadows.
 - Tokens are `internal`; only `CoCodeTheme` is public. Components read `ChamberTheme.colors`, a `@ReadOnlyComposable` getter over `LocalChamberColors`.
 - `ChamberColors` is `@Immutable`: `card`, `cardBorder`, `success`, `successContainer`, `onSuccessContainer`, `warning`, `idle`, and the `terminal*` set used by `LogConsole`.

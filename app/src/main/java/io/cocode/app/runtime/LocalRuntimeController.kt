@@ -2,12 +2,13 @@ package io.cocode.app.runtime
 
 import io.cocode.app.runtime.install.InstallReporter
 import io.cocode.app.runtime.install.InstalledRuntime
-import io.cocode.app.runtime.install.OpenChamberInstaller
 import io.cocode.app.runtime.install.PackageVersionSource
 import io.cocode.app.runtime.install.PackageVersions
 import io.cocode.app.runtime.install.RuntimeInstaller
+import io.cocode.app.runtime.install.RuntimeEnvironmentInstaller
+import io.cocode.app.runtime.manifest.AgentSpec
 import io.cocode.app.runtime.process.HealthProbe
-import io.cocode.app.runtime.process.OpenChamberServer
+import io.cocode.app.runtime.process.T3Server
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +33,7 @@ fun interface RuntimeStateListener {
 }
 
 /** The operations that must run inside the foreground service's lifetime. */
-enum class RuntimeOperation { Install, Start, Repair, Stop, Uninstall, Restart, Update }
+enum class RuntimeOperation { Install, Start, Repair, Stop, Uninstall, Restart, Update, ApplyAgents }
 
 /**
  * Gate between the UI and the controller. [request] must bring the foreground service up first and
@@ -43,22 +44,29 @@ fun interface ForegroundStarter {
 }
 
 /**
- * Owns the Linux runtime lifecycle: install, start, stop, repair, uninstall and crash recovery.
+ * Owns the Linux runtime lifecycle: install, start, stop, repair, uninstall, agent selection and
+ * crash recovery.
  *
  * Public actions queue behind [operationLock]; the watchdog's recovery takes the same lock. [busy]
  * is true from the moment an action is queued until it has finished, so the service can tell "work
  * in progress" from "resting" without guessing from intermediate states.
  *
- * Intent: [wantsRunning] records what the user asked for. Start, Install and Repair (which ends in a
- * start) set it; Stop and Uninstall clear it. Only a set intent allows automatic crash recovery.
+ * Intent: [wantsRunning] records what the user asked for. Start, Install, Repair and ApplyAgents
+ * (which restarts a previously running server) set it; Stop and Uninstall clear it. Only a set
+ * intent allows automatic crash recovery.
  */
 class DefaultLocalRuntimeController(
     private val paths: RuntimePaths,
     private val abi: String,
     private val installer: RuntimeInstaller,
-    private val server: OpenChamberServer,
+    private val server: T3Server,
     private val health: HealthProbe = HealthProbe.Loopback,
     private val uiPassword: (RuntimePaths) -> String = RuntimeSecrets::uiPassword,
+    /** The agents the manifest offers; production passes them, tests may use a subset. */
+    private val manifestAgents: List<AgentSpec> = emptyList(),
+    private val selectionStore: AgentSelectionStore = InMemoryAgentSelectionStore(),
+    /** The manifest's T3 version, offered even when GitHub cannot be reached. */
+    private val pinnedT3Version: String? = null,
     private val listener: RuntimeStateListener = RuntimeStateListener {},
     private val foregroundStarter: ForegroundStarter = ForegroundStarter {},
     /** Removes every owned runtime process (Stop, Repair, Uninstall run this before touching files). */
@@ -76,13 +84,8 @@ class DefaultLocalRuntimeController(
      * Other ABIs are UnsupportedAbi (remote servers still work).
      */
     private val supportedAbis: Set<String> = setOf("arm64-v8a", "x86_64"),
-    /** Registry lookup for newer versions. Null disables the registry check; the bundled pins still apply. */
+    /** Registry lookup for newer versions. Null disables the registry check; bundled pins still apply. */
     private val versionSource: PackageVersionSource? = null,
-    /**
-     * The versions bundled in the app's manifest. They are the update floor and what a fresh install
-     * takes. Null means there are no bundled versions (tests only).
-     */
-    private val pinnedVersions: PackageVersions? = null,
     /** Minimum time between automatic registry checks. Manual checks ignore it. */
     private val updateCheckIntervalMillis: Long = UPDATE_CHECK_INTERVAL_MILLIS,
 ) : LocalRuntimeController {
@@ -99,12 +102,27 @@ class DefaultLocalRuntimeController(
     private val mutableInfo = MutableStateFlow<RuntimeInfo?>(null)
     override val info: StateFlow<RuntimeInfo?> = mutableInfo.asStateFlow()
 
+    private val knownAgentIds = manifestAgents.map { it.id }.toSet()
+    private val initialSelection = sanitizeSelection(selectionStore.selected())
+    private val mutableAgents =
+        MutableStateFlow(
+            AgentsState(
+                available = manifestAgents,
+                selected = initialSelection,
+                installed = emptyMap(),
+            ),
+        )
+    override val agents: StateFlow<AgentsState> = mutableAgents.asStateFlow()
+
     private val mutableUpdates = MutableStateFlow(RuntimeUpdateState())
     override val updates: StateFlow<RuntimeUpdateState> = mutableUpdates.asStateFlow()
 
     /** Operations and recovery jobs queued or running; count and [busy] change together (see WorkCounter). */
     private val work = WorkCounter()
 
+    init {
+        if (selectionStore.selected() != initialSelection) selectionStore.save(initialSelection)
+    }
 
     private fun beginWork() = work.begin()
 
@@ -123,7 +141,7 @@ class DefaultLocalRuntimeController(
      */
     @Volatile private var installedVersions: PackageVersions? = null
 
-    /** Newest registry versions from the last successful check. Written by the check job only. */
+    /** Newest versions from the last successful check. Written by the check job only. */
     @Volatile private var latestKnown: PackageVersions? = null
 
     /** Registry check in flight. Not under operationLock: the network must not block the runtime. */
@@ -134,7 +152,7 @@ class DefaultLocalRuntimeController(
         launch(FailurePhase.Runtime) { detectLocked() }
     }
 
-    // --- Public actions. Each one first asks the foreground service to start (item 3). ---
+    // --- Public actions. Each one first asks the foreground service to start. ---
 
     override fun install() = foregroundStarter.request(RuntimeOperation.Install)
 
@@ -152,8 +170,22 @@ class DefaultLocalRuntimeController(
 
     override fun restart() = foregroundStarter.request(RuntimeOperation.Restart)
 
+    override fun setAgents(selected: Set<String>) {
+        require(selected.isNotEmpty()) { "Select at least one agent" }
+        val sanitized = sanitizeSelection(selected)
+        require(sanitized.isNotEmpty()) { "Select at least one known agent" }
+        val previous = mutableAgents.value.selected
+        selectionStore.save(sanitized)
+        mutableAgents.update { it.copy(selected = sanitized) }
+        // Before an install the selection is simply used by Set up; with an installed environment the
+        // change is applied in place by the service.
+        if (sanitized != previous && installedVersions != null) {
+            foregroundStarter.request(RuntimeOperation.ApplyAgents)
+        }
+    }
+
     /**
-     * Checks the registry now. Runs outside operationLock, so it can finish while an operation is
+     * Checks GitHub and npm now. Runs outside operationLock, so it can finish while an operation is
      * queued. Ignored while a check is already running, and when the runtime is not installed.
      */
     override fun checkForUpdates() {
@@ -176,6 +208,7 @@ class DefaultLocalRuntimeController(
         when (operation) {
             RuntimeOperation.Install -> launch(FailurePhase.Install) { installLocked(thenStart = true) }
             RuntimeOperation.Update -> launch(FailurePhase.Runtime) { updateLocked() }
+            RuntimeOperation.ApplyAgents -> launch(FailurePhase.Runtime) { applyAgentsLocked() }
             RuntimeOperation.Start -> {
                 cancelRequested = false
                 launch(FailurePhase.Start) { startLocked(manual = true) }
@@ -194,7 +227,7 @@ class DefaultLocalRuntimeController(
                     // into staging and swap atomically. A failed repair leaves the old runtime intact.
                     stopLocked()
                     currentPhase = FailurePhase.Install
-                    installLocked(thenStart = true, repair = true)
+                    installLocked(thenStart = true)
                 }
             RuntimeOperation.Restart -> {
                 // One queued op, so stop and start can't be reordered by the lock (two separate
@@ -213,7 +246,9 @@ class DefaultLocalRuntimeController(
                     stopLocked()
                     withContext(ioDispatcher) { installer.removeAll() }
                     mutableInfo.value = null
+                    mutableAgents.update { it.copy(installed = emptyMap()) }
                     installedVersions = null
+                    latestKnown = null
                     mutableUpdates.value = RuntimeUpdateState()
                     publish(RuntimeState.NotInstalled)
                 }
@@ -261,7 +296,7 @@ class DefaultLocalRuntimeController(
         if (existing == null) {
             publish(RuntimeState.NotInstalled)
         } else {
-            refreshInfo(existing)
+            adopt(existing)
             publish(RuntimeState.Stopped)
             // The bundled pins may already be newer than what is installed: offer that without network.
             recomputeAvailable(existing)
@@ -269,24 +304,17 @@ class DefaultLocalRuntimeController(
         }
     }
 
-    /**
-     * Install, then optionally start (Install and Repair both end running, as the user asked for it).
-     * A repair ([repair] = true) installs at least the installed versions, so it never downgrades
-     * OpenCode after an update.
-     */
-    private suspend fun installLocked(
-        thenStart: Boolean,
-        repair: Boolean = false,
-    ) {
+    /** Install, then optionally start (Install and Repair both end running, as the user asked for it). */
+    private suspend fun installLocked(thenStart: Boolean) {
         if (abi !in supportedAbis) {
             publish(RuntimeState.UnsupportedAbi)
             return
         }
         cancelRequested = false
+        val selected = mutableAgents.value.selected
         publish(RuntimeState.Installing(InstallStep.DownloadRootfs, 0f, null))
-        val versions = if (repair) repairVersions() else null
-        val installed = installer.install(installReporter(updating = false), versions)
-        refreshInfo(installed)
+        val installed = installer.install(installReporter(updating = false), selected)
+        adopt(installed)
         recomputeAvailable(installed)
         maybeCheckForUpdates()
         // Intermediate Stopped: the service keeps running because busy is still true here.
@@ -310,28 +338,11 @@ class DefaultLocalRuntimeController(
             override fun log(line: String) = appendLog(line)
         }
 
-    /** Per package, the newer of the installed and the bundled version. Null when nothing is known. */
-    private fun repairVersions(): PackageVersions? {
-        val installed = installedVersions
-        val pinned = pinnedVersions
-        if (installed == null) return null
-        if (pinned == null) return installed
-        return PackageVersions(
-            openChamber = newerOf(installed.openChamber, pinned.openChamber),
-            openCode = newerOf(installed.openCode, pinned.openCode),
-        )
-    }
-
-    private fun newerOf(
-        a: String,
-        b: String,
-    ): String = if (OpenChamberInstaller.compareVersions(a, b) >= 0) a else b
-
     /**
-     * Updates the installed packages to the available target. The server is stopped first. A failure
-     * keeps the previous environment (which the installer never touches before the swap): it sets
-     * [RuntimeUpdateState.lastFailure] and does not publish [RuntimeState.Failed]. Afterwards the
-     * server is restarted when it was running, otherwise the state rests at Stopped.
+     * Updates T3 Code and the selected agents to the available targets. The server is stopped first.
+     * A failure keeps the previous environment (which the installer never touches before the swap):
+     * it sets [RuntimeUpdateState.lastFailure] and does not publish [RuntimeState.Failed]. Afterwards
+     * the server is restarted when it was running, otherwise the state rests at Stopped.
      */
     private suspend fun updateLocked() {
         val target = mutableUpdates.value.available
@@ -339,18 +350,22 @@ class DefaultLocalRuntimeController(
         val runtime = withContext(ioDispatcher) { installer.installedRuntime() } ?: return
         val wasRunning = mutableState.value.let { it is RuntimeState.Running || it is RuntimeState.Starting } || wantsRunning
 
+        val selected = mutableAgents.value.selected
+        val agentTargets =
+            selected.associateWith { id ->
+                target.agents.firstOrNull { it.id == id }?.change?.target
+                    ?: runtime.metadata.agents[id]
+                    ?: ""
+            }
+        val versions = PackageVersions(t3 = target.t3.target, agents = agentTargets)
+
         cancelRequested = false
         stopLocked()
         mutableUpdates.update { it.copy(lastFailure = null) }
         try {
-            val versions =
-                PackageVersions(
-                    openChamber = target.openChamber.target,
-                    openCode = target.openCode.target,
-                )
             publish(RuntimeState.Installing(InstallStep.CopyEnvironment, null, null, MessageKey.ProgressCopyingEnvironment, updating = true))
             val updated = installer.update(installReporter(updating = true), versions)
-            refreshInfo(updated)
+            adopt(updated)
             recomputeAvailable(updated)
             mutableUpdates.update { it.copy(lastFailure = null) }
         } catch (error: CancellationException) {
@@ -360,22 +375,11 @@ class DefaultLocalRuntimeController(
         } catch (error: Throwable) {
             // Not Failed: the previous environment is still installed and usable. The reason is shown
             // on the update card instead, so a failed update never blocks the runtime.
-            val typed = error as? UserFacingException
-            appendLog("ERROR: update failed: ${error.message}")
-            mutableUpdates.update {
-                it.copy(
-                    lastFailure =
-                        UpdateFailure(
-                            reason = error.message ?: "Update failed",
-                            messageKey = typed?.key ?: MessageKey.Generic,
-                            detail = typed?.detail,
-                        ),
-                )
-            }
+            recordFailure(error, "update")
             // The failed attempt left the old environment in place: show its versions again.
-            refreshInfo(runtime)
+            adopt(runtime)
         }
-        recomputeAvailable(installer.installedRuntime() ?: runtime)
+        recomputeAvailable(withContext(ioDispatcher) { installer.installedRuntime() } ?: runtime)
         if (!wasRunning) {
             publish(RuntimeState.Stopped)
             return
@@ -385,15 +389,65 @@ class DefaultLocalRuntimeController(
     }
 
     /**
+     * Applies the saved agent selection to the installed environment. The server is stopped first;
+     * the installer removes no-longer-selected packages, installs new ones, verifies and rewrites the
+     * metadata. A failure keeps the previous metadata and records [RuntimeUpdateState.lastFailure].
+     */
+    private suspend fun applyAgentsLocked() {
+        val runtime = withContext(ioDispatcher) { installer.installedRuntime() } ?: return
+        val selected = mutableAgents.value.selected
+        if (selected.isEmpty()) {
+            recordFailure(UserFacingException(MessageKey.AgentsRequired, "Select at least one agent"), "agent change")
+            return
+        }
+        val wasRunning = mutableState.value.let { it is RuntimeState.Running || it is RuntimeState.Starting } || wantsRunning
+        cancelRequested = false
+        stopLocked()
+        mutableUpdates.update { it.copy(lastFailure = null) }
+        try {
+            publish(RuntimeState.Installing(InstallStep.InstallAgents, null, null, MessageKey.ProgressInstallingAgents, updating = true))
+            val updated = installer.applyAgents(installReporter(updating = true), selected)
+            adopt(updated)
+            recomputeAvailable(updated)
+        } catch (error: CancellationException) {
+            publish(RuntimeState.Stopped)
+            throw error
+        } catch (error: Throwable) {
+            recordFailure(error, "agent change")
+            adopt(runtime)
+        }
+        if (!wasRunning) {
+            publish(RuntimeState.Stopped)
+            return
+        }
+        currentPhase = FailurePhase.Start
+        startLocked(manual = true)
+    }
+
+    private fun recordFailure(
+        error: Throwable,
+        what: String,
+    ) {
+        val typed = error as? UserFacingException
+        appendLog("ERROR: $what failed: ${error.message}")
+        mutableUpdates.update {
+            it.copy(
+                lastFailure =
+                    UpdateFailure(
+                        reason = error.message ?: "$what failed",
+                        messageKey = typed?.key ?: MessageKey.Generic,
+                        detail = typed?.detail,
+                    ),
+            )
+        }
+    }
+
+    /**
      * Recomputes [RuntimeUpdateState.available] from the installed versions and the newest known
      * versions: the registry's (when fetched) and the bundled pins. Never offers a downgrade.
      */
     private fun recomputeAvailable(runtime: InstalledRuntime) {
-        val installed =
-            PackageVersions(
-                openChamber = runtime.metadata.openChamberVersion,
-                openCode = runtime.metadata.openCodeVersion,
-            )
+        val installed = PackageVersions(t3 = runtime.metadata.t3Version, agents = runtime.metadata.agents)
         installedVersions = installed
         mutableUpdates.update { it.copy(available = availableFor(installed, latestKnown)) }
     }
@@ -402,25 +456,21 @@ class DefaultLocalRuntimeController(
         installed: PackageVersions,
         registry: PackageVersions?,
     ): RuntimeUpdate? {
-        val target = newestOf(registry, pinnedVersions) ?: return null
-        val openChamber = VersionChange(current = installed.openChamber, target = newerOf(target.openChamber, installed.openChamber))
-        val openCode = VersionChange(current = installed.openCode, target = newerOf(target.openCode, installed.openCode))
-        val update = RuntimeUpdate(openChamber = openChamber, openCode = openCode)
+        val targetT3 = newestOf(registry?.t3, pinnedT3Version, installed.t3) ?: installed.t3
+        val t3 = VersionChange(current = installed.t3, target = targetT3)
+        val selected = mutableAgents.value.selected
+        val agents =
+            selected.mapNotNull { id ->
+                val current = installed.agents[id] ?: return@mapNotNull null
+                val target = newestOf(registry?.agents?.get(id), current) ?: return@mapNotNull null
+                AgentChange(id = id, displayName = displayNameOf(id), change = VersionChange(current, target))
+            }
+        val update = RuntimeUpdate(t3 = t3, agents = agents)
         return update.takeIf { it.hasChanges }
     }
 
-    /** Per package, the higher of the registry and the bundled version. Either may be null. */
-    private fun newestOf(
-        registry: PackageVersions?,
-        pinned: PackageVersions?,
-    ): PackageVersions? {
-        if (registry == null) return pinned
-        if (pinned == null) return registry
-        return PackageVersions(
-            openChamber = newerOf(registry.openChamber, pinned.openChamber),
-            openCode = newerOf(registry.openCode, pinned.openCode),
-        )
-    }
+    private fun newestOf(vararg versions: String?): String? =
+        versions.filterNotNull().maxWithOrNull { a, b -> RuntimeEnvironmentInstaller.compareVersions(a, b) }
 
     /** An automatic check, throttled by [updateCheckIntervalMillis] since the last one. */
     private fun maybeCheckForUpdates() {
@@ -432,18 +482,23 @@ class DefaultLocalRuntimeController(
     }
 
     /**
-     * Asks the registry for newer versions, with no operationLock: the network must not hold up the
-     * runtime. Cancellation propagates. A failure keeps the bundled pins and sets [RuntimeUpdateState.checkFailed].
+     * Asks GitHub and npm for newer versions, with no operationLock: the network must not hold up the
+     * runtime. Cancellation propagates. A failure keeps the currently known versions and sets
+     * [RuntimeUpdateState.checkFailed].
      */
     private suspend fun runUpdateCheck() {
         val source = versionSource ?: return
-        val pinned = pinnedVersions
         val installed = installedVersions ?: return
+        val pinned =
+            PackageVersions(
+                t3 = pinnedT3Version ?: installed.t3,
+                agents = installed.agents.filterKeys { it in mutableAgents.value.selected },
+            )
         mutableUpdates.update { it.copy(checking = true) }
         try {
             val latest: PackageVersions? =
                 try {
-                    source.latest(pinned ?: installed)
+                    source.latest(pinned)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Throwable) {
@@ -478,18 +533,18 @@ class DefaultLocalRuntimeController(
         // A second Start queued behind the first (UI launch and a notification or test racing through
         // the service) must not tear down the server that just came up: start() stops the old child.
         if (mutableState.value is RuntimeState.Running && runCatching { server.isAlive() }.getOrDefault(false)) {
-            appendLog("Start ignored: OpenChamber is already running")
+            appendLog("Start ignored: T3 Code is already running")
             return
         }
         val port = runtime.metadata.port
-        publish(RuntimeState.Starting("Starting OpenChamber on port $port"))
+        publish(RuntimeState.Starting("Starting T3 Code on port $port"))
         val password = withContext(ioDispatcher) { uiPassword(paths) }
         withContext(ioDispatcher) {
             server.start(runtime, password, ::appendLog) { cancelRequested }
         }
         if (cancelRequested) throw CancellationException("Start cancelled by Stop")
         publish(RuntimeState.Running("http://127.0.0.1:$port", port, nowMillis()))
-        refreshInfo(runtime)
+        adopt(runtime)
         scheduleWatchdog()
     }
 
@@ -503,7 +558,7 @@ class DefaultLocalRuntimeController(
         watchdog = null
         val current = mutableState.value
         if (current !is RuntimeState.Stopped && current !is RuntimeState.NotInstalled) {
-            publish(RuntimeState.Stopping("Stopping OpenChamber"))
+            publish(RuntimeState.Stopping("Stopping T3 Code"))
         }
         // Always run: never trust the UI's view of what is alive.
         withContext(ioDispatcher) {
@@ -555,8 +610,8 @@ class DefaultLocalRuntimeController(
                 while (true) {
                     delay(watchdogPollMillis)
                     val running = mutableState.value as? RuntimeState.Running ?: return@launch
-                    // A dead child is certain; a slow /health is not. Opening the web UI fires a burst of
-                    // requests and a phone can take seconds to answer, so only a dead process or
+                    // A dead child is certain; a slow environment read is not. Opening the web UI fires a
+                    // burst of requests and a phone can take seconds to answer, so only a dead process or
                     // several consecutive missed probes count as a crash (seen on device).
                     val alive = runCatching { server.isAlive() }.getOrDefault(false)
                     val answered =
@@ -609,7 +664,7 @@ class DefaultLocalRuntimeController(
      * A successful attempt returns to the watchdog, which refills the budget after a healthy window.
      */
     private suspend fun restartAfterCrash() {
-        publish(RuntimeState.Failed("OpenChamber stopped unexpectedly", recoverable = true, phase = FailurePhase.Runtime))
+        publish(RuntimeState.Failed("T3 Code stopped unexpectedly", recoverable = true, phase = FailurePhase.Runtime))
         while (true) {
             val delayMillis = restartPolicy.nextDelayMillis()
             if (delayMillis == null) {
@@ -620,15 +675,15 @@ class DefaultLocalRuntimeController(
                 stopAfterExhaustion()
                 publish(
                     RuntimeState.Failed(
-                        "OpenChamber kept stopping; tap Start to try again",
+                        "T3 Code kept stopping; tap Start to try again",
                         recoverable = true,
                         phase = FailurePhase.Runtime,
                     ),
                 )
                 return
             }
-            publish(RuntimeState.Starting("OpenChamber stopped; restarting in ${delayMillis / 1000}s"))
-            appendLog("Restarting OpenChamber in ${delayMillis / 1000}s")
+            publish(RuntimeState.Starting("T3 Code stopped; restarting in ${delayMillis / 1000}s"))
+            appendLog("Restarting T3 Code in ${delayMillis / 1000}s")
             delay(delayMillis)
             if (!wantsRunning) return
             try {
@@ -683,17 +738,35 @@ class DefaultLocalRuntimeController(
         mutableLog.value = (mutableLog.value + line).takeLast(MAX_LOG_LINES)
     }
 
+    /** Adopts what is installed: info, the agent versions and the available update. */
+    private fun adopt(runtime: InstalledRuntime) {
+        refreshInfo(runtime)
+        mutableAgents.update { it.copy(installed = runtime.metadata.agents) }
+    }
+
     private fun refreshInfo(runtime: InstalledRuntime) {
         mutableInfo.value =
             RuntimeInfo(
                 abi = abi,
                 alpineVersion = runtime.metadata.alpineVersion,
-                openChamberVersion = runtime.metadata.openChamberVersion,
-                openCodeVersion = runtime.metadata.openCodeVersion,
+                t3Version = runtime.metadata.t3Version,
+                agents = runtime.metadata.agents,
                 nodeVersion = runtime.metadata.nodeVersion,
                 diskUsageBytes = directorySize(paths.root),
                 freeSpaceBytes = paths.root.usableSpace,
             )
+    }
+
+    private fun displayNameOf(id: String): String =
+        manifestAgents.firstOrNull { it.id == id }?.displayName ?: id
+
+    /** Keeps only known agents and never returns an empty set when the manifest offers anything. */
+    private fun sanitizeSelection(selected: Set<String>): Set<String> {
+        if (knownAgentIds.isEmpty()) return selected.ifEmpty { DEFAULT_AGENTS }
+        val known = selected.filter { it in knownAgentIds }.toSet()
+        if (known.isNotEmpty()) return known
+        val defaults = DEFAULT_AGENTS.filter { it in knownAgentIds }.toSet()
+        return defaults.ifEmpty { setOf(manifestAgents.first().id) }
     }
 
     /** Symlink-safe: guest links may point anywhere, so never follow them while sizing. */

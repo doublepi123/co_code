@@ -14,7 +14,7 @@ Files:
 - `StatusTone` maps to a color (Idle, Busy, Live, Error). `StatusDot` animates: Busy pulses with an infinite transition, Live draws a steady halo (so a running server doesn't keep the screen animating), and Idle is flat.
 - `ChamberCard` is a flat `Surface` with a 1 dp hairline border and the `large` shape. It becomes clickable when `onClick` is set, and an optional `accent` tints the border.
 - `ConfirmDialog` is a two-button `AlertDialog`. `destructive = true` tints the confirm action with `colorScheme.error`. Its dismiss label defaults to `R.string.cancel`.
-- `ChamberMark` draws the OpenChamber cube with `Canvas` on a 100x100 logical grid, which avoids bundling an image. It is scaled to the requested `size`.
+- `ChamberMark` draws the T3 Code cube with `Canvas` on a 100x100 logical grid, which avoids bundling an image. It is scaled to the requested `size`.
 - `LogConsole` tracks follow mode. Output is followed while the list is at its end, and following resumes when scrolling returns to the bottom. Line colors come from prefixes: `ERROR`/`FATAL`/`E/` use error, `WARN`/`W/` use warning, and `$ `/`> ` use primary. Empty lines render as a space so they keep their height. The list is wrapped in `SelectionContainer`.
 - Strings are resolved with `stringResource` and `pluralStringResource` (`R.plurals.log_lines`), not passed as literals.
 

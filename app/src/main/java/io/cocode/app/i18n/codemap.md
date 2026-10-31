@@ -8,12 +8,12 @@ The single place that maps runtime keys (`MessageKey`, `InstallStep`) to Android
 
 `object UserMessages`:
 
-- `headline(key: MessageKey): @StringRes Int`: exhaustive `when` over 22 `MessageKey` values:
-  - Failure headlines: `MirrorsUnreachable`, `PackagesFailed`, `OpenChamberInstallFailed`, `NativeBuildFailed`, `PtySmokeFailed`, `PortInUse`, `OpenCodeStartFailed`, `ExitedDuringStart`, `NotListeningInTime`, `NotReadyInTime`, `KeptStopping`, `StoppedUnexpectedly`, `RestartFailed`, `EmbeddedProotMissing`, `Generic`.
-  - Progress labels: `ProgressUnpacking`, `ProgressInstallingPackages`, `ProgressInstallingOpenChamber`, `ProgressBuildingNative`, `ProgressVerifying`, `ProgressActivating`, `ProgressDone`.
+- `headline(key: MessageKey): @StringRes Int`: exhaustive `when` over 23 `MessageKey` values:
+  - Failure headlines: `MirrorsUnreachable`, `PackagesFailed`, `ServerInstallFailed`, `AgentInstallFailed`, `AgentsRequired`, `PtySmokeFailed`, `PortInUse`, `ServerExitedDuringStart`, `ServerNotListeningInTime`, `ServerNotReadyInTime`, `ServerKeptStopping`, `ServerStoppedUnexpectedly`, `ServerRestartFailed`, `EmbeddedProotMissing`, `Generic`.
+  - Progress labels: `ProgressUnpacking`, `ProgressInstallingPackages`, `ProgressInstallingServer`, `ProgressInstallingAgents`, `ProgressVerifying`, `ProgressActivating`, `ProgressDone`, `ProgressCopyingEnvironment`, `UpdateNotEnoughSpace`.
   - Resource names: `R.string.msg_*`.
 - `failureText(context, failed: RuntimeState.Failed): String`: the localised headline when `messageKey` is set; otherwise `failed.reason` (English technical text); if blank, `msg_generic`. Never empty.
-- `stepLabel(step: InstallStep): @StringRes Int`: exhaustive over the six install steps, `R.string.step_*` (`DownloadRootfs`, `ExtractRootfs`, `InstallPackages`, `InstallOpenChamber`, `BuildNativeModules`, `Verify`).
+- `stepLabel(step: InstallStep): @StringRes Int`: exhaustive over the six install steps, `R.string.step_*` (`DownloadRootfs`, `ExtractRootfs`, `InstallPackages`, `InstallServer`, `InstallAgents`, `Verify`).
 
 Design rules:
 

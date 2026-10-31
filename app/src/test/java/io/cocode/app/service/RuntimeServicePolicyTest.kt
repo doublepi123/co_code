@@ -36,7 +36,7 @@ class RuntimeServicePolicyTest {
     fun `repair keeps the service through its internal stop and reinstall`() {
         val actions =
             replay(
-                true to RuntimeState.Stopping("Stopping OpenChamber"),
+                true to RuntimeState.Stopping("Stopping T3 Code"),
                 true to RuntimeState.Stopped,
                 true to RuntimeState.Installing(InstallStep.InstallPackages, null, null),
                 true to RuntimeState.Stopped,
@@ -55,10 +55,10 @@ class RuntimeServicePolicyTest {
         // Crash: recovery is queued (busy), then the budget is spent.
         val recovery =
             replay(
-                true to RuntimeState.Failed("OpenChamber stopped unexpectedly", true, FailurePhase.Runtime),
+                true to RuntimeState.Failed("T3 Code stopped unexpectedly", true, FailurePhase.Runtime),
                 true to RuntimeState.Starting("restarting in 2s"),
-                true to RuntimeState.Failed("OpenChamber kept stopping", true, FailurePhase.Runtime),
-                false to RuntimeState.Failed("OpenChamber kept stopping", true, FailurePhase.Runtime),
+                true to RuntimeState.Failed("T3 Code kept stopping", true, FailurePhase.Runtime),
+                false to RuntimeState.Failed("T3 Code kept stopping", true, FailurePhase.Runtime),
             )
 
         assertEquals(Action.Finish, recovery.last())
@@ -69,7 +69,7 @@ class RuntimeServicePolicyTest {
     fun `uninstall ends at NotInstalled and the service stops`() {
         val actions =
             replay(
-                true to RuntimeState.Stopping("Stopping OpenChamber"),
+                true to RuntimeState.Stopping("Stopping T3 Code"),
                 true to RuntimeState.Stopped,
                 false to RuntimeState.NotInstalled,
             )

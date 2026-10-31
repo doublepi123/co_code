@@ -2,17 +2,16 @@
 
 ## Responsibility
 
-Full-screen OpenChamber web UI for one server (`Routes.WEB`, `web/{targetId}`). Owns the WebView pool, session preparation and page loading, navigation policy, the JS bridge, downloads, file and microphone requests, and the overlay panels. It hosts OpenChamber's own web UI; it does not implement it.
+Full-screen T3 Code web UI for one server (`Routes.WEB`, `web/{targetId}`). Owns the WebView pool, session preparation and page loading, navigation policy, the JS bridge, downloads, file and microphone requests, and the overlay panels. It hosts T3 Code's own web UI; it does not implement it.
 
 Files:
 - `ChamberWebView.kt`: `ChamberWebView` (one WebView bound to one profile, clients, bridge, helper script), `WebViewPool`, `WebHost`, `originOf()`. Its `Client.shouldInterceptRequest` answers the local server's update check.
-- `LocalUpdateGate.kt`: pure decision `interceptsLocalUpdateCheck(targetId, origin, method, url)`. True only for the local target, a GET on the binding's own origin, and exactly `/api/openchamber/update-check` (query and fragment ignored). It returns `UPDATE_CHECK_BODY` (`{"available":false,...}`, status 200, `no-store`). OpenChamber's own update prompt cannot be turned off by a server setting, so the app answers it here. Remote targets and every other request pass through.
 - `WebDependencies.kt`: `rememberWebDependencies()` (app singletons `WebSessionProfiles` and `HttpDownloadStarter` from Koin; preview stand-ins in inspection mode), `bindWeb(profiles, target, obtain)`.
 - `IsolationPanel.kt`: the isolation-failure panel, `browserAddressFor()` and `openAddressInBrowser()`.
 - `WebScreen.kt`: `WebScreen` (profile bind, session prep, overlays, BackHandler, insets, page-location reporting via `onPageLocation`, remembered-page application via `resumePath`), `OverlayContent`, `LocalServerPanel`, `WebLifecycleEffect`, `WebHostEffect`.
 - `WebPanels.kt`: `StatusPanel`, `PanelAction`, `ConnectingPanel`.
 - `EdgeHandle.kt`: draggable edge tab with a menu (Home, Reload, Open in browser).
-- `NotifyVisibility.kt`: `LocalPageVisibilityEffect(isLocal, overlayShown)` reports to `notify.LocalPageVisibility` while the local page is RESUMED (this navigation entry) with no overlay; clears only its own report on dispose. OpenChamber events are then left to the page (see notify codemap for `requireHidden`).
+- `NotifyVisibility.kt`: `LocalPageVisibilityEffect(isLocal, overlayShown)` reports to `notify.LocalPageVisibility` while the local page is RESUMED (this navigation entry) with no overlay; clears only its own report on dispose. T3 Code events are then left to the page (see notify codemap for `requireHidden`).
 
 ## Design
 
@@ -41,7 +40,7 @@ Files:
 ## Flow
 
 1. Root `Routes.web(targetId)` → `WebScreen` → `bindWeb`: `profiles.acquire(target)`, then `pool.obtain` returns the `ChamberWebView` bound to that profile. Initial `phase` is `Loaded` if `view.sessionKey == sessionKey`, else `Connecting`.
-2. `LaunchedEffect(web, sessionKey, attempt)` runs only when the view is bound (`isolationFailure == null`, `view != null`, `sessionCookies != null`). It calls `auth.prepare(target, web.sessionCookies)`. `Ready(url)` or `NeedsLogin(url)` (OpenChamber shows its own sign-in at the same address) leads to `view.load(start)`. `Unreachable(reason)` gives `SessionPhase.Unreachable`. If the binding failed, no `prepare` call is made.
+2. `LaunchedEffect(web, sessionKey, attempt)` runs only when the view is bound (`isolationFailure == null`, `view != null`, `sessionCookies != null`). It calls `auth.prepare(target, web.sessionCookies)`. `Ready(url)` or `NeedsLogin(url)` (T3 Code shows its own sign-in at the same address) leads to `view.load(start)`. `Unreachable(reason)` gives `SessionPhase.Unreachable`. If the binding failed, no `prepare` call is made.
 3. `startPageUrl(start, base, deepLink, resumePath, gateway)` chooses the first URL. A pending notification is joined to the instance base and then consumed by `onDeepLinkUsed()` (which also clears the remembered page). A remembered absolute path is instead restored on the origin alone whenever a fresh load occurs, preserving existing prefs without duplicating a subpath; an already-loaded pooled page is left as is. `latestDeepLink`/`latestResumePath` are `rememberUpdatedState`, so the value read is current at load time. Trusted page locations are reported up (`onPageLocation`) from `onPageFinished` and `doUpdateVisitedHistory` (pushState included), never in gateway mode or off-origin.
 4. Already-loaded same session: a second effect calls `navigateWithinSession(withSessionPath(base, link))`, which accepts only the same origin and returns false if no session is loaded.
 5. `onPageFinished` (trusted origin) sets `committed` and `currentUrl`, clears history once per session, and injects the helper script. Overlay is null once committed and no error or phase overlay applies. The progress bar shows while `progress < 100`.

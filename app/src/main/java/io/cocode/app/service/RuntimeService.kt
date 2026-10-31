@@ -185,7 +185,7 @@ class RuntimeService : Service() {
         private const val ACTION_OPERATION = "io.cocode.app.action.OPERATION"
         private const val ACTION_STOP_NOTIFICATION = "io.cocode.app.action.STOP_FROM_NOTIFICATION"
         private const val EXTRA_OPERATION = "operation"
-        private const val CHANNEL_ID = "openchamber-runtime"
+        private const val CHANNEL_ID = "t3-runtime"
         private const val NOTIFICATION_ID = 4101
 
         /** Starts the service in the foreground for [operation]. Called from the UI, in the foreground. */

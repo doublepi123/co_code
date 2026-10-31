@@ -2,11 +2,11 @@
 
 ## Responsibility
 
-The control-room home screen (`Routes.HOME`). Shows the on-device OpenChamber runtime (setup, install progress, start and stop, failures, OpenChamber / OpenCode updates, details, log), the shared-storage folder card, and saved remote servers with add, edit and remove.
+The control-room home screen (`Routes.HOME`). Shows the on-device T3 Code runtime (setup, install progress, start and stop, failures, T3 Code / agent updates, agent selection, details, log), the shared-storage folder card, and saved remote servers with add, edit and remove.
 
 Files:
 - `HomeScreen.kt`: `HomeScreen`, `HomeActions` (lambdas passed in from the root), header, one-shot `HomeEntrance`.
-- `LocalRuntimeCard.kt`: `LocalRuntimeCard`, `RuntimePhase` (coarse phase of `RuntimeState`), per-phase bodies, the update notice (`UpdateOfferRow`, `UpdateProblemRow`, `RawOutput`, `VersionChanges`), footer toggles, `AutoOpenRow`, `ScreenAwakeRow`, `UpdateCheckRow`.
+- `LocalRuntimeCard.kt`: `LocalRuntimeCard`, `RuntimePhase` (coarse phase of `RuntimeState`), per-phase bodies, `AgentSelectionSection` (checkboxes for the manifest agents, installed versions, Apply after install), the update notice (`UpdateOfferRow`, `UpdateProblemRow`, `RawOutput`, `VersionChanges`), footer toggles, `AutoOpenRow`, `ScreenAwakeRow`, `UpdateCheckRow`.
 - `SharedStorageCard.kt`: `SharedStorageCard` (switch, status, folder tree, restart notice, permission and unavailable bodies).
 - `RemoteServers.kt`: `RemoteServersSection`, server rows, `RemoveServerDialog`, `ServerEditorDialog`.
 
@@ -15,10 +15,11 @@ Files:
 - State is hoisted. Composables take plain data and `HomeActions` lambdas. The root (`ui/CoCodeApp.kt`) owns flows and side effects. `HomeScreen` is also used by previews.
 - `RuntimePhase` collapses `RuntimeState` to a phase. `AnimatedContent` keys on the phase, so progress ticks update in place. `rememberLastNonNull` keeps the outgoing body during exit transitions.
 - `checking` overrides the phase to `Checking` during detection, showing a spacer, not a Set up offer.
-- Installing lists `InstallStep.setupSteps`, or `InstallStep.updateSteps` when `Installing.updating` (then with an "Updating OpenChamber…" title, the version changes being installed, an update-specific background note, and the header pill reading Updating). Earlier steps are Done, the current one is Active (ring, percent, bar, detail), later ones are Pending. A step missing from the list counts as the first. A vertical rail is drawn with `drawBehind`.
+- Installing lists `InstallStep.setupSteps`, or `InstallStep.updateSteps` when `Installing.updating` (then with an "Updating T3 Code…" title, the version changes being installed, an update-specific background note, and the header pill reading Updating). Earlier steps are Done, the current one is Active (ring, percent, bar, detail), later ones are Pending. A step missing from the list counts as the first. A vertical rail is drawn with `drawBehind`.
 - Running shows the URL, uptime (a 30 s `produceState` ticker), port and a copy action. Failed shows `failed.reason`. Recoverable failures get Retry and Repair. Non-recoverable ones get only Repair, with an explanation.
+- Agent selection: `AgentSelectionSection` shows one checkbox per manifest agent with the installed version. Before setup a toggle calls `setAgents` immediately (the saved set is used by Set up); after install the toggles stage a pending set and Apply calls `setAgents`, which queues `ApplyAgents`.
 - Repair, Uninstall and Update go through `ConfirmDialog` (`PendingConfirm`). The uninstall wording changes when the shared folder is in use, since projects stay in place. The update wording changes when the server is up (it is stopped and started again, so running tasks are interrupted); the dialog closes itself if the offer disappears.
-- Update notice: a slot under the phase body, shown only with `info != null` in Stopped, Starting, Running, Stopping or Failed. `RuntimeUpdateState.lastFailure` wins over `available`. The offer (`primaryContainer`) lists only changed packages ("OpenChamber 2.4.0 → 2.5.0", versions in mono) with an Update button on the title line; `TitleWithAction` (a small custom `Layout`) gives the version lines the full width so they don't wrap on a 360 dp phone. The failure row (`errorContainer`, like `FailedBody`) shows the localised `UserMessages.headline(messageKey)`, a note that the current version still works, Details (English reason plus raw `detail` in a selectable, copyable terminal box, max 180 dp, scrolls), Try again (only while an offer exists; asks again) and a close button (`onDismissUpdateFailure`). Update and Try again are disabled while Starting or Stopping. After confirming, `updateRequested` hides the slot until the runtime reports Installing, or 15 s (`UPDATE_PICKUP_GRACE_MS`).
+- Update notice: a slot under the phase body, shown only with `info != null` in Stopped, Starting, Running, Stopping or Failed. `RuntimeUpdateState.lastFailure` wins over `available`. The offer (`primaryContainer`) lists only changed components ("T3 Code 0.1.6-pw.5 → 0.1.7-pw.1", versions in mono) with an Update button on the title line; `TitleWithAction` (a small custom `Layout`) gives the version lines the full width so they don't wrap on a 360 dp phone. The failure row (`errorContainer`, like `FailedBody`) shows the localised `UserMessages.headline(messageKey)`, a note that the current version still works, Details (English reason plus raw `detail` in a selectable, copyable terminal box, max 180 dp, scrolls), Try again (only while an offer exists; asks again) and a close button (`onDismissUpdateFailure`). Update and Try again are disabled while Starting or Stopping. After confirming, `updateRequested` hides the slot until the runtime reports Installing, or 15 s (`UPDATE_PICKUP_GRACE_MS`).
 - Details: `AutoOpenRow` and `ScreenAwakeRow` share one switch-row layout. Screen awake is opt-in and persisted by `ScreenAwakeController`; it holds the Activity window only while the local runtime is Running, the app is foreground and no remote page is in view. `UpdateCheckRow` sits above the version table. The whole row calls `onCheckForUpdates` (disabled while checking or Installing) and summarises the state: Checking… with a spinner, Couldn't check for updates (`checkFailed`, warning tint), Update available or Up to date with "checked N minutes ago" (`R.plurals.checked_*_ago`, 30 s ticker), or Not checked yet.
 - `NotInstalledBody` shows free space from `filesDir.usableSpace` and warns below 3 GiB (`LOW_SPACE_BYTES`).
 - `SharedStorageCard` has three states: `Off`, `NeedsPermission`, `Active`. Turning it off while Active asks for confirmation. The folder tree is drawn with rails. `codeSpans()` sets paths in mono.
@@ -30,7 +31,7 @@ Files:
 ## Flow
 
 Render:
-1. The root collects `runtime.state`, `info`, `logTail`, `updates`, `remotes.servers` and `storage.state` inside the HOME destination.
+1. The root collects `runtime.state`, `info`, `logTail`, `updates`, `agents`, `remotes.servers` and `storage.state` inside the HOME destination.
 2. `HomeScreen(state = shownLocalState(state, pendingStartFrom), checking, updates, ...)`.
 3. `LocalRuntimeCard` derives the phase and renders the matching body. The log toggle appears when there is a log. The details toggle appears when `info != null` or the phase is Failed.
 4. `SharedStorageCard` shows when `storage != null && !checking && state.allowsSharedStorage()`, which excludes Detecting, UnsupportedAbi and NotInstalled.
@@ -42,7 +43,7 @@ Install and start:
 4. Failed → Retry → `local.retry()`. Repair opens a confirm dialog, then `local.repair()`.
 
 Update:
-1. The runtime fills `updates.available` (bundled pins at detection, then the npm registry check). The card shows the offer.
+1. The runtime fills `updates.available` (bundled T3 version at detection, then the GitHub + npm check). The card shows the offer.
 2. Update → confirm → `HomeActions.onUpdate` → `local.update()`: asks for notifications, discards the pooled local WebView, then `runtime.update()`.
 3. The runtime stops the server and reports `Installing(updating = true)` through `updateSteps`, then swaps the environment in and starts the server again if it was running.
 4. Failure: the state goes back to Stopped or Running (never Failed) and `updates.lastFailure` is set. The card shows the failure row; Try again repeats from step 2, the close button calls `local.dismissUpdateFailure()`.
@@ -66,7 +67,7 @@ Storage card:
 ## Integration
 
 - Used by `ui/CoCodeApp.kt`, which builds `HomeActions` and passes state. The `HomeActions` doc says previews share this surface (`ui/preview/`).
-- Runtime types: `RuntimeState`, `FailurePhase`, `RuntimeInfo`, `InstallStep` (`setupSteps`, `updateSteps`), `RuntimeUpdateState`, `RuntimeUpdate`, `VersionChange`, `UpdateFailure`, `ServerTarget.Remote`, `ServerTarget.LOCAL_ID`, `SharedStorageState`, `SharedStorageStatus`.
+- Runtime types: `RuntimeState`, `FailurePhase`, `RuntimeInfo`, `InstallStep` (`setupSteps`, `updateSteps`), `AgentsState`, `RuntimeUpdateState`, `RuntimeUpdate`, `VersionChange`, `AgentChange`, `UpdateFailure`, `ServerTarget.Remote`, `ServerTarget.LOCAL_ID`, `SharedStorageState`, `SharedStorageStatus`.
 - From `ui/`: `hasStorageAccess`, `rememberStorageAccessRequest`, `checkServerAddress`, `AddressCheck`, `displayAddress`, `isLoopbackHost`, `rememberCopyAction`, `rememberLastNonNull`, `revealOnEnter`, `formatBytes`, `uptimeLabel`.
 - From `ui/components/`: `ChamberCard`, `ConfirmDialog`, `IconTile`, `DetailRow`, `LogConsole`, `SectionHeader`, `StatusPill`, `ChamberMark`.
 - `i18n.UserMessages.stepLabel(InstallStep)`, `UserMessages.headline(MessageKey)` (update failures), and `R.string.*` / `R.plurals`.

@@ -17,23 +17,23 @@ object UserMessages {
         when (key) {
             MessageKey.MirrorsUnreachable -> R.string.msg_mirrors_unreachable
             MessageKey.PackagesFailed -> R.string.msg_packages_failed
-            MessageKey.OpenChamberInstallFailed -> R.string.msg_openchamber_install_failed
-            MessageKey.NativeBuildFailed -> R.string.msg_native_build_failed
+            MessageKey.ServerInstallFailed -> R.string.msg_server_install_failed
+            MessageKey.AgentInstallFailed -> R.string.msg_agent_install_failed
+            MessageKey.AgentsRequired -> R.string.msg_agents_required
             MessageKey.PtySmokeFailed -> R.string.msg_pty_smoke_failed
             MessageKey.PortInUse -> R.string.msg_port_in_use
-            MessageKey.OpenCodeStartFailed -> R.string.msg_opencode_start_failed
-            MessageKey.ExitedDuringStart -> R.string.msg_exited_during_start
-            MessageKey.NotListeningInTime -> R.string.msg_not_listening_in_time
-            MessageKey.NotReadyInTime -> R.string.msg_not_ready_in_time
-            MessageKey.KeptStopping -> R.string.msg_kept_stopping
-            MessageKey.StoppedUnexpectedly -> R.string.msg_stopped_unexpectedly
-            MessageKey.RestartFailed -> R.string.msg_restart_failed
+            MessageKey.ServerExitedDuringStart -> R.string.msg_server_exited_during_start
+            MessageKey.ServerNotListeningInTime -> R.string.msg_server_not_listening_in_time
+            MessageKey.ServerNotReadyInTime -> R.string.msg_server_not_ready_in_time
+            MessageKey.ServerKeptStopping -> R.string.msg_server_kept_stopping
+            MessageKey.ServerStoppedUnexpectedly -> R.string.msg_server_stopped_unexpectedly
+            MessageKey.ServerRestartFailed -> R.string.msg_server_restart_failed
             MessageKey.EmbeddedProotMissing -> R.string.msg_embedded_proot_missing
             MessageKey.Generic -> R.string.msg_generic
             MessageKey.ProgressUnpacking -> R.string.msg_progress_unpacking
             MessageKey.ProgressInstallingPackages -> R.string.msg_progress_installing_packages
-            MessageKey.ProgressInstallingOpenChamber -> R.string.msg_progress_installing_openchamber
-            MessageKey.ProgressBuildingNative -> R.string.msg_progress_building_native
+            MessageKey.ProgressInstallingServer -> R.string.msg_progress_installing_server
+            MessageKey.ProgressInstallingAgents -> R.string.msg_progress_installing_agents
             MessageKey.ProgressVerifying -> R.string.msg_progress_verifying
             MessageKey.ProgressActivating -> R.string.msg_progress_activating
             MessageKey.ProgressDone -> R.string.msg_progress_done
@@ -60,8 +60,8 @@ object UserMessages {
             InstallStep.ExtractRootfs -> R.string.step_extract_rootfs
             InstallStep.InstallPackages -> R.string.step_install_packages
             InstallStep.CopyEnvironment -> R.string.step_copy_environment
-            InstallStep.InstallOpenChamber -> R.string.step_install_openchamber
-            InstallStep.BuildNativeModules -> R.string.step_build_native_modules
+            InstallStep.InstallServer -> R.string.step_install_server
+            InstallStep.InstallAgents -> R.string.step_install_agents
             InstallStep.Verify -> R.string.step_verify
         }
 }

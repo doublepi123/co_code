@@ -208,7 +208,7 @@ internal fun DetailRow(
 }
 
 /**
- * The OpenChamber cube drawn with Canvas: an open-top isometric box. Matches the web UI's logo
+ * The T3 Code cube drawn with Canvas: an open-top isometric box. Matches the web UI's logo
  * without bundling an image.
  */
 @Composable

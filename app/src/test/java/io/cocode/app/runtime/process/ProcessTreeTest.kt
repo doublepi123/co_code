@@ -150,7 +150,7 @@ class ProcessTreeTest {
 
     @Test
     fun `log truncation keeps recent content when file exceeds max bytes`() {
-        val logFile = folder.newFile("openchamber.log")
+        val logFile = folder.newFile("t3.log")
         val line = "abcdefghijklmnopqrstuvwxyz\n"
         logFile.writeText(List(20) { "$it$line" }.joinToString(""))
 

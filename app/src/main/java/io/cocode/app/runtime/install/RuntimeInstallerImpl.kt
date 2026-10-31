@@ -17,6 +17,7 @@ class RuntimeInstallerImpl(
     private val manifest: RuntimeManifest,
     private val suite: () -> EmbeddedCommandSuite.Paths,
     private val downloader: VerifiedRuntimeDownloader,
+    private val releaseSource: T3ReleaseSource,
     private val shimAsset: () -> String,
     private val dnsProvider: io.cocode.app.runtime.network.SystemDnsProvider =
         io.cocode.app.runtime.network.SystemDnsProvider { emptyList() },
@@ -25,11 +26,12 @@ class RuntimeInstallerImpl(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val installer by lazy {
-        OpenChamberInstaller(
+        RuntimeEnvironmentInstaller(
             paths,
             abi,
             manifest,
             downloader,
+            releaseSource,
             shimAsset,
             dnsProvider,
             nowMillis,
@@ -45,6 +47,7 @@ class RuntimeInstallerImpl(
     override fun installedRuntime(): InstalledRuntime? {
         val metadataFile = paths.metadataFile
         if (!metadataFile.isFile || !paths.rootfs.isDirectory) return null
+        if (!File(paths.rootfs, "opt/t3/bin.mjs").isFile) return null
         normalizeRuntimeSymlinks(paths.environment)
         val metadata =
             runCatching { json.decodeFromString<RuntimeMetadata>(metadataFile.readText()) }
@@ -55,12 +58,12 @@ class RuntimeInstallerImpl(
 
     override suspend fun install(
         report: InstallReporter,
-        versions: PackageVersions?,
+        agents: Set<String>,
     ): InstalledRuntime {
         paths.root.mkdirs()
         recover()
         val proot = suite()
-        return installer.install(report, proot, versions)
+        return installer.install(report, proot, agents)
     }
 
     override suspend fun update(
@@ -71,6 +74,16 @@ class RuntimeInstallerImpl(
         recover()
         val proot = suite()
         return installer.update(report, proot, versions)
+    }
+
+    override suspend fun applyAgents(
+        report: InstallReporter,
+        selected: Set<String>,
+    ): InstalledRuntime {
+        paths.root.mkdirs()
+        recover()
+        val proot = suite()
+        return installer.applyAgents(report, proot, selected)
     }
 
     override fun discardEnvironment() {

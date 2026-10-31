@@ -58,13 +58,13 @@ class StartPageDecisionTest {
     fun `notification link is joined onto the instance base path`() {
         val page =
             startPageUrl(
-                startUrl = "http://127.0.0.1:3000/openchamber",
-                baseUrl = "http://127.0.0.1:3000/openchamber",
+                startUrl = "http://127.0.0.1:3000/t3",
+                baseUrl = "http://127.0.0.1:3000/t3",
                 deepLinkPath = "/?session=s1",
                 resumePath = null,
                 needsGatewayLogin = false,
             )
-        assertEquals("http://127.0.0.1:3000/openchamber/?session=s1", page.url)
+        assertEquals("http://127.0.0.1:3000/t3/?session=s1", page.url)
         assertTrue(page.consume)
     }
 
@@ -72,13 +72,13 @@ class StartPageDecisionTest {
     fun `remembered page on a sub-path instance is restored without repeating the base path`() {
         val page =
             startPageUrl(
-                startUrl = "http://127.0.0.1:3000/openchamber",
-                baseUrl = "http://127.0.0.1:3000/openchamber",
+                startUrl = "http://127.0.0.1:3000/t3",
+                baseUrl = "http://127.0.0.1:3000/t3",
                 deepLinkPath = null,
-                resumePath = "/openchamber/?session=s1",
+                resumePath = "/t3/?session=s1",
                 needsGatewayLogin = false,
             )
-        assertEquals("http://127.0.0.1:3000/openchamber/?session=s1", page.url)
+        assertEquals("http://127.0.0.1:3000/t3/?session=s1", page.url)
         assertTrue(page.consume)
     }
 
@@ -99,15 +99,15 @@ class StartPageDecisionTest {
     fun `notification wins over a saved page and stays pending through a gateway round`() {
         val page =
             startPageUrl(
-                startUrl = "http://127.0.0.1:3000/openchamber",
-                baseUrl = "http://127.0.0.1:3000/openchamber",
+                startUrl = "http://127.0.0.1:3000/t3",
+                baseUrl = "http://127.0.0.1:3000/t3",
                 deepLinkPath = "/?session=notification",
-                resumePath = "/openchamber/?session=saved",
+                resumePath = "/t3/?session=saved",
                 needsGatewayLogin = true,
             )
-        assertEquals("http://127.0.0.1:3000/openchamber/?session=notification", page.url)
+        assertEquals("http://127.0.0.1:3000/t3/?session=notification", page.url)
         assertFalse(page.consume)
-        val decision = startPageDecision("/?session=notification", "/openchamber/?session=saved", needsGatewayLogin = true)
+        val decision = startPageDecision("/?session=notification", "/t3/?session=saved", needsGatewayLogin = true)
         assertEquals(StartPageSource.Notification, decision.source)
     }
 
@@ -115,13 +115,13 @@ class StartPageDecisionTest {
     fun `nothing pending loads the start URL`() {
         val page =
             startPageUrl(
-                startUrl = "http://127.0.0.1:3000/openchamber",
-                baseUrl = "http://127.0.0.1:3000/openchamber",
+                startUrl = "http://127.0.0.1:3000/t3",
+                baseUrl = "http://127.0.0.1:3000/t3",
                 deepLinkPath = null,
                 resumePath = null,
                 needsGatewayLogin = false,
             )
-        assertEquals("http://127.0.0.1:3000/openchamber", page.url)
+        assertEquals("http://127.0.0.1:3000/t3", page.url)
         assertFalse(page.consume)
     }
 
@@ -129,13 +129,13 @@ class StartPageDecisionTest {
     fun `an unusable base never falls back to a duplicated saved path`() {
         val page =
             startPageUrl(
-                startUrl = "http://127.0.0.1:3000/openchamber",
+                startUrl = "http://127.0.0.1:3000/t3",
                 baseUrl = "not a url",
                 deepLinkPath = null,
-                resumePath = "/openchamber/?session=s1",
+                resumePath = "/t3/?session=s1",
                 needsGatewayLogin = false,
             )
-        assertEquals("http://127.0.0.1:3000/openchamber", page.url)
+        assertEquals("http://127.0.0.1:3000/t3", page.url)
         assertTrue(page.consume)
     }
 }

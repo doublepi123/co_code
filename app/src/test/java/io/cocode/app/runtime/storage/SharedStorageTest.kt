@@ -37,7 +37,7 @@ class SharedStorageTest {
 
     @Test
     fun `off binds the private workspace only at projects, home first, with no second mount`() {
-        val cmd = ProotCommands.serverCommand(proot, rootfs, GuestBinds.privateOnly(home, privateWs), emptyList(), 3000)
+        val cmd = ProotCommands.serverCommand(proot, rootfs, GuestBinds.privateOnly(home, privateWs), emptyList())
 
         assertEquals(
             listOf(
@@ -51,7 +51,7 @@ class SharedStorageTest {
 
     @Test
     fun `active binds in the fixed order - home, projects, projects-private, whole opencode dir, then the private exceptions`() {
-        val cmd = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList(), 3000)
+        val cmd = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList())
 
         assertEquals(
             listOf(
@@ -71,15 +71,15 @@ class SharedStorageTest {
     @Test
     fun `no bind targets the old workspace mount points`() {
         val all =
-            ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList(), 3000).bindPairs() +
-                ProotCommands.serverCommand(proot, rootfs, GuestBinds.privateOnly(home, privateWs), emptyList(), 3000).bindPairs()
+            ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList()).bindPairs() +
+                ProotCommands.serverCommand(proot, rootfs, GuestBinds.privateOnly(home, privateWs), emptyList()).bindPairs()
 
         assertFalse(all.any { it.endsWith(":/workspace") || it.endsWith(":/workspace-private") })
     }
 
     @Test
     fun `shared projects mount at home projects and the private workspace at home projects-private`() {
-        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList(), 3000).bindPairs()
+        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList()).bindPairs()
 
         assertTrue(pairs.contains("/storage/emulated/0/CoCode/projects:/root/projects"))
         assertTrue(pairs.contains("/data/runtime/workspace:/root/projects-private"))
@@ -123,7 +123,7 @@ class SharedStorageTest {
 
     @Test
     fun `the private exceptions come after the directory bind so they are not hidden by it`() {
-        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList(), 3000).bindPairs()
+        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList()).bindPairs()
         val dirIndex = pairs.indexOf("/storage/emulated/0/CoCode/opencode:/root/.config/opencode")
         val serviceIndex = pairs.indexOfFirst { it.endsWith(":/root/.config/opencode/service.json") }
 
@@ -132,7 +132,7 @@ class SharedStorageTest {
 
     @Test
     fun `no single-file bind is made for any shared config item`() {
-        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList(), 3000).bindPairs()
+        val pairs = ProotCommands.serverCommand(proot, rootfs, activeBinds(), emptyList()).bindPairs()
         val shared = pairs.filter { it.startsWith("/storage/emulated/0/CoCode/opencode") }
 
         assertEquals(listOf("/storage/emulated/0/CoCode/opencode:/root/.config/opencode"), shared)
@@ -282,7 +282,7 @@ class SharedStorageTest {
         assertTrue(text.contains("node_modules"))
         assertTrue(text.contains("auth.json"))
         assertTrue(text.contains("session"))
-        assertTrue(text.contains("OpenChamber"))
+        assertTrue(text.contains("T3 Code"))
         assertTrue(text.contains("~/projects-private"))
         assertTrue(text.contains("~/projects"))
         assertFalse(text.contains("/workspace"))

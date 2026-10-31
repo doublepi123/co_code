@@ -7,7 +7,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 /*
- * Warm ink + amber, taken from OpenChamber's own chrome (#151313 background, #EDB449 accent) so
+ * Warm ink + amber, taken from T3 Code's own chrome (#151313 background, #EDB449 accent) so
  * the native shell and the web UI read as one product. Dynamic color is intentionally not used.
  */
 

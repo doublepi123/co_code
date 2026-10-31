@@ -1,5 +1,6 @@
 package io.cocode.app.ui.preview
 
+import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.LocalRuntimeController
 import io.cocode.app.runtime.RemoteServerStore
@@ -40,6 +41,13 @@ internal class FakeRuntimeController(
     private val mutableUpdates = MutableStateFlow(updates)
     override val updates: StateFlow<RuntimeUpdateState> = mutableUpdates.asStateFlow()
 
+    private val mutableAgents = MutableStateFlow(PreviewData.agents)
+    override val agents: StateFlow<AgentsState> = mutableAgents.asStateFlow()
+
+    override fun setAgents(selected: Set<String>) {
+        mutableAgents.value = mutableAgents.value.copy(selected = selected)
+    }
+
     override fun checkForUpdates() = Unit
 
     override fun update() {
@@ -78,6 +86,7 @@ internal class FakeRuntimeController(
             RuntimeOperation.Uninstall -> uninstall()
             RuntimeOperation.Restart -> restart()
             RuntimeOperation.Update -> update()
+            RuntimeOperation.ApplyAgents -> setAgents(agents.value.selected)
         }
     }
 
@@ -137,17 +146,29 @@ internal object PreviewData {
         RuntimeInfo(
             abi = "arm64-v8a",
             alpineVersion = "3.24.1",
-            openChamberVersion = "2.4.0",
-            openCodeVersion = "2.0.32",
+            t3Version = "0.1.6-pw.5",
+            agents = mapOf("opencode" to "2.2.5"),
             nodeVersion = "24.14.0",
             diskUsageBytes = 1_262_485_504L,
             freeSpaceBytes = 38_654_705_664L,
         )
 
+    val agents =
+        AgentsState(
+            available =
+                listOf(
+                    io.cocode.app.runtime.manifest.AgentSpec("codex", "@openai/codex", "codex", "Codex"),
+                    io.cocode.app.runtime.manifest.AgentSpec("claude", "@anthropic-ai/claude-code", "claude", "Claude Code"),
+                    io.cocode.app.runtime.manifest.AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode"),
+                ),
+            selected = setOf("opencode"),
+            installed = mapOf("opencode" to "2.2.5"),
+        )
+
     val running =
         RuntimeState.Running(
-            url = "http://127.0.0.1:3000",
-            port = 3000,
+            url = "http://127.0.0.1:3773",
+            port = 3773,
             sinceEpochMs = System.currentTimeMillis() - 2 * 60 * 60 * 1000L - 14 * 60 * 1000L,
         )
 
@@ -182,6 +203,6 @@ internal object PreviewData {
             "(37/61) Installing ca-certificates (20250911-r0)",
             "(38/61) Installing nodejs (24.14.0-r0)",
             "WARN: low battery, keep the phone plugged in",
-            "OpenChamber listening on http://127.0.0.1:3000",
+            "Listening on http://127.0.0.1:3773",
         )
 }

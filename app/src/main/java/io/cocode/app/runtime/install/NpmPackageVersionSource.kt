@@ -1,44 +1,34 @@
 package io.cocode.app.runtime.install
 
+import io.cocode.app.runtime.manifest.AgentSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
- * [PackageVersionSource] over the npm registry's abbreviated metadata (`GET /<name>`, with the
+ * Latest versions from the npm registry's abbreviated metadata (`GET /<name>`, with the
  * `application/vnd.npm.install-v1+json` accept header). [registryBaseUrl] is injectable for tests.
  *
- * Selection per package (see [selectLatest]): the highest stable version with the same major as the pin.
- * OpenCode additionally needs at least [OpenChamberInstaller.MIN_OPENCODE_VERSION]. The result is never
- * lower than the pin, so a registry that lags behind the app's bundled versions cannot downgrade it.
+ * Agent CLIs are not version-locked: the highest stable version wins, across major versions. A
+ * registry that lags behind the installed version never causes a downgrade.
  */
 class NpmPackageVersionSource(
     private val client: OkHttpClient,
     private val registryBaseUrl: String = DEFAULT_REGISTRY,
-) : PackageVersionSource {
-    override suspend fun latest(pinned: PackageVersions): PackageVersions =
+) {
+    /** The newest stable version of [packageName], or [pinned] when the registry has nothing newer. */
+    suspend fun latest(
+        packageName: String,
+        pinned: String?,
+    ): String? =
         withContext(Dispatchers.IO) {
-            PackageVersions(
-                openChamber = latestOf(OPENCHAMBER_PACKAGE, pinned.openChamber, minimum = null),
-                openCode = latestOf(OPENCODE_PACKAGE, pinned.openCode, minimum = OpenChamberInstaller.MIN_OPENCODE_VERSION),
-            )
+            selectLatest(fetchVersions(packageName), pinned)
         }
-
-    private fun latestOf(
-        name: String,
-        pinned: String,
-        minimum: String?,
-    ): String {
-        val found = selectLatest(fetchVersions(name), pinned, minimum)
-        // Never below the pin: the registry can only add a newer version, never remove the bundled one.
-        return if (found == null || OpenChamberInstaller.compareVersions(found, pinned) < 0) pinned else found
-    }
 
     private fun fetchVersions(name: String): Collection<String> {
         // The scope slash must be percent-encoded for the registry's path routing.
@@ -47,6 +37,7 @@ class NpmPackageVersionSource(
             Request.Builder()
                 .url("${registryBaseUrl.trimEnd('/')}/$encoded")
                 .header("Accept", "application/vnd.npm.install-v1+json")
+                .header("User-Agent", "CoCode-Android")
                 .build()
         // Derived client: keeps the shared connection pool, but bounds this call to the registry timeout.
         val bounded =
@@ -62,8 +53,6 @@ class NpmPackageVersionSource(
 
     companion object {
         const val DEFAULT_REGISTRY = "https://registry.npmjs.org"
-        const val OPENCHAMBER_PACKAGE = "@openchamber/web"
-        const val OPENCODE_PACKAGE = "@opencode/cli"
         private const val TIMEOUT_SECONDS = 15L
 
         private val json = Json { ignoreUnknownKeys = true }
@@ -76,26 +65,44 @@ class NpmPackageVersionSource(
         }
 
         /**
-         * The highest stable version among [candidates] that shares [pinned]'s major version and, when
-         * [minimum] is set, is at least it. Pre-releases (any `-` or `+` suffix, which covers `0.0.0-dev-*`)
-         * are excluded. Returns null when nothing qualifies.
+         * The highest stable version among [candidates]. Pre-releases (any `-` or `+` suffix) are
+         * excluded. Returns [pinned] when nothing qualifies, and never a version below it.
          */
         internal fun selectLatest(
             candidates: Collection<String>,
-            pinned: String,
-            minimum: String?,
+            pinned: String?,
         ): String? {
-            val major = majorOf(pinned)
-            return candidates
-                .filter { STABLE.matches(it) }
-                .filter { majorOf(it) == major }
-                .filter { minimum == null || OpenChamberInstaller.compareVersions(it, minimum) >= 0 }
-                .maxWithOrNull { a, b -> OpenChamberInstaller.compareVersions(a, b) }
+            val best =
+                candidates
+                    .filter { STABLE.matches(it) }
+                    .maxWithOrNull { a, b -> RuntimeEnvironmentInstaller.compareVersions(a, b) }
+            if (best == null) return pinned
+            if (pinned != null && RuntimeEnvironmentInstaller.compareVersions(best, pinned) < 0) return pinned
+            return best
         }
 
-        private fun majorOf(version: String): Int =
-            OpenChamberInstaller.extractVersion(version).substringBefore('.').toIntOrNull() ?: -1
-
         private val STABLE = Regex("""^\d+(\.\d+)+$""")
+    }
+}
+
+/**
+ * Combines the T3 Code release channel with npm for the agent CLIs. `latest()` throws when npm is
+ * unreachable (the controller reports the check as failed and keeps the installed versions); a
+ * GitHub failure falls back to the manifest's pinned T3 version.
+ */
+class DefaultPackageVersionSource(
+    private val npm: NpmPackageVersionSource,
+    private val t3: T3ReleaseSource,
+    private val agents: List<AgentSpec>,
+    private val fallbackT3Version: String,
+) : PackageVersionSource {
+    override suspend fun latest(pinned: PackageVersions): PackageVersions {
+        val t3Version = t3.latest()?.version ?: fallbackT3Version
+        val installedAgents =
+            agents
+                .map { spec -> spec.id to npm.latest(spec.npmPackage, pinned.agents[spec.id]) }
+                .filter { (_, version) -> !version.isNullOrBlank() }
+                .associate { (id, version) -> id to version!! }
+        return PackageVersions(t3 = t3Version, agents = installedAgents)
     }
 }

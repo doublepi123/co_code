@@ -38,9 +38,9 @@ data class ApiResult(
 }
 
 /**
- * Talks to the on-device OpenChamber server for notification actions. Logs in once with the UI
- * password (the same POST /auth/session the WebView uses), keeps the session cookie in a private
- * in-memory jar, and re-logs in when the server rejects the session.
+ * Talks to the on-device T3 Code server for notification actions. Logs in once with the auth
+ * password (the same POST /api/auth/browser-session the WebView uses), keeps the session cookie in a
+ * private in-memory jar, and re-logs in when the server rejects the session.
  *
  * Trust: a request is only ever made while [localReady] reports a non-null launch id that is still the
  * same launch, and the base URL still points at the same canonical loopback origin. That pair is the
@@ -158,7 +158,7 @@ class LocalApiClient(
                 ?: return ApiResult(0, "Refusing a request outside the local server")
 
         if (!jar.hasSession(lease.origin) && !login(lease)) {
-            return if (isCurrent(lease)) ApiResult(401, "Could not sign in to OpenChamber") else abandon()
+            return if (isCurrent(lease)) ApiResult(401, "Could not sign in to T3 Code") else abandon()
         }
         val first = execute(lease, target, request, directory)
         if (!isCurrent(lease)) return abandon()
@@ -177,10 +177,9 @@ class LocalApiClient(
         val pw = runCatching { password() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return false
         val body =
             buildJsonObject {
-                put("password", pw)
-                put("trustDevice", true)
+                put("credential", pw)
             }.toString()
-        val url = lease.origin.resolve("/auth/session") ?: return false
+        val url = lease.origin.resolve("/api/auth/browser-session") ?: return false
         val request =
             Request.Builder()
                 .url(url)
@@ -214,7 +213,7 @@ class LocalApiClient(
                 .url(target)
                 .method(request.method, requestBody)
                 .tag(LocalApiLease::class.java, lease)
-        // OpenChamber decodes this with decodeURIComponent, so encode like encodeURIComponent: space is %20.
+        // T3 Code decodes this with decodeURIComponent, so encode like encodeURIComponent: space is %20.
         if (!directory.isNullOrBlank()) builder.header("x-opencode-directory", encodeUriComponent(directory))
         return try {
             val call = executeCall(builder.build(), lease)
@@ -320,7 +319,7 @@ class LocalApiClient(
 
     private companion object {
         val JSON = "application/json; charset=utf-8".toMediaType()
-        const val CHANGED_MESSAGE = "The local OpenChamber changed; request dropped"
+        const val CHANGED_MESSAGE = "The local T3 Code server changed; request dropped"
     }
 }
 
@@ -380,10 +379,10 @@ class MemoryCookieJar(
         cookies += incoming
     }
 
-    /** True when a non-expired OpenChamber session cookie covers [url]. */
+    /** True when a non-expired T3 Code session cookie covers [url]. */
     @Synchronized
     fun hasSession(url: HttpUrl): Boolean =
-        cookies.any { it.name.startsWith("oc_ui_session") && it.matches(url) }
+        cookies.any { it.name.startsWith("t3_session") && it.matches(url) }
 
     @Synchronized
     fun clear() {

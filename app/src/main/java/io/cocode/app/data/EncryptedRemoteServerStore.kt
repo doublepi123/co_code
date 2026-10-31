@@ -13,7 +13,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Remote OpenChamber servers, persisted as one JSON list in EncryptedSharedPreferences. The UI
+ * Remote T3 Code servers, persisted as one JSON list in EncryptedSharedPreferences. The UI
  * password is stored only here, encrypted at rest with an AES-GCM master key.
  */
 class EncryptedRemoteServerStore(

@@ -17,7 +17,7 @@ class RuntimePaths(
     /** Previous environment during a swap. Garbage once [environment] has been committed. */
     val rollback: File get() = File(root, "environment.rollback")
     /**
-     * Guest `/root`: OpenCode/OpenChamber config, sessions and credentials. Lives outside the
+     * Guest `/root`: T3 Code/agent config, sessions and credentials. Lives outside the
      * environment so a repair or reinstall never deletes it. Bind-mounted over the guest /root.
      */
     val home: File get() = File(root, "home")
@@ -29,7 +29,7 @@ class RuntimePaths(
     val metadataFile: File get() = File(environment, METADATA_FILE_NAME)
     val uiPasswordFile: File get() = File(root, UI_PASSWORD_FILE_NAME)
     val installLog: File get() = File(logs, "install.log")
-    val serverLog: File get() = File(logs, "openchamber.log")
+    val serverLog: File get() = File(logs, "t3.log")
 
     companion object {
         const val METADATA_FILE_NAME = "metadata.json"

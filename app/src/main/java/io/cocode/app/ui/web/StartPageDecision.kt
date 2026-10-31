@@ -8,7 +8,7 @@ internal enum class StartPageSource {
     /** A notification link (`/?session=…`): joined onto the instance's base URL. */
     Notification,
 
-    /** The instance's saved page (`/openchamber/?session=…`): restored on the origin, path intact. */
+    /** The instance's saved page (`/t3/?session=…`): restored on the origin, path intact. */
     Remembered,
 }
 
@@ -43,7 +43,7 @@ internal data class StartPage(val url: String, val consume: Boolean)
 /**
  * Resolves the first page of an instance. A notification path is a route relative to the base URL
  * ([withSessionPath]); a remembered page is already an absolute same-origin path and is restored on
- * the origin alone ([withRememberedPagePath]), so a base path such as `/openchamber` is not repeated.
+ * the origin alone ([withRememberedPagePath]), so a base path such as `/t3` is not repeated.
  */
 internal fun startPageUrl(
     startUrl: String,

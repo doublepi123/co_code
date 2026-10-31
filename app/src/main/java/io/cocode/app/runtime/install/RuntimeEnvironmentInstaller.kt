@@ -10,16 +10,18 @@ import io.cocode.app.runtime.fs.copyTreeStrict
 import io.cocode.app.runtime.fs.deleteTree
 import io.cocode.app.runtime.fs.deleteTreeOrThrow
 import io.cocode.app.runtime.fs.treeSize
+import io.cocode.app.runtime.fs.writeFileReplacing
+import io.cocode.app.runtime.manifest.AgentSpec
 import io.cocode.app.runtime.manifest.RuntimeManifest
 import io.cocode.app.runtime.network.ResolvConf
 import io.cocode.app.runtime.network.SystemDnsProvider
 import io.cocode.app.runtime.process.EmbeddedCommandSuite
 import io.cocode.app.runtime.process.ProcessScanner
-import io.cocode.app.runtime.process.OpenChamberPolicy
 import io.cocode.app.runtime.process.ProotCommands
 import io.cocode.app.runtime.process.terminateProcessTree
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -29,19 +31,19 @@ import java.util.concurrent.TimeUnit
 internal const val OUTPUT_JOIN_MILLIS = 2_000L
 
 /**
- * Builds the Alpine + Node + OpenChamber environment in staging and activates it. Each guest
+ * Builds the Alpine + Node + T3 Code + agent CLI environment in staging and activates it. Each guest
  * command's output is streamed to [InstallReporter.log] and to `logs/install.log`.
- * Ported and trimmed from AndCode's LocalRuntimeInstaller (MIT).
  *
- * The active environment is never touched until the staged one is complete and verified: the
- * swap in [activateRuntimeEnvironment] is the only mutation of it. The guest `/root` lives outside
- * the environment (see [RuntimePaths.home]), so a rebuild does not delete user data.
+ * The active environment is never touched until the staged one is complete and verified: the swap in
+ * [activateRuntimeEnvironment] is the only mutation of it. The guest `/root` lives outside the
+ * environment (see [RuntimePaths.home]), so a rebuild does not delete user data.
  */
-class OpenChamberInstaller(
+class RuntimeEnvironmentInstaller(
     private val paths: RuntimePaths,
     private val abi: String,
     private val manifest: RuntimeManifest,
     private val downloader: VerifiedRuntimeDownloader,
+    private val releaseSource: T3ReleaseSource,
     private val shimAsset: () -> String,
     private val dnsProvider: SystemDnsProvider = SystemDnsProvider { emptyList() },
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -49,17 +51,14 @@ class OpenChamberInstaller(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    /**
-     * Full install: download, extract, packages, OpenChamber, native modules, verify, activate.
-     * [versions] null installs the manifest's pinned npm versions.
-     */
+    /** Full install: Alpine, packages, T3 Code, pty check, the selected agents, verify, activate. */
     suspend fun install(
         report: InstallReporter,
         proot: EmbeddedCommandSuite.Paths,
-        versions: PackageVersions? = null,
+        agents: Set<String>,
     ): InstalledRuntime =
         withContext(Dispatchers.IO) {
-            val pinned = versions ?: manifestVersions()
+            val selected = requireAgents(agents)
             val architecture = manifest.architecture(abi)
             paths.cache.mkdirs()
             paths.logs.mkdirs()
@@ -100,16 +99,32 @@ class OpenChamberInstaller(
 
                 // Shim before npm: install-time scripts also run under node and benefit from it.
                 writeShim(rootfs)
-                finishEnvironment(
-                    report = report,
-                    proot = proot,
-                    runner = runner,
-                    rootfs = rootfs,
-                    staging = staging,
-                    versions = pinned,
-                    installStep = InstallStep.InstallOpenChamber,
-                    reuseMetadata = null,
-                )
+
+                val release = resolveRelease()
+                installServer(report, rootfs, release)
+                verifyPty(runner, rootfs)
+
+                report.step(InstallStep.InstallAgents, null, selected.joinToString(" "), MessageKey.ProgressInstallingAgents)
+                installAgentPackages(runner, selected)
+                val agentVersions = verifyAgents(runner, selected)
+
+                report.step(InstallStep.Verify, null, "node, t3, agents", MessageKey.ProgressVerifying)
+                val nodeVersion = nodeVersion(runner)
+
+                val metadata =
+                    RuntimeMetadata(
+                        runtimeVersion = manifest.runtimeVersion,
+                        alpineVersion = manifest.alpineVersion,
+                        abi = abi,
+                        port = manifest.port,
+                        t3Version = release.version,
+                        agents = agentVersions,
+                        nodeVersion = nodeVersion,
+                        installedAt = nowMillis(),
+                    )
+                writeMetadata(staging, metadata)
+                activate(report, staging)
+                InstalledRuntime(metadata, paths.rootfs)
             } catch (error: Throwable) {
                 // Best effort: a leftover staging tree is removed before the next install anyway.
                 deleteTree(staging)
@@ -118,10 +133,11 @@ class OpenChamberInstaller(
         }
 
     /**
-     * Updates the npm packages of the active environment to [versions] without a new Alpine base.
-     * The active environment is copied into staging (symlinks and modes kept), npm installs the new
-     * versions there, then the same verification and swap as [install] run. Requires an active
-     * environment with metadata. Any failure deletes staging; the active environment is untouched.
+     * Updates T3 Code and the selected agents of the active environment to [versions] without a new
+     * Alpine base. The environment is copied into staging (symlinks and modes kept), the T3 bundle is
+     * replaced, changed agent packages are removed and installed again there, then the same
+     * verification and swap as [install] run. Any failure deletes staging; the active environment is
+     * untouched.
      */
     suspend fun update(
         report: InstallReporter,
@@ -131,6 +147,7 @@ class OpenChamberInstaller(
         withContext(Dispatchers.IO) {
             val current =
                 checkNotNull(installedMetadataOrNull()) { "No active runtime environment to update" }
+            val selected = requireAgents(versions.agents.keys)
             paths.cache.mkdirs()
             paths.logs.mkdirs()
             paths.prootTmp.mkdirs()
@@ -150,30 +167,52 @@ class OpenChamberInstaller(
 
                 report.step(InstallStep.CopyEnvironment, null, null, MessageKey.ProgressCopyingEnvironment)
                 copyTreeStrict(paths.environment, staging)
-                // The copy's links still name the live environment. Point them into staging now, so npm and
-                // node-gyp never write through them into the active files. No marker is written here; the
+                // The copy's links still name the live environment. Point them into staging now, so npm
+                // never writes through them into the active files. No marker is written here; the
                 // post-commit pass runs on the new environment.
                 clearSymlinkMarker(staging)
                 normalizeRuntimeSymlinks(staging, writeMarker = false)
                 val rootfs = File(staging, "rootfs")
                 check(rootfs.isDirectory) { "Copied environment has no rootfs" }
-                // npm's in-place upgrade breaks PRoot's faked hard links (see removeGlobalPackages), so the
-                // old global packages are removed first and installed again from scratch.
-                removeGlobalPackages(rootfs)
+
+                // npm's in-place upgrade breaks PRoot's faked hard links (see removeAgentPackages), so
+                // packages that change are removed host-side and installed again from scratch.
+                removeAgentPackages(rootfs, agentsToReplace(selected, current.agents, versions.agents))
                 ResolvConf.write(rootfs, dnsProvider.dnsServers())
 
                 val runner = runnerFor(proot, rootfs, report)
                 writeShim(rootfs)
-                finishEnvironment(
-                    report = report,
-                    proot = proot,
-                    runner = runner,
-                    rootfs = rootfs,
-                    staging = staging,
-                    versions = versions,
-                    installStep = InstallStep.InstallOpenChamber,
-                    reuseMetadata = current,
+                installServer(
+                    report,
+                    rootfs,
+                    releaseFor(versions.t3),
                 )
+                verifyPty(runner, rootfs)
+
+                report.step(InstallStep.InstallAgents, null, null, MessageKey.ProgressInstallingAgents)
+                installAgentPackages(
+                    runner,
+                    selected.filter { id -> current.agents[id] != versions.agents[id] }.toSet(),
+                    versions.agents,
+                )
+                val agentVersions = verifyAgents(runner, selected)
+
+                report.step(InstallStep.Verify, null, "node, t3, agents", MessageKey.ProgressVerifying)
+                val nodeVersion = nodeVersion(runner)
+                val metadata =
+                    RuntimeMetadata(
+                        runtimeVersion = current.runtimeVersion,
+                        alpineVersion = current.alpineVersion,
+                        abi = abi,
+                        port = manifest.port,
+                        t3Version = versions.t3,
+                        agents = agentVersions,
+                        nodeVersion = nodeVersion,
+                        installedAt = nowMillis(),
+                    )
+                writeMetadata(staging, metadata)
+                activate(report, staging)
+                InstalledRuntime(metadata, paths.rootfs)
             } catch (error: Throwable) {
                 deleteTree(staging)
                 throw error
@@ -181,26 +220,226 @@ class OpenChamberInstaller(
         }
 
     /**
-     * Removes the two global npm packages and their bin links from the staged rootfs, host side, without
-     * following links. An update then installs both from scratch, which is the path verified on device.
-     *
-     * Why: `npm i -g` over an existing global install replaces files that PRoot's `--link2symlink` has
-     * faked as hard links (`.l2s.*` chains). npm's unlink and rename of those leaves a dangling chain:
-     * `opencode` reports "Operation not permitted" or "not found" and the verify step fails. A clean
-     * reinstall does not hit this. Missing entries are fine.
-     *
-     * Only the staged copy is touched. The active environment is never written, so a crash here leaves
-     * it as it was.
+     * Applies an agent selection to the active environment in place. The controller stops the server
+     * first. Removed agents are deleted host-side (the copy-to-staging update path is unnecessary for
+     * a few packages), new ones are installed from npm, then every selected agent is verified and the
+     * metadata is rewritten atomically. A failure before the metadata write leaves the previous
+     * record intact; the next install or selection change repairs the files.
      */
-    internal fun removeGlobalPackages(rootfs: File) = Companion.removeGlobalPackages(rootfs)
+    suspend fun applyAgents(
+        report: InstallReporter,
+        proot: EmbeddedCommandSuite.Paths,
+        selected: Set<String>,
+    ): InstalledRuntime =
+        withContext(Dispatchers.IO) {
+            val current = checkNotNull(installedMetadataOrNull()) { "No active runtime environment" }
+            val wanted = requireAgents(selected)
+            val rootfs = paths.rootfs
+            check(rootfs.isDirectory) { "Active environment has no rootfs" }
 
-    private fun manifestVersions(): PackageVersions =
-        PackageVersions(openChamber = manifest.openChamberVersion, openCode = manifest.openCodeVersion)
+            removeAgentPackages(rootfs, agentsToReplace(wanted, current.agents, current.agents))
+            writeShim(rootfs)
+            ResolvConf.write(rootfs, dnsProvider.dnsServers())
+
+            val runner = runnerFor(proot, rootfs, report)
+            report.step(InstallStep.InstallAgents, null, null, MessageKey.ProgressInstallingAgents)
+            installAgentPackages(runner, wanted - current.agents.keys)
+            report.step(InstallStep.Verify, null, null, MessageKey.ProgressVerifying)
+            val versions = verifyAgents(runner, wanted)
+
+            val metadata = current.copy(agents = versions)
+            writeMetadata(paths.environment, metadata)
+            InstalledRuntime(metadata, rootfs)
+        }
+
+    // --- Steps -----------------------------------------------------------------------------------
+
+    private suspend fun installServer(
+        report: InstallReporter,
+        rootfs: File,
+        release: T3Release,
+    ) {
+        val arch = manifest.t3Arch(abi)
+        val assetName = manifest.t3.assetName(release.version, arch)
+        report.step(InstallStep.InstallServer, null, assetName, MessageKey.ProgressInstallingServer)
+
+        // Fail closed: without the checksum list the bundle is never unpacked.
+        val expected =
+            try {
+                releaseSource.sha256Sums(release)[assetName]
+            } catch (error: Throwable) {
+                throw UserFacingException(
+                    MessageKey.ServerInstallFailed,
+                    "Unable to read the T3 Code checksum list: ${error.message}",
+                )
+            } ?: throw UserFacingException(
+                MessageKey.ServerInstallFailed,
+                "SHA256SUMS does not list $assetName",
+            )
+
+        val archive = File(paths.cache, assetName)
+        downloader.download(
+            url = release.assetUrl(assetName),
+            destination = archive,
+            expectedSha256 = expected,
+        ) { fraction ->
+            report.step(InstallStep.InstallServer, fraction, assetName, MessageKey.ProgressInstallingServer)
+        }
+
+        val target = File(rootfs, T3_GUEST.removePrefix("/"))
+        deleteTreeOrThrow(target)
+        target.mkdirs()
+        archive.inputStream().use { RuntimeArchive.extractTarGz(it, target, stripComponents = 1) }
+        verifyServerBundle(target, arch, release.version)
+    }
+
+    private fun verifyServerBundle(
+        target: File,
+        arch: String,
+        version: String,
+    ) {
+        require(File(target, "bin.mjs").isFile) { "T3 Code bundle has no bin.mjs" }
+        require(File(target, "client/index.html").isFile) { "T3 Code bundle has no client/index.html" }
+        val info =
+            runCatching {
+                json.decodeFromString<T3BundleInfo>(File(target, "ANDROID-BUNDLE.json").readText())
+            }.getOrNull() ?: error("T3 Code bundle has no readable ANDROID-BUNDLE.json")
+        require(info.arch == arch) { "T3 Code bundle is for ${info.arch}, expected $arch" }
+        require(info.version == version) { "T3 Code bundle is ${info.version}, expected $version" }
+    }
+
+    private fun verifyPty(
+        runner: GuestRunner,
+        rootfs: File,
+    ) {
+        require(File(rootfs, PTY_MODULE_GUEST.removePrefix("/")).isDirectory) {
+            "T3 Code bundle has no node-pty module"
+        }
+        File(rootfs, PTY_SMOKE_GUEST_PATH.removePrefix("/")).apply {
+            parentFile?.mkdirs()
+            writeText(PTY_SMOKE_SCRIPT)
+        }
+        runner.mustSucceed(
+            "set -e; node $PTY_SMOKE_GUEST_PATH",
+            MessageKey.PtySmokeFailed,
+            "The bundled node-pty does not work in the guest. The install is incomplete.",
+            timeoutMinutes = PTY_SMOKE_TIMEOUT_MINUTES,
+        )
+    }
+
+    /** Installs [ids] from npm at their latest versions, or at [versions] when a version is known. */
+    private fun installAgentPackages(
+        runner: GuestRunner,
+        ids: Set<String>,
+        versions: Map<String, String> = emptyMap(),
+    ) {
+        if (ids.isEmpty()) return
+        val specs = ids.map(::spec)
+        val script = agentInstallScript(specs, versions)
+        runner.mustSucceed(
+            script,
+            MessageKey.AgentInstallFailed,
+            "Unable to install the selected agent CLIs from npm.",
+            timeoutMinutes = NPM_TIMEOUT_MINUTES,
+        )
+    }
+
+    private fun verifyAgents(
+        runner: GuestRunner,
+        ids: Set<String>,
+    ): Map<String, String> =
+        ids.associate { id ->
+            val spec = spec(id)
+            // e.g. `codex-cli 0.166.0`, `opencode v2.2.5`; parse the number, never the raw line.
+            val output = runner.output("${spec.bin} --version")
+            val version = extractVersion(output)
+            require(version.isNotBlank()) { "${spec.displayName} did not report a version" }
+            id to version.removePrefix("v")
+        }
+
+    private fun nodeVersion(runner: GuestRunner): String =
+        extractVersion(runner.output("node --version")).removePrefix("v")
+
+    private fun spec(id: String): AgentSpec =
+        requireNotNull(manifest.agent(id)) { "Unknown agent: $id" }
+
+    private fun requireAgents(selected: Set<String>): Set<String> {
+        if (selected.isEmpty()) throw UserFacingException(MessageKey.AgentsRequired, "Select at least one agent")
+        selected.forEach(::spec)
+        return selected
+    }
+
+    /**
+     * Agents whose package must be deleted before npm installs again. With [targets] empty this is
+     * the set that is no longer selected. Otherwise it is every selected agent whose installed
+     * version differs from the target, plus every removed agent.
+     */
+    private fun agentsToReplace(
+        selected: Set<String>,
+        installed: Map<String, String>,
+        targets: Map<String, String>,
+    ): List<AgentSpec> {
+        val changed =
+            if (targets.isEmpty()) {
+                selected.filter { installed[it] == null && false }
+            } else {
+                selected.filter { installed[it] != targets[it] }
+            }
+        val removed = installed.keys - selected
+        return (changed + removed).distinct().mapNotNull { manifest.agent(it) }
+    }
+
+    /**
+     * Removes agent package trees and their bin links host-side, without following links.
+     *
+     * Why: `npm i -g` over an existing global install replaces files that PRoot's `--link2symlink`
+     * has faked as hard links (`.l2s.*` chains). npm's unlink and rename of those leaves a dangling
+     * chain: the binary reports "Operation not permitted" or "not found". A clean install does not hit
+     * this. Missing entries are fine. Only the given rootfs is touched.
+     */
+    private fun removeAgentPackages(
+        rootfs: File,
+        specs: List<AgentSpec>,
+    ) {
+        for (spec in specs) {
+            deleteTreeOrThrow(File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}"))
+            for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
+        }
+    }
+
+    private fun resolveRelease(): T3Release = releaseFor(manifest.t3.version)
+
+    private fun releaseFor(version: String): T3Release =
+        T3Release(
+            version = version,
+            tag = "v$version",
+            downloadBaseUrl = "https://github.com/${manifest.t3.repository}/releases/download/v$version",
+        )
 
     private fun installedMetadataOrNull(): RuntimeMetadata? {
         val file = paths.metadataFile
         if (!file.isFile) return null
         return runCatching { json.decodeFromString<RuntimeMetadata>(file.readText()) }.getOrNull()
+    }
+
+    private fun writeMetadata(
+        environment: File,
+        metadata: RuntimeMetadata,
+    ) {
+        writeFileReplacing(File(environment, RuntimePaths.METADATA_FILE_NAME), json.encodeToString(metadata))
+    }
+
+    private fun activate(
+        report: InstallReporter,
+        staging: File,
+    ) {
+        report.step(InstallStep.Verify, null, null, MessageKey.ProgressActivating)
+        activateRuntimeEnvironment(
+            active = paths.environment,
+            staging = staging,
+            rollback = paths.rollback,
+        )
+        report.step(InstallStep.Verify, 1f, null, MessageKey.ProgressDone)
     }
 
     private fun runnerFor(
@@ -217,104 +456,6 @@ class OpenChamberInstaller(
             parentFile?.mkdirs()
             writeText(shimAsset())
         }
-    }
-
-    /**
-     * The shared tail of install and update: npm install of [versions], node-pty rebuild and smoke test,
-     * verification, metadata, then the atomic swap. [reuseMetadata] carries the active runtime's
-     * runtimeVersion and alpineVersion for an update; a fresh install takes them from the manifest.
-     * Throws on any failure; the caller deletes staging.
-     */
-    private fun finishEnvironment(
-        report: InstallReporter,
-        proot: EmbeddedCommandSuite.Paths,
-        runner: GuestRunner,
-        rootfs: File,
-        staging: File,
-        versions: PackageVersions,
-        installStep: InstallStep,
-        reuseMetadata: RuntimeMetadata?,
-    ): InstalledRuntime {
-        report.step(installStep, null, "npm i @openchamber/web@${versions.openChamber}", MessageKey.ProgressInstallingOpenChamber)
-        runner.mustSucceed(
-            "set -e; npm i -g --no-fund --no-audit " +
-                "@openchamber/web@${versions.openChamber} " +
-                "@opencode/cli@${versions.openCode}",
-            MessageKey.OpenChamberInstallFailed,
-            "Unable to install OpenChamber from npm.",
-            timeoutMinutes = NPM_TIMEOUT_MINUTES,
-        )
-
-        // The node-pty prebuild is glibc-linked and segfaults on musl, so a source rebuild is
-        // required. A build failure fails the install (recoverable; the old environment stays).
-        report.step(InstallStep.BuildNativeModules, null, "node-pty for musl", MessageKey.ProgressBuildingNative)
-        runner.mustSucceed(
-            "set -e; cd $OPENCHAMBER_MODULE_ROOT/node_modules/node-pty && npx --yes node-gyp rebuild",
-            MessageKey.NativeBuildFailed,
-            "Unable to build node-pty for the terminal feature. Check the network and retry.",
-            timeoutMinutes = NATIVE_TIMEOUT_MINUTES,
-        )
-        File(rootfs, PTY_SMOKE_GUEST_PATH.removePrefix("/")).apply {
-            parentFile?.mkdirs()
-            writeText(PTY_SMOKE_SCRIPT)
-        }
-        runner.mustSucceed(
-            "set -e; node $PTY_SMOKE_GUEST_PATH",
-            MessageKey.PtySmokeFailed,
-            "The rebuilt node-pty does not work in the guest. The install is incomplete.",
-            timeoutMinutes = PTY_SMOKE_TIMEOUT_MINUTES,
-        )
-
-        report.step(InstallStep.Verify, null, "node, opencode, web bundle", MessageKey.ProgressVerifying)
-        val nodeVersion = extractVersion(runner.output("node --version"))
-        // Prints `opencode v2.0.32`: parse the number, never the raw line.
-        val opencodeVersion = extractVersion(runner.output("opencode --version"))
-        require(compareVersions(opencodeVersion, MIN_OPENCODE_VERSION) >= 0) {
-            "OpenCode $opencodeVersion is older than the required $MIN_OPENCODE_VERSION"
-        }
-        require(File(rootfs, "$OPENCHAMBER_MODULE_ROOT/dist/index.html").isFile) {
-            "OpenChamber web bundle is missing after install"
-        }
-        // Stock npm install of the requested version. No patched artifact and no version pin.
-        val installedOpenChamber =
-            runCatching { installedPackageVersion(runner, "@openchamber/web") }.getOrNull()
-                ?: versions.openChamber
-
-        val metadata =
-            RuntimeMetadata(
-                runtimeVersion = reuseMetadata?.runtimeVersion ?: manifest.runtimeVersion,
-                alpineVersion = reuseMetadata?.alpineVersion ?: manifest.alpineVersion,
-                abi = abi,
-                port = manifest.port,
-                openChamberVersion = installedOpenChamber,
-                openCodeVersion = opencodeVersion.removePrefix("v"),
-                nodeVersion = nodeVersion.removePrefix("v"),
-                installedAt = nowMillis(),
-            )
-        // Metadata is written inside the environment, so the directory rename commits it too.
-        File(staging, RuntimePaths.METADATA_FILE_NAME).writeText(json.encodeToString(metadata))
-        // Pins OpenCode to the path CoCode manages, so OpenChamber's own OpenCode upgrade is disabled.
-        OpenChamberPolicy.write(rootfs)
-
-        report.step(InstallStep.Verify, null, null, MessageKey.ProgressActivating)
-        activateRuntimeEnvironment(
-            active = paths.environment,
-            staging = staging,
-            rollback = paths.rollback,
-        )
-        report.step(InstallStep.Verify, 1f, null, MessageKey.ProgressDone)
-        return InstalledRuntime(metadata = metadata, rootfs = paths.rootfs)
-    }
-
-    /** Reads an installed global package's version from inside the guest. */
-    private fun installedPackageVersion(
-        runner: GuestRunner,
-        packageName: String,
-    ): String {
-        val output = runner.output("node -p \"require('/usr/local/lib/node_modules/$packageName/package.json').version\"")
-        val version = VERSION_PATTERN.find(output)?.value
-        require(version != null) { "No version reported for $packageName" }
-        return version
     }
 
     /**
@@ -489,62 +630,47 @@ class OpenChamberInstaller(
                 .start()
     }
 
+    @Serializable
+    internal data class T3BundleInfo(
+        val version: String? = null,
+        val arch: String? = null,
+        val libc: String? = null,
+    )
+
     companion object {
-        /** Alpine packages. The build toolchain is needed to rebuild node-pty for musl. */
+        /** Alpine packages. node-pty in the T3 bundle is already built for musl, so no toolchain. */
         val APK_PACKAGES =
             listOf(
                 "nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client",
-                "ca-certificates", "libstdc++", "python3", "make", "g++", "linux-headers",
+                "ca-certificates", "libstdc++", "python3",
             ).joinToString(" ")
 
         /** How many trailing output lines travel with a failure, for the technical detail. */
         const val MAX_DETAIL_LINES = 40
 
-        const val OPENCHAMBER_MODULE_ROOT = "/usr/local/lib/node_modules/@openchamber/web"
+        const val T3_GUEST = "/opt/t3"
+        const val T3_CLI_GUEST = "/opt/t3/bin.mjs"
+        const val T3_BUNDLE_INFO_GUEST = "/opt/t3/ANDROID-BUNDLE.json"
+        const val PTY_MODULE_GUEST = "/opt/t3/node_modules/node-pty"
         const val SHIM_GUEST_PATH = "/opt/cocode/android-shim.cjs"
-
-        /** Global npm package directories, relative to the rootfs. Removed before an update reinstalls them. */
-        val GLOBAL_PACKAGE_DIRS =
-            listOf(
-                "usr/local/lib/node_modules/@openchamber/web",
-                "usr/local/lib/node_modules/@opencode/cli",
-            )
-
-        /**
-         * Bin links of the global packages, relative to the rootfs. Each is a link into the package above, and
-         * npm recreates it. They are removed with the packages so no dangling link remains.
-         */
-        val GLOBAL_BIN_LINKS =
-            listOf(
-                "usr/local/bin/openchamber",
-                "usr/local/bin/opencode",
-                "usr/local/bin/opencode2",
-            )
-
-        /** Removes the global packages and bin links from [rootfs] (see the instance method for the reason). */
-        internal fun removeGlobalPackages(rootfs: File) {
-            for (relative in GLOBAL_PACKAGE_DIRS) deleteTreeOrThrow(File(rootfs, relative))
-            for (relative in GLOBAL_BIN_LINKS) deleteTreeOrThrow(File(rootfs, relative))
-        }
         const val PTY_SMOKE_GUEST_PATH = "/opt/cocode/pty-smoke.cjs"
-        const val MIN_OPENCODE_VERSION = "2.0.20"
+
         const val DEFAULT_TIMEOUT_MINUTES = 20L
         const val APK_TIMEOUT_MINUTES = 20L
         const val NPM_TIMEOUT_MINUTES = 30L
-        const val NATIVE_TIMEOUT_MINUTES = 15L
         const val PTY_SMOKE_TIMEOUT_MINUTES = 2L
         const val VERIFY_TIMEOUT_MINUTES = 2L
 
-        /** Free space an update needs beyond the copy: npm, node-gyp and the new packages grow the tree. */
+        /** Free space an update needs beyond the copy: extracted bundles and agent packages grow the tree. */
         const val UPDATE_FREE_SPACE_MARGIN_BYTES = 512L * 1024 * 1024
 
         /**
-         * Spawns `/bin/sh -c 'echo PTYOK'` through the rebuilt node-pty and requires the output and
+         * Spawns `/bin/sh -c 'echo PTYOK'` through the bundled node-pty and requires the output and
          * exit 0. Its own timer bounds the run so a hung PTY cannot stall the install.
          */
         val PTY_SMOKE_SCRIPT =
             """
-            const pty = require('$OPENCHAMBER_MODULE_ROOT/node_modules/node-pty');
+            const pty = require('$PTY_MODULE_GUEST');
             let out = '';
             const timer = setTimeout(() => { console.error('PTY smoke timed out: ' + out); process.exit(1); }, 20000);
             const term = pty.spawn('/bin/sh', ['-c', 'echo PTYOK'], { cols: 80, rows: 24, cwd: '/root', env: process.env });
@@ -559,7 +685,7 @@ class OpenChamberInstaller(
 
         private val VERSION_PATTERN = Regex("""\d+(?:\.\d+)+""")
 
-        /** First dotted version in a tool's output: `opencode v2.0.32` -> `2.0.32`, `v24.18.1` -> `24.18.1`. */
+        /** First dotted version in a tool's output: `opencode v2.2.5` -> `2.2.5`, `v24.18.1` -> `24.18.1`. */
         fun extractVersion(output: String): String = VERSION_PATTERN.find(output)?.value ?: output.trim().removePrefix("v")
 
         /** Dotted numeric comparison of the versions found in each string; missing segments count as 0. */
@@ -574,6 +700,39 @@ class OpenChamberInstaller(
                 if (diff != 0) return diff
             }
             return 0
+        }
+
+        /**
+         * `npm i -g` line for [specs]. [versions] pins an agent when an update knows its target;
+         * otherwise npm takes the latest.
+         */
+        fun agentInstallScript(
+            specs: List<AgentSpec>,
+            versions: Map<String, String> = emptyMap(),
+        ): String {
+            val packages =
+                specs.map { spec ->
+                    versions[spec.id]?.takeIf(String::isNotBlank)?.let { "${spec.npmPackage}@$it" } ?: spec.npmPackage
+                }
+            return "set -e; npm i -g --no-fund --no-audit ${packages.joinToString(" ")}"
+        }
+
+        /** Bin link names an agent package owns. OpenCode ships a second compatibility binary. */
+        fun agentBinNames(spec: AgentSpec): List<String> =
+            buildList {
+                add(spec.bin)
+                if (spec.id == "opencode") add("opencode2")
+            }
+
+        /** Removes the given agents' packages and bin links from [rootfs] (see the instance method). */
+        internal fun removeAgentPackages(
+            rootfs: File,
+            specs: List<AgentSpec>,
+        ) {
+            for (spec in specs) {
+                deleteTreeOrThrow(File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}"))
+                for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
+            }
         }
     }
 }

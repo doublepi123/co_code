@@ -13,7 +13,7 @@ Produces the guest `/etc/resolv.conf`. The guest needs DNS from the device's act
   - `servers(system)`: normalises each address (strips the IPv6 zone `%iface` and brackets), drops blank, whitespace, `0.0.0.0` and `::`, then dedupes and takes 3. If any usable system servers exist, only those are returned; `PUBLIC_FALLBACK` (`1.1.1.1`, `8.8.8.8`) is used only when none are usable. This avoids musl's parallel nameserver queries sending internal lookups to public DNS and failing on networks that block it.
   - `render(system)` produces the `nameserver` lines. `write(rootfs, system)` writes `etc/resolv.conf`.
 
-- `RuntimeDnsMonitor` (interface: `start(rootfs)`, `stop()`). `None` is the default for tests and previews. Production uses `DnsRefresherMonitor`, the adapter over `DnsRefresher`. `ProotOpenChamberServer` is the only consumer.
+- `RuntimeDnsMonitor` (interface: `start(rootfs)`, `stop()`). `None` is the default for tests and previews. Production uses `DnsRefresherMonitor`, the adapter over `DnsRefresher`. `ProotT3Server` is the only consumer.
 - `DnsRefresher`: lifecycle and refresh share one lock. Two counters guard every write:
   - `generation` advances on every `start` and `stop`. A refresh from an older generation never commits.
   - `sampleSequence` numbers each refresh before it samples. A refresh may commit only if its number is newer than the last committed one. A slow, stale sample that finishes late therefore cannot overwrite a newer result in the same generation. The committed sequence advances only after a successful write.
@@ -28,9 +28,9 @@ Produces the guest `/etc/resolv.conf`. The guest needs DNS from the device's act
 ## Flow
 
 Install:
-1. `OpenChamberInstaller.configureRootfs` → `ResolvConf.write(rootfs, dnsProvider.dnsServers())`.
+1. `RuntimeEnvironmentInstaller.configureRootfs` → `ResolvConf.write(rootfs, dnsProvider.dnsServers())`.
 
-Each start (`ProotOpenChamberServer.start`):
+Each start (`ProotT3Server.start`):
 1. `refreshDns(runtime)` writes the rootfs resolv.conf once, before launch, from `AppModule`'s `ResolvConf.write(runtime.rootfs, AndroidSystemDnsProvider(context).dnsServers())`. Failures are ignored (`runCatching`).
 2. After the server is ready, `dnsMonitor.start(runtime.rootfs)` starts the live monitor. It registers the default-network events and refreshes at once. A monitor failure is reported by the monitor and does not fail a successful start.
 
@@ -39,12 +39,12 @@ While running (live monitor):
 2. The refresh samples the system servers, takes the commit point under the lock, and rewrites `etc/resolv.conf` atomically only if the normalised servers or the file content changed.
 3. The server is not restarted. The new resolv.conf applies to later lookups from the running guest.
 
-Stop (`ProotOpenChamberServer.stop`):
+Stop (`ProotT3Server.stop`):
 1. `dnsMonitor.stop()` runs first, before process teardown, so no refresh writes after the server is torn down. A failed start also calls `stop()`, so the watch is always released.
 
 ## Integration
 
-- Consumers: `runtime/install/OpenChamberInstaller.kt` (install-time), `runtime/install/RuntimeInstallerImpl.kt` (constructor default), and `runtime/process/OpenChamberServer.kt` through the `refreshDns` hook and the `dnsMonitor` constructor parameter.
+- Consumers: `runtime/install/RuntimeEnvironmentInstaller.kt` (install-time), `runtime/install/RuntimeInstallerImpl.kt` (constructor default), and `runtime/process/T3Server.kt` through the `refreshDns` hook and the `dnsMonitor` constructor parameter.
 - Production wiring (`di/AppModule.kt`, the single integration point):
   - `refreshDns = { runtime -> ResolvConf.write(runtime.rootfs, AndroidSystemDnsProvider(context).dnsServers()) }`
   - `dnsMonitor = DnsRefresherMonitor(DnsRefresher(dnsProvider = AndroidSystemDnsProvider(context), events = AndroidNetworkEvents(context), reporter = …))`

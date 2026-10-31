@@ -10,8 +10,8 @@ class FormatTest {
     @Test
     fun `a plain address without userinfo is still accepted`() {
         assertEquals(
-            AddressCheck.Valid(url = "https://example.com:8443/openchamber", host = "example.com"),
-            checkServerAddress("  https://example.com:8443/openchamber/  "),
+            AddressCheck.Valid(url = "https://example.com:8443/t3", host = "example.com"),
+            checkServerAddress("  https://example.com:8443/t3/  "),
         )
         // The loose host fallback for names java.net.URI rejects (an underscore) stays available.
         assertEquals(
@@ -52,7 +52,7 @@ class FormatTest {
     @Test
     fun `display drops the scheme and a trailing slash`() {
         assertEquals("127.0.0.1:3000", displayAddress("http://127.0.0.1:3000/"))
-        assertEquals("example.com/openchamber", displayAddress("https://example.com/openchamber"))
+        assertEquals("example.com/t3", displayAddress("https://example.com/t3"))
         assertEquals("[::1]:3000", displayAddress("http://[::1]:3000/"))
         // An @ in the path or query is not userinfo.
         assertEquals("example.com/path?email=a@b", displayAddress("http://example.com/path?email=a@b"))
@@ -62,16 +62,16 @@ class FormatTest {
     fun `display of a saved userinfo address never shows the credentials`() {
         val saved =
             listOf(
-                "http://user:pw@example.com:3000/openchamber",
+                "http://user:pw@example.com:3000/t3",
                 "http://user:pw@example.com:3000/",
-                "https://user@example.com/openchamber",
+                "https://user@example.com/t3",
                 // Unparsable as a URL, but still never rendered with its credentials.
                 "user:pw@example.com:3000",
             )
         val displayed = saved.map(::displayAddress)
-        assertEquals("example.com:3000/openchamber", displayed[0])
+        assertEquals("example.com:3000/t3", displayed[0])
         assertEquals("example.com:3000", displayed[1])
-        assertEquals("example.com/openchamber", displayed[2])
+        assertEquals("example.com/t3", displayed[2])
         assertEquals("example.com:3000", displayed[3])
         displayed.forEach { address ->
             assertFalse(address, address.contains("user"))

@@ -88,7 +88,7 @@ class LocalRuntimeEnvironmentActivationTest {
         assertEquals("old", l.active.resolve("marker.txt").readText())
         assertEquals(
             "1.18.3",
-            json.decodeFromString<RuntimeMetadata>(l.active.resolve("metadata.json").readText()).openCodeVersion,
+            json.decodeFromString<RuntimeMetadata>(l.active.resolve("metadata.json").readText()).agents["opencode"],
         )
         assertFalse(l.rollback.exists())
     }
@@ -558,9 +558,9 @@ class LocalRuntimeEnvironmentActivationTest {
             runtimeVersion = "2026.10.18.1",
             alpineVersion = "3.24.1",
             abi = "arm64-v8a",
-            port = 3000,
-            openChamberVersion = "2.4.0",
-            openCodeVersion = version,
+            port = 3773,
+            t3Version = "0.1.6-pw.5",
+            agents = mapOf("opencode" to version),
             installedAt = 123,
         )
 }

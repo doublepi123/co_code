@@ -1,15 +1,14 @@
 package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.RuntimePaths
-import io.cocode.app.notify.NotificationPayload
 import io.cocode.app.runtime.install.InstalledRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 import java.util.ArrayDeque
 
-/** Runs and stops the OpenChamber server process. */
-interface OpenChamberServer {
+/** Runs and stops the T3 Code server process. */
+interface T3Server {
     /**
      * Launches the server and waits until it is ready (see [Readiness]). Throws on any failure and
      * whenever [isCancelled] returns true, so a Stop never queues behind the readiness wait.
@@ -41,10 +40,10 @@ class PortInUseException(
 ) : IllegalStateException("Port $port is in use by another app")
 
 /**
- * Launches `node cli.js serve` inside PRoot. Ported from AndCode's LocalRuntimeProcessLauncher (MIT),
- * reduced to the single OpenChamber server.
+ * Launches `node /opt/t3/bin.mjs` inside PRoot. Ported from AndCode's LocalRuntimeProcessLauncher
+ * (MIT), reduced to the single T3 Code server.
  */
-class ProotOpenChamberServer(
+class ProotT3Server(
     private val paths: RuntimePaths,
     private val suite: () -> EmbeddedCommandSuite.Paths,
     private val health: HealthProbe,
@@ -61,7 +60,7 @@ class ProotOpenChamberServer(
     private val dnsMonitor: io.cocode.app.runtime.network.RuntimeDnsMonitor =
         io.cocode.app.runtime.network.RuntimeDnsMonitor.None,
     /** Pre-start cleanup; returns true when the port is free afterwards. */
-    private val cleanBeforeStart: (port: Int, guestRunDir: File, prootPath: String) -> Boolean = { _, _, _ -> true },
+    private val cleanBeforeStart: (port: Int, prootPath: String) -> Boolean = { _, _ -> true },
     /** The bind set for this launch (shared storage decision). Defaults to private-only. */
     private val bindsForStart: () -> io.cocode.app.runtime.storage.GuestBinds = {
         io.cocode.app.runtime.storage.GuestBinds.privateOnly(paths.home, paths.workspace)
@@ -70,8 +69,6 @@ class ProotOpenChamberServer(
     private val onStarted: (io.cocode.app.runtime.storage.GuestBinds) -> Unit = {},
     /** Told when the server stops, so nothing is marked as needing a restart. */
     private val onStopped: () -> Unit = {},
-    /** Receives raw `[OpenChamberDesktopNotify] ` lines, which carry user text and never reach the log. */
-    private val notificationSink: (line: String) -> Unit = {},
     /** Spawns the guest command. Injected so tests can stand in a fake child process. */
     private val spawn: (command: List<String>, env: Map<String, String>, dir: File) -> Process = { command, env, dir ->
         ProcessBuilder(command)
@@ -83,7 +80,7 @@ class ProotOpenChamberServer(
             }
             .start()
     },
-) : OpenChamberServer {
+) : T3Server {
     private val lock = Any()
     private var process: Process? = null
     private var launchId = 0L
@@ -113,18 +110,13 @@ class ProotOpenChamberServer(
     ): Long {
         stop()
         val port = runtime.metadata.port
-        // OpenChamber's own data dir inside the guest. home is bind-mounted to /root (see GuestBinds).
-        val guestRunDir = File(paths.home, ".config/openchamber/run")
-        // Port ownership is decided before anything is spawned: a foreign listener that survives our
-        // cleanup means we must not launch, and must never send the password to it.
+        // T3 Code keeps its data in T3CODE_HOME (/root/.t3, under the bind-mounted home).
         val prootPath = runCatching { suite().proot.absolutePath }.getOrNull()
             ?: error("Embedded PRoot is unavailable")
-        if (!cleanBeforeStart(port, guestRunDir, prootPath)) throw PortInUseException(port)
+        // Port ownership is decided before anything is spawned: a foreign listener that survives our
+        // cleanup means we must not launch, and must never send the password to it.
+        if (!cleanBeforeStart(port, prootPath)) throw PortInUseException(port)
         runCatching { refreshDns(runtime) }
-        // Best effort: an install from before the policy existed gets it here, and a failure must not block
-        // the start. Without it OpenChamber offers its own OpenCode/OpenChamber update paths.
-        runCatching { OpenChamberPolicy.write(runtime.rootfs) }
-            .onFailure { onLog("Could not write the OpenChamber policy file: ${it.message}") }
         val resolved = suite()
 
         paths.logs.mkdirs()
@@ -139,12 +131,12 @@ class ProotOpenChamberServer(
                 rootfs = runtime.rootfs,
                 binds = binds,
                 extraBinds = emptyList(),
-                port = port,
             )
         val env =
             ProotCommands.serverEnvironment(
                 resolved.environment(),
                 paths.prootTmp,
+                port,
                 uiPassword,
             )
         val signal = CompletableDeferred<Unit>()
@@ -214,12 +206,6 @@ class ProotOpenChamberServer(
             val writer = BoundedLogWriter(paths.serverLog, maxLogBytes)
             try {
                 process.inputStream.bufferedReader().forEachLine { line ->
-                    // Desktop-notify lines carry user text: hand them to the sink, keep them out of the
-                    // log, the diagnostic tail and the readiness signal.
-                    if (line.startsWith(NotificationPayload.PREFIX)) {
-                        runCatching { notificationSink(line) }
-                        return@forEachLine
-                    }
                     synchronized(lock) {
                         recentOutput.addLast(line)
                         while (recentOutput.size > DIAGNOSTIC_LINES) recentOutput.removeFirst()
@@ -239,12 +225,12 @@ class ProotOpenChamberServer(
                     if (this.process === process && launchId == launch) readyId = null
                 }
             }
-        }, "openchamber-output").apply { isDaemon = true; start() }
+        }, "t3-output").apply { isDaemon = true; start() }
 
     /**
      * Readiness in trust order: the child printed the listen line (signal), the child is alive, then
-     * /health is believed (ok, OpenCode ready, serverId stable). A child that exits before listening
-     * because the port was taken fails as port in use.
+     * the environment document is believed while its id stays stable. A child that exits before
+     * listening because the port was taken fails as port in use.
      */
     private fun waitUntilReady(
         started: Process,
@@ -254,7 +240,7 @@ class ProotOpenChamberServer(
         pump: Thread,
     ) {
         val deadline = now() + readyTimeoutMillis * 1_000_000L
-        val serverIds = mutableListOf<String?>()
+        val environmentIds = mutableListOf<String?>()
         var listening = false
         while (true) {
             if (isCancelled()) throw CancellationException("Start cancelled")
@@ -263,27 +249,25 @@ class ProotOpenChamberServer(
                 pump.join(2_000)
                 val output = synchronized(lock) { recentOutput.toList() }
                 if (!listening && output.any { it.contains("EADDRINUSE") }) throw PortInUseException(port)
-                error("OpenChamber exited during startup (exit ${started.exitValue()}): ${tail()}")
+                error("T3 Code exited during startup (exit ${started.exitValue()}): ${tail()}")
             }
             if (!listening) listening = signal.isCompleted
             if (!listening) {
-                if (now() >= deadline) error("OpenChamber did not start listening on port $port: ${tail()}")
+                if (now() >= deadline) error("T3 Code did not start listening on port $port: ${tail()}")
                 sleep(pollMillis)
                 continue
             }
             val report = health.read(port)
-            serverIds += report?.serverId
-            check(Readiness.identityStable(serverIds)) {
-                "Another OpenChamber answered on port $port during startup; refusing to continue"
+            environmentIds += report?.environmentId
+            check(Readiness.identityStable(environmentIds)) {
+                "Another T3 Code server answered on port $port during startup; refusing to continue"
             }
-            when (val verdict = Readiness.verdict(report)) {
+            when (Readiness.verdict(report)) {
                 Readiness.Verdict.Ready -> return
-                is Readiness.Verdict.OpenCodeFailed ->
-                    error("OpenCode backend failed to start: ${verdict.error}")
                 Readiness.Verdict.Waiting -> Unit
             }
             if (now() >= deadline) {
-                error("OpenChamber did not become ready on port $port within ${readyTimeoutMillis / 1000}s: ${tail()}")
+                error("T3 Code did not become ready on port $port within ${readyTimeoutMillis / 1000}s: ${tail()}")
             }
             sleep(pollMillis)
         }
@@ -295,7 +279,8 @@ class ProotOpenChamberServer(
             .ifEmpty { "No server output was produced" }
 
     companion object {
-        const val READY_TIMEOUT_MILLIS = 90_000L
+        /** First boot runs the database migrations; on a phone that can take minutes. */
+        const val READY_TIMEOUT_MILLIS = 180_000L
         const val POLL_MILLIS = 500L
         const val DIAGNOSTIC_LINES = 200
     }

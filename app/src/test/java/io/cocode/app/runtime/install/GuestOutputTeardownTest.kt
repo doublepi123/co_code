@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Orchestration regression for the production teardown path. These tests call
- * [GuestOutputPump.awaitAndTearDown], the same function [OpenChamberInstaller.GuestRunner.run] calls,
+ * [GuestOutputPump.awaitAndTearDown], the same function [RuntimeEnvironmentInstaller.GuestRunner.run] calls,
  * with a fake command wait. Nothing here starts PRoot or a real process.
  *
  * Clock choice: the fake clock is used where the test only needs the deadline position. The

@@ -43,7 +43,7 @@ Invariants:
 ## Integration
 
 - Consumers:
-  - `runtime/process/OpenChamberServer.kt`: `bindsForStart` (= `prepareForStart`), `onStarted`, `onStopped`.
+  - `runtime/process/T3Server.kt`: `bindsForStart` (= `prepareForStart`), `onStarted`, `onStopped`.
   - `runtime/process/ProotCommands.kt`: `GuestBinds.privateOnly` and `serverCommand(binds)`.
   - `runtime/SharedStorageContract.kt`: the public `SharedStorageController` and `SharedStorageState`.
 - Wiring: `di/AppModule.kt` constructs `SharedStorageControllerImpl` with `PrefsSharedStoragePrefs.open(context)` and the `hostRoot` (`Environment.getExternalStorageDirectory()/CoCode`). `prepareForStart` is supplied as `bindsForStart`, and `recordStarted` and `recordStopped` are the callbacks.

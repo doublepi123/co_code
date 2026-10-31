@@ -71,10 +71,16 @@ class DefaultWebSessionAuthenticatorTest {
     private fun cookiesFor(target: ServerTarget) = FakeCookies(WebSessionIdentity(target.id, canonicalWebOrigin(target.baseUrl)!!))
 
     private fun health(ok: Boolean = true) =
-        MockResponse().setBody(if (ok) """{"status":"ok","openchamberVersion":"2.4.0"}""" else """{"status":"down"}""")
+        MockResponse().setBody(
+            if (ok) {
+                """{"environmentId":"5b0c8f4e-1a2b-4c3d-8e9f-0123456789ab","serverVersion":"0.1.6-pw.5"}"""
+            } else {
+                """{"serverVersion":"0.1.6-pw.5"}"""
+            },
+        )
 
-    private fun loginOk(cookie: String = "oc_ui_session_3000=abc; Path=/; HttpOnly") =
-        MockResponse().setBody("""{"success":true}""").addHeader("Set-Cookie", cookie)
+    private fun loginOk(cookie: String = "t3_session_3773=abc; Path=/; HttpOnly") =
+        MockResponse().setBody("""{"authenticated":true}""").addHeader("Set-Cookie", cookie)
 
     private fun auth(
         localPassword: () -> String? = { "local-secret" },
@@ -141,7 +147,7 @@ class DefaultWebSessionAuthenticatorTest {
 
     @Test
     fun `remote Access health redirect needs gateway login and does not post password`() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "https://team.cloudflareaccess.com/cdn-cgi/access/login/openchamber.example.com"))
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "https://team.cloudflareaccess.com/cdn-cgi/access/login/t3.example.com"))
         val target = remote("secret")
         val result = auth().prepare(target, cookiesFor(target))
         assertEquals(WebSessionResult.NeedsGatewayLogin(base()), result)
@@ -172,7 +178,7 @@ class DefaultWebSessionAuthenticatorTest {
     @Test
     fun `unparseable health body is Unreachable`() =
         runBlocking {
-            server.enqueue(MockResponse().setBody("<html>not openchamber</html>"))
+            server.enqueue(MockResponse().setBody("<html>not t3</html>"))
             val target = local()
 
             assertTrue(auth().prepare(target, cookiesFor(target)) is WebSessionResult.Unreachable)
@@ -194,15 +200,15 @@ class DefaultWebSessionAuthenticatorTest {
             assertEquals(1, cookies.stored.size)
             assertEquals(base(), cookies.stored[0].first)
             assertEquals(2, cookies.stored[0].second.size)
-            assertEquals("oc_ui_session_3000=abc; Path=/; HttpOnly", cookies.stored[0].second[0])
+            assertEquals("t3_session_3773=abc; Path=/; HttpOnly", cookies.stored[0].second[0])
 
             server.takeRequest()
             val login = server.takeRequest()
             assertEquals("POST", login.method)
-            assertEquals("/auth/session", login.path)
+            assertEquals("/api/auth/browser-session", login.path)
             val body = login.body.readUtf8()
-            assertTrue(body, body.contains("\"password\":\"local-secret\""))
-            assertTrue(body, body.contains("\"trustDevice\":true"))
+            assertTrue(body, body.contains("\"credential\":\"local-secret\""))
+            assertFalse(body, body.contains("trustDevice"))
         }
 
     @Test
@@ -226,7 +232,7 @@ class DefaultWebSessionAuthenticatorTest {
                 server.enqueue(health())
                 server.enqueue(
                     MockResponse().setResponseCode(302)
-                        .addHeader("Location", elsewhere.url("/auth/session").toString())
+                        .addHeader("Location", elsewhere.url("/api/auth/browser-session").toString())
                         .addHeader("Set-Cookie", "trap=1; Path=/"),
                 )
                 val target = local()
@@ -246,7 +252,7 @@ class DefaultWebSessionAuthenticatorTest {
             val elsewhere = MockWebServer()
             elsewhere.start()
             try {
-                server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", elsewhere.url("/health").toString()))
+                server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", elsewhere.url("/.well-known/t3/environment").toString()))
                 val target = local()
 
                 assertTrue(auth().prepare(target, cookiesFor(target)) is WebSessionResult.Unreachable)
@@ -265,13 +271,13 @@ class DefaultWebSessionAuthenticatorTest {
             server.enqueue(MockResponse().setBody("""{"authenticated":true}"""))
             val target = remote(null)
             val cookies = cookiesFor(target)
-            cookies.jar = "oc_ui_session_3000=kept"
+            cookies.jar = "t3_session_3773=kept"
 
             val result = auth().prepare(target, cookies)
 
             assertEquals(WebSessionResult.Ready(base()), result)
             server.takeRequest()
-            assertEquals("oc_ui_session_3000=kept", server.takeRequest().getHeader("Cookie"))
+            assertEquals("t3_session_3773=kept", server.takeRequest().getHeader("Cookie"))
         }
 
     @Test
@@ -294,7 +300,7 @@ class DefaultWebSessionAuthenticatorTest {
 
             assertEquals(WebSessionResult.Ready(base()), auth().prepare(target, cookies))
             server.takeRequest()
-            assertTrue(server.takeRequest().body.readUtf8().contains("\"password\":\"stored\""))
+            assertTrue(server.takeRequest().body.readUtf8().contains("\"credential\":\"stored\""))
             assertEquals(1, cookies.stored.size)
         }
 
@@ -402,9 +408,9 @@ class DefaultWebSessionAuthenticatorTest {
                         if (n == 1) {
                             firstPosted.countDown()
                             release.await(5, TimeUnit.SECONDS)
-                            return loginOk("oc_ui_session_3000=first; Path=/")
+                            return loginOk("t3_session_3773=first; Path=/")
                         }
-                        return loginOk("oc_ui_session_3000=second; Path=/")
+                        return loginOk("t3_session_3773=second; Path=/")
                     }
                 }
             val target = local()
@@ -420,8 +426,8 @@ class DefaultWebSessionAuthenticatorTest {
             release.countDown()
             assertEquals(WebSessionResult.Ready(base()), first.await())
             assertEquals(WebSessionResult.Ready(base()), second.await())
-            assertEquals(listOf("oc_ui_session_3000=first; Path=/", "oc_ui_session_3000=second; Path=/"), cookies.stored.map { it.second.single() })
-            assertEquals("oc_ui_session_3000=second", cookies.jar)
+            assertEquals(listOf("t3_session_3773=first; Path=/", "t3_session_3773=second; Path=/"), cookies.stored.map { it.second.single() })
+            assertEquals("t3_session_3773=second", cookies.jar)
         }
 
     // --- transport and client policy ---
