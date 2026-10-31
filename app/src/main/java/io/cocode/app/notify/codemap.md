@@ -2,143 +2,46 @@
 
 ## Responsibility
 
-Turns OpenChamber's desktop-notification events and CoCode's own runtime errors into Android notifications, and lets the user act on them (reply, permission decision, form answer) without opening the app. Also owns the one-time bootstrap that turns on OpenChamber's `nativeNotificationsEnabled`, and the pending "open this session" link from a notification tap.
+Turns CoCode's own runtime failures into Android notifications. Nothing here reacts to the web UI's
+agent events: T3 Code has no native notification bridge, so agent notifications are not implemented.
 
 ## Design
 
-Pipeline for OpenChamber events (stdout from the server):
-
-- `NotificationSink.accept(line)`: entry point, called by `ProotOpenChamberServer` through `notificationSink`. Runs off the pump thread on `Dispatchers.IO`.
-- `NotificationPayload.parseLine`: accepts only lines starting with `[OpenChamberDesktopNotify] `. The JSON must have a non-blank `tag`. Fields: `kind`, `title`, `body`, `tag`, `sessionId`, `directory`, `requireHidden` (default true; only a JSON `false`, OpenChamber's "always" mode, turns it off). Unknown kinds map to `Kind.Unknown`.
-- Sink: `NotificationSink` leaves an event to the page only when `NotifyPolicy.leaveToPage(event.requireHidden, ProcessForeground.isInForeground())` is true. So an event is suppressed only when OpenChamber marks it `requireHidden` AND the local page is on screen. In "always" mode (`requireHidden` false) it is posted even with the page visible.
-- `NotifyPolicy.deliveryFor(kind, localPageShowing)`: `Suppressed` only while the local OpenChamber page is on screen; otherwise `Post(channel)`. Home, a remote server's page, any overlay, an unpainted page and the background all post.
-  - `localPageShowing(isLocal, resumed, overlayShown)` = local && RESUMED && no overlay (pure).
-  - `channelFor`: Ready/Goal → AgentFinished; Question/Permission → NeedsInput; Error/RestartInterrupted → Errors; Plugin/Unknown → Other.
-- `AppForeground` (`ForegroundState.kt`): `ProcessForeground` (symbol kept for DI) = `LocalPageVisibility.isShowing()` && process ≥ STARTED. It no longer means "app in foreground".
-  - `PageVisibility`: synchronized single-owner report; `report(owner, true)` takes over, `report(owner, false)` clears only its own. Starts false, memory only, so a missed report or a restart posts (fail-open).
-  - Reported by `ui/web/NotifyVisibility.kt` `LocalPageVisibilityEffect`, called once from `WebScreen` after the overlay is decided.
-- `ActionPlan.forEvent(event)` decides the actions from the kind alone:
-  - Ready, Goal, Error with a session → `Reply` (RemoteInput).
-  - Permission with a session and a `permission-<sid>:<rid>` tag → `Permission`. Otherwise `OpenOnly`.
-  - Question → `Question` (needs the pending form first).
-  - Plugin, RestartInterrupted, Unknown, or no session → `OpenOnly`.
-- `OpenChamberNotifier`:
-  - Channels `agent-finished` (DEFAULT), `needs-input` (HIGH), `errors` (HIGH), `other` (DEFAULT). `ensureChannels()` re-applies names on every call and keeps user importance.
-  - Notification id = `NotificationPayload.notificationId(tag)`: FNV-1a over UTF-8, non-negative. The same tag replaces the earlier notification.
-  - Content: small icon `ic_notification`, accent `#EDB449`, BigTextStyle, `CATEGORY_MESSAGE`, auto-cancel.
-  - Tap intent: `MainActivity` with `ACTION_OPEN_SESSION`, extras `cocode.open_session` and `cocode.open_directory`.
-  - Action intents: `NotificationActionReceiver` broadcasts with extras `session_id`, `directory`, `notification_id`, plus `request_id`/`decision` or `form_id`/`field_key`/`value`. RemoteInput key `reply_text`.
-  - Reply and permission PendingIntents come from `NotificationActionIdentity`: an explicitly encoded data URI includes action, notification id, session, optional directory and permission request/decision. The request-code hash is auxiliary only, so equal hashes cannot merge actions; `FLAG_UPDATE_CURRENT` still updates only the exact same action, and RemoteInput stays mutable.
-  - A multi-field form ([FormAnswer.Fields]) gets one "Fill form" action (`R.string.action_fill_form`) instead of broadcast buttons. Its PendingIntent is built inside `revisions.publish` from the same identity URI, with the form id in `request` and that write's revision token in `decision`, so every post gets its own activity PendingIntent. `NotificationActionIdentity.activityPendingIntent` sends it to `NotificationFormActivity` (`ACTION_ANSWER_FORM`, immutable) with the session, directory, notification id, form id and the revision as `cocode.revision`. The notification also keeps extras `cocode.form_style=fields` and `cocode.form_id`, so a later keep can rebuild the action for its own revision. Choice, Text and OpenOnly keep their previous actions.
-  - `postAlert(RuntimeAlert)`: Errors channel, id from `alert:<key>`, tap opens Home.
-  - `updateStatus(id, channel, text): String?`: in-place "Sent" (success path only), `setOnlyAlertOnce`. It writes a new revision as pending-Sent and returns the token, or null when posting is not allowed.
-  - Every write goes through `NotificationRevisionGate.publish(id, sent)` under one lock. A write records its token as `latestWritten[id]` before writing and stores it in extras `cocode.revision`. `cancelIfCurrent(id, token)` and `forgetSent(id, token)` are the Sent clean-up entry points; `cancel(id)` is the explicit removal and drops that id's pending entry and latest token.
-  - Revision-scoped actions for the form screen: `NotificationRevisionGate.ifCurrent(id, token, write)` runs `write` only when the id's `latestWritten` token is not newer than `token` (no local record falls back to trusting the system, so actions survive a process restart) and the system's current revision is exactly `token`. Both checks and the write happen under the gate lock (no TOCTOU; a failed read runs nothing), so a newer publish blocks the old action even while the system still shows the old notification. It ignores the pending-Sent table, so a plain `post(sent = false)` matches too. `cancelIfRevision(id, token)` wraps an explicit cancel and returns whether it ran; `keepIfRevision(id, token, plan)` wraps a keep and returns the new revision, or null when stale or posting is not allowed. `publishIfLatest(id, token, write)` is the inline recovery rule: it checks local ownership (`latestWritten`), a user-dismissed revision tombstone, not the lagging system, so an actionable recovery step/status can be reposted without overwriting a newer revision. A new `publish` clears the tombstone.
-  - `keep(id, KeepPlan): String?`: after an action didn't go through; returns the new revision of the kept notification (null if not posted). Rebuilds from `activeNotifications` (`NotificationCompat.Builder(context, original)`), so title, channel, session tap and, if `keepActions`, the original buttons and RemoteInput stay. A Fields form is special: the copied action carries the old revision, so it is cleared and, when the form id is known and `keepActions` is true, re-created for this keep's token from `plan.sessionId`/`plan.directory`/`id`/`cocode.form_id`. Without a form id no Fill form action is kept. Status replaces the previous one (base text kept in extras `cocode.original_body` since `post()`). A draft goes to `setRemoteInputHistory` and extras `cocode.draft`. Swiped away: a minimal Errors notification that still opens the session; lost buttons are never re-created. The read of the old notification and the write of the kept one happen under the same revision lock, and the kept notification gets a new revision (so an older Sent clean-up cannot remove it). Never sends anything.
-  - `canPost()`: POST_NOTIFICATIONS on API 33+.
-- Question path, `NotificationSink.postQuestion`:
-  - `accept` issues a per-notification event ticket (`NotificationEventOrder.issue`) synchronously, before any asynchronous work, for every event it will post. Tickets come from one global monotonic counter (never per-id reset), so an evicted id that is then re-inserted cannot make an old ticket current again (ABA). A newer non-question post on the same id advances the ticket too, so it retires an older question that is still waiting on a read. A suppressed event posts nothing and does not advance the ticket.
-  - Calls the pending reader once, then `QuestionRoute.decide(pending, sessionId)` (`InlineNotificationFormDelivery.kt`, pure):
-    - `Inline(formId)`: the session's only pending form is 1..8 plain text fields (`PendingForms.inlineForm`, one text field included). Under `NotificationActionReceiver.withNotificationLock(id)`, re-checks the ticket, then `InlineNotificationFormDelivery.start` runs `InlineNotificationFormController.begin(pending)` and `notifier.postInline` posts the first field. Nothing is sent. If nothing could be posted, an open-only notification follows (also inside the lock and only for the current ticket).
-    - `Classic(answer)`: only `Choice` keeps its buttons; everything else is `OpenOnly`. `Fields` and `Text` never leave the router, so no question reaches the form screen or the old one-field reply.
-    - `Unresolved` (the read failed): under the same lock/ticket check, `postInlineLookup`, "Couldn't load the form" with a broadcast "Try again" (`LOOKUP`) and a tap that opens the session. No field is guessed.
-    - `NoSingleForm` (none or several): under the same lock/ticket check, open-only.
-  - The ticket check is the ordering rule: a read that started for an older event can finish with a valid old snapshot after a newer form already posted, but it can no longer start a draft, cancel, or redraw the newer notification.
-  - Legacy classification below still applies to `Choice` and to notifications posted before the upgrade.
-  - Requires exactly one form for the session (`PendingForms.singleFormFor`); with several, it opens the app.
-  - `PendingForms.classifyForm` → `FormAnswer`:
-    - `Choice` (single `string` field, 1 to 3 options with value and label) → one button per option.
-    - `Text` (single string field, no options) → RemoteInput reply.
-    - `Fields` (2 to `MAX_FORM_FIELDS` = 8 fields, all `string`, no `options`/`when`/`hidden`, not a `global` session) → one "Fill form" action that opens `NotificationFormActivity`. `FormTextField` keeps each field's key, title (fallback key), description, required (default false), placeholder and default.
-    - `OpenOnly` (other multi-field forms, `when`/`hidden`, non-string, `global` session, too many fields or options, missing ids) → tap to open.
-- Inline form inside the notification (main path for plain text forms; never opens an Activity, no overlay):
-  - Backend (`InlineNotificationForm.kt`, `InlineNotificationFormStore.kt`): one field at a time, answers staged in process memory only, one whole-map POST after the last field; projections never carry an answer, a default or a server body. `serialized(notificationId)` maps each id to a fixed lock stripe (64), so different ids normally run in parallel, a hash collision only queues (inside the receiver's total budget), and a lock is never evicted or replaced for an id; capacity, TTL and the in-flight flag stay under the store lock and an in-flight draft is never evicted. Each `begin`/`act`/`resume` has a budget: a pending timeout is clearly unsent (`CheckFailed`), while a send that has started and is cancelled or times out stays `ResultUnknown` and is never retried automatically.
-  - Wiring, `InlineNotificationFormDelivery` (`InlineNotificationFormDelivery.kt`), called under the per-id lock by the receiver and the sink:
-    - Every action first checks `isInlineRevisionCurrent(id, revision)`; a stale, replayed or replaced action does nothing (no step, no write, no network).
-    - Wire commands (`InlineFormWire`): `reply`, `reply-send` (last field), `back`, `skip`, `skip-send` (last optional field), `cancel`, `retry`, `dismiss` (delete intent), `lookup`, `resume`. `reply-send`/`skip-send`/`retry` first write "Sending…"/"Checking…" (one recovery action, no tap), wait until the system shows it, then let the controller check and send.
-    - Ownership (`DraftOwner`, read under the per-id lock) decides what a current-revision action may do; restart is never inferred from `Ignored`:
-      - `Lost` (no draft for the id at all: process restart or expiry) is the only restart: `begin()` re-reads pending and shows field one with `InlineFormNotice.Restarted`. No "Sending…" is written, the action's text is dropped, nothing is sent.
-      - `Other` (another form's draft owns the id): nothing at all (no step, no write, no restart, no cancel).
-      - `This`: the action runs. If the controller ignores it (duplicate, older generation, a step behind after a refused refresh), `begin()` only re-renders this live draft at its true step (same key and schema keep the draft); it never resets it. Unexpected exceptions become a re-render or a fallback, never a dead notification.
-    - `start` returns `InlineStart`: `Posted`; `Skipped` (the controller ignored the begin, e.g. a late question or a failed read for an older form while a newer form owns the id; the sink leaves the notification alone); `NotPosted` (open-only notification instead). `startLookup` is `Skipped` while any live draft owns the id, so a failed read never redraws a working step.
-    - Outcomes: `Render` → `updateInlineIfRevision`; if the system lags or refuses that write, `repostInlineIfLatest` posts the same actionable step again only while the local revision still owns the id, the user has not dismissed that revision, and the active notification can still be read (a missing notification/read failure is never recreated). `Sent`/`Gone` → `inlineDoneIfRevision` ("Answers sent" / "already answered or closed", recorded as pending-Sent); if that write cannot run because the system never showed "Sending…", `repostInlineDoneIfLatest` posts the same status under the same local-ownership + active-existence check. The receiver clears exactly that revision after 3 s (`cancelIfCurrent`; `setTimeoutAfter(10 s)` backstop). `Dismissed` → `cancelIfRevision`; `Fallback` → `inlineFallbackIfRevision` ("This can only be answered in OpenChamber", tap opens the session, no actions); `Ignored` → nothing.
-    - A "Sending…"/"Checking…" notification carries a `RESUME` broadcast action ("Check status"). After process death it re-reads pending: with no draft it starts again at field one (never replaying the old answer); with an existing draft it only refreshes the form and keeps a `ResultUnknown`/`CheckFailed` status, so the user still has to choose the existing explicit Retry. It never POSTs. Its delete intent (`DISCARD_PENDING`) synchronously marks that revision dismissed in the receiver before the per-id lock, then removes only this form's draft; a late result/recovery for the swiped revision is blocked and nothing is re-sent.
-    - `dismiss` (swipe): drops the draft unless a newer revision exists (`hasNewerThan`).
-  - Buttons, `InlineFormLayouts.buttons` (pure): Reply first, then Back, Skip, then Cancel only in a free slot; never more than 3. Reply is "Answer", or "Answer & send" on the last field; Skip becomes "Skip & send" on the last field. Retry/Cancel after a failed check or an unknown result. A swipe always cancels.
-  - Notifier rendering (`OpenChamberNotifier`, implements `NotificationPoster`, which is an `InlineFormSurface`):
-    - Title `"<n>/<count> · <field title>"` (`inline_step_title`); body: restart notice, form title, field description, a fixed status (`inline_status_*`) and how the step relates to the single send (`inline_hint_staged`/`_last`/`_single`). Never an answer, a default or a server body.
-    - Editing and "Sending…" steps: `contentIntent = null`, `autoCancel = false`, `onlyAlertOnce` after the first post, no full-screen intent, `setAllowSystemGeneratedContextualActions(false)`. Built fresh every time (no copy of the old notification), so there is no `EXTRA_REMOTE_INPUT_HISTORY` and no `cocode.draft`.
-    - Actions: `NotificationActionIdentity.inlinePendingIntent` broadcasts to `NotificationActionReceiver` with `ACTION_INLINE_FORM`. Only the reply buttons are `FLAG_MUTABLE` (RemoteInput `reply_text`, label = field title, "(optional)" when skippable, `SEMANTIC_ACTION_REPLY`); every other action and the delete intent are immutable. All actions `setShowsUserInterface(false)`, no generated replies.
-    - Extras on every inline notification: `cocode.revision`, `cocode.form_style=inline`, `cocode.inline_phase` (`step`, `sending`, `checking`, `done_sent`, `done_gone`, `lookup`, `fallback`), and `cocode.form_id` when known (steps, and statuses that replace a step; not the lookup).
-    - Step-only locating extras (non-sensitive, read by tests and the host E2E harness from the posted notification; no other diagnostic interface): `cocode.inline_index` (Int, zero-based), `cocode.inline_count` (Int), `cocode.inline_last` (Boolean), `cocode.inline_token` (String, the random business token, not the revision), `cocode.inline_generation` (Long), `cocode.inline_status` (`InlineFormStatus` name), `cocode.inline_notice` (`Restarted`, only after a restart). Never an answer, a default or a server body. Constants: `OpenChamberNotifier.EXTRA_INLINE_*` / `PHASE_*`.
-    - Every write after the first goes through `inlineWriteIfRevision` (`ifCurrent` + `publish` under the gate lock). If the system refuses the post, the shown revision becomes the newest local one again, so its buttons keep working (their next tap re-renders the true step). A refused first post forgets its token.
-  - Identity: `NotificationActionIdentity.Spec` has separate optional `formId`, `token`, `generation`, `revision` and `command` (encoded as `form`, `token`, `gen`, `rev`, `cmd`; omitted when null, so older identities keep their URIs). Receiver extras `form_id`, `inline_token`, `inline_generation`, `inline_revision`, `inline_command`. `inlineSpecFrom(intent)` rebuilds the spec from the extras and requires the Intent's data to be exactly that URI.
-  - Receiver: `ACTION_INLINE_FORM` → `inlineSpecFrom` → RemoteInput text verbatim (not trimmed) → `InlineNotificationFormDelivery.handle` under the same per-id lock and `goAsync`. The returned done revision goes through the existing 3 s `cancelIfCurrent`/`forgetSent` clean-up.
-  - Tests: JVM `InlineNotificationFormDeliveryTest` (routing, buttons, identity, revision-gated fake surface); device `InlineNotificationFormNotificationInstrumentationTest` (real posted notifications, no broadcast sent).
-- Old single-field `ACTION_FORM` (choice buttons, and text notifications posted before the upgrade): a typed form answer is never kept as a draft, and a refusal shows the fixed `form_send_refused`, never the response body.
-- Form screen, `NotificationFormController.kt` (used by `NotificationFormActivity`). Backup code only: no new notification links to it; it serves `Fill form` notifications posted before the upgrade (and their `keepLocked` rebuild):
-  - `NotificationFormTransport` is the only dependency (`pending()` + `send(request, directory)`); `LocalApiNotificationFormTransport` adapts `LocalApiClient`.
-  - `load()`: failed read → `CheckFailed`; form no longer pending → `Gone`; `Fields` → `Ready`; other classification → `Unavailable`.
-  - `submit(form, values)`: keeps only the form's fields, trims values and drops blank ones. Missing required values → `KeepSendFailed` with the first field's title (or key), without calling the API. Otherwise it reuses `ActionDecisions`: pending check → one POST of the whole answer map (`NotificationActions.formReply(sessionId, formId, answers)`) → 2xx means `Cancel`; a refusal or unknown result gets a second pending check via `afterButton`, never a resend. A failed query is never `Gone`. `NotificationFormSubmission.reason` is only that local field label: a failed response's `body` is never returned, since it can echo the answer or other sensitive text.
-- Form screen UI, `NotificationFormActivity.kt` + `NotificationFormScreen.kt`:
-  - Manifest: `exported=false`, `singleTask`, own empty `taskAffinity`, `excludeFromRecents`, `adjustResize`. `Target.from(intent)` reads `ACTION_ANSWER_FORM` + the receiver's `session_id`/`directory`/`notification_id`/`form_id` extras and the `cocode.revision` extra; anything missing (including the revision) finishes at once. A new intent for another form or revision recreates the screen. The screen gets `stateKey = "<sessionId>:<formId>"`: revision is only a notification-side-effect identity, so a keep (or a reopen/process restore) does not clear what was typed; different form ids stay strictly apart.
-  - `NotificationFormModel` (Compose state, main thread): `start()` loads once (kept in a `ViewModel` across rotation); `send(values)` returns `Started`/`Ignored`/`Missing(keys)` and never starts a second submit while one is in flight. The submit runs in a process-wide main scope so it finishes, and updates the notification, even if the screen is closed.
-  - `NotificationFormEffects` maps the outcome to the notifier, revision-scoped: `Cancel` and `Gone` → `cancelIfRevision(id, currentRevision)` and close; load `CheckFailed`/`Unavailable` and every Keep step → `ActionDecisions.keepPlan(step, FailureContext(sid, dir, draft = null), status)` passed to `keepIfRevision(id, currentRevision, plan)`, updating `currentRevision` to the returned token. So an answer from an older form cannot cancel or overwrite a newer notification on the same id, while a retry or a later success after a keep still matches the kept revision. A `KeepSendFailed` with a reason is only the local required-field title (`reply_failed`); without one it uses the fixed `form_send_refused`, never the server body. The `stateKey` is `session:form`, so a keep never clears what was typed. The typed answers never reach the notification or the log.
-  - `NotificationFormScreen`: top bar with Close, form title and intro, one block per field (title, `Required` badge, description, `OutlinedTextField` with placeholder, `defaultValue` prefilled), a bottom bar pinned above the keyboard with the last status and one Send button (disabled + "Sending…" while in flight). Answers live in `rememberSaveable`, so a failure or rotation never clears them. A blank required field is flagged, focused and scrolled into view. IME Next moves between fields; the last field's IME action is Send. Width is capped (560dp) for tablets/landscape; the content scrolls on short screens.
-  - Test tags in `NotificationFormTags` (exposed as resource ids). Device test: `androidTest/.../notify/NotificationFormScreenInstrumentationTest.kt` (fake load/submit, no server).
-- Action receiver, `NotificationActionReceiver` (`BroadcastReceiver` + `KoinComponent`, `exported=false`):
-  - `onReceive` calls `goAsync()`; only `ACTION_INLINE_FORM` gets the new ~7.8 s total budget (per-id lock wait, pending read, POST and bounded system wait all count). `ACTION_REPLY`/`ACTION_FORM`/`ACTION_PERMISSION` keep their previous semantics with no new silent timeout. `finish()` runs as soon as the action (or the inline work) is done; the 3 s "Sent" pause runs in a separate process-scope job, so it never holds the PendingResult.
-  - Serialized per notification id with a fixed 64-stripe `Mutex` table: the same id always uses the same lock; different ids normally run in parallel and a hash collision only queues (counted in the broadcast budget). Correctness still comes from re-reading pending state.
-  - `ACTION_REPLY`: reads RemoteInput text, `POST /api/session/:sid/prompt` (body unchanged, no client id). 2xx: `updateStatus` shows "Sent" and returns its token; after 3 s the receiver calls `cancelIfCurrent(id, token)`. 3xx/4xx: `KeepSendFailed` (reason ≤ 120 chars). 0/5xx: `KeepResultUnknown` ("open the session and check before sending again"). The text is kept as a draft; it is never re-sent automatically.
-  - "Sent" clean-up is authoritative in-process state, not a timer on the id. `NotificationRevisionGate` keeps one pending-Sent token per notification id (`NotificationRevisionState`, shared by the process), plus `latestWritten` (the last token this process wrote, recorded before the write). Every write to an id (`post`, `postAlert`, `updateStatus`, `keep`) and every explicit `cancel` drops that id's pending entry under the same lock before it writes; `cancel` also drops `latestWritten`. `cancelIfCurrent` consumes the entry only when it matches, and removes only when the system's extras (`cocode.revision`) show the same token. A stale token changes nothing. `ifCurrent` (used by the form screen's `cancelIfRevision`/`keepIfRevision`) requires that no newer local token exists and that the system shows the token, under the same lock; a missing local record falls back to the system revision (after a process restart). The receiver calls `forgetSent` in a `finally` when the wait is interrupted, so no pending entry is left behind. A failed read removes nothing. This is local state: it does not track the system's own notification state beyond that extras check.
-  - `ACTION_FORM` / `ACTION_PERMISSION`: `ActionDecisions.beforeSend(check(pending()))`: Pending → POST; Gone → cancel; NotAnswerable → keep, open-session only (`KeepOpenOnly`, no buttons); Unknown (`pending()==null`, query failed) → keep the buttons with "couldn't check, nothing was sent" (`KeepCheckFailed`). A query failure never cancels. After a failed POST, read again: Gone → cancel; otherwise keep with buttons (failed or unknown). Only `NotAnswerable` loses its buttons. A typed form answer is kept as a draft. `ACTION_FORM` stays for single-field `Choice`/`Text`; a `Fields` form is answered by the form screen, not by this receiver.
-- Decisions, `ActionDecisions.kt` (pure): `PendingCheck`, `ActionStep`, `SendOutcome` (`outcomeOf(status)`), `FailureContext`, `KeepPlan`. `checkForm` treats `Fields` as pending. No step after a failure is ever Send.
-- Request builders, `NotificationActions` (in `PendingPermissions.kt`): pure `ApiRequest(method, path, body)`. `formReply` has a single-field overload and a whole-map overload (one `{ answer: { key: value } }` body). Path segments are URL-encoded with `%20` for spaces.
-- Pending-state parsing, `PendingPermissions.kt` and `PendingForms.kt`: read `GET /api/sessions/status` → `pending[sid].permissions[]` and `pending[sid].forms[]`. Parsing is pure and unit-tested; `missingRequiredFields` is the shared required-value check for the form screen.
-- Runtime alerts, `NotificationObserver` and `RuntimeErrorWatch`:
-  - `NotificationObserver.start()` (called once from `CoCodeApplication`) collects `runtime.state` with `collectLatest`.
-  - `RuntimeErrorWatch.onState`: Failed(Install) → "Setup failed", Failed(Start) → "OpenChamber didn't start", Failed(Runtime) → "OpenChamber stopped". Deduped by key. Stop never alerts.
-  - While Running, `watchHealth` polls `GET /health` every 15 s. `RuntimeErrorWatch.onHealth` alerts on `lastOpenCodeError` when `openCodeRunning` is false. Repeats are suppressed until the error clears.
-  - Stopped or NotInstalled: cancel the health job and reset the dedupe.
-  - Alerts always post, even in the foreground (`NotifyPolicy.runtimeErrorDelivery`).
-- Settings bootstrap, `NotificationSettings.kt` (`NotificationSettingsBootstrap`):
-  - Runs on Running, guarded by a `SharedPreferences` flag (`cocode_notify`, key `notifications_bootstrapped`) via `NotificationBootstrapStore`.
-  - Reads `GET /api/config/settings`. If `nativeNotificationsEnabled` is undefined or null → `PUT /api/config/settings` with `true`, then marks done. If the user has set any value (true or false) → marks done and leaves it alone.
-  - Errors are swallowed (`runCatching`); the flag is not set on a failed PUT, so it retries on the next Running.
-- Open-session link, `OpenSessionLink` (object): `offer(sessionId, directory)` sets a `MutableStateFlow<Target?>`, `take()` clears it once, `pathFor(id)` returns `/?session=<urlencoded>`. Consumed by the UI.
+- `RuntimeErrorWatch.kt` (pure): `RuntimeAlert(key, title, body)` plus `onState(RuntimeState)`.
+  - `Failed(Install)` → key `install:<reason>`, "Setup failed".
+  - `Failed(Start)` → key `start:<reason>`, "T3 Code didn't start".
+  - `Failed(Runtime)` → key `runtime:<reason>`, "T3 Code stopped".
+  - A user Stop goes to `Stopped`/`NotInstalled`, never `Failed`, so it is not alerted. The same key
+    is shown once until `reset()` clears the dedupe set.
+  - Titles come from `RuntimeErrorWatch.Titles` (`di/AppModule.kt`, `R.string.alert_*`); the default
+    keeps English text so logic tests need no `Context`.
+- `NotificationObserver.kt`: process-wide coroutine (`SupervisorJob` + `Dispatchers.IO`) started once
+  from `CoCodeApplication`. It collects `LocalRuntimeController.state`, posts
+  `watch.onState(state)`, and resets the dedupe on `Stopped`/`NotInstalled`. It polls nothing while
+  the server runs.
+- `RuntimeAlertNotifier.kt`: the native side.
+  - Creates the `errors` channel (`R.string.channel_errors`, HIGH) and re-applies its name on every
+    post so a language change reaches system settings; user importance/mute settings are kept.
+  - `postAlert(alert)`: silently returns without `POST_NOTIFICATIONS` (API 33+). Id =
+    FNV-1a(`alert:<key>`), non-negative, so the same key replaces the earlier alert. Small icon
+    `ic_notification`, accent `#EDB449`, `BigTextStyle`, `CATEGORY_ERROR`, auto-cancel; the tap opens
+    `MainActivity` (no session extras).
+- Alerts always post, even with the app in the foreground.
 
 ## Flow
 
-OpenChamber event:
-1. Server prints `[OpenChamberDesktopNotify] {json}` → `NotificationSink.accept`.
-2. Parse. Null → drop.
-3. `deliveryFor(kind, ProcessForeground.isInForeground())`. Suppressed (local page on screen) → drop.
-4. `ActionPlan.forEvent`:
-   - Question → `postQuestion` on IO: ticket check → `pending()` → `QuestionRoute.decide` → inline first step (`postInline`), lookup retry (`postInlineLookup`), or `notifier.post(event, channel, questionAnswer)` for Choice/OpenOnly. The ticket is re-checked under the per-id lock before any post.
-   - Otherwise → `notifier.post(event, channel)` with Reply / Permission / OpenOnly actions.
-5. Tap → `MainActivity.onNewIntent`/`onCreate` → `OpenSessionLink.offer` → UI opens the session.
-6. Action tap → `NotificationActionReceiver.onReceive` → `goAsync` → per-id lock → (`pending()` check) → `LocalApiClient.send` → `updateStatus` ("Sent", then 3 s and `cancelIfCurrent`), `cancel`, or `keep(KeepPlan)`. Only a `NotificationRevisionGate` pending-Sent match removes an id after a delay; any newer write to that id makes the old clean-up a no-op.
-7. Inline step (in the shade, no Activity) → `ACTION_INLINE_FORM` broadcast → per-id lock → revision check → controller step → `updateInlineIfRevision` (next field, new revision) … last field → "Sending…" → one whole-map POST → "Answers sent" → cleared after 3 s. Stale actions do nothing.
-8. Legacy only: Fill form tap → `NotificationFormActivity` (immutable PendingIntent carrying the revision) → `NotificationFormController.load()` → the whole form → `submit()` once with every field → `cancelIfRevision`, or `keepIfRevision` and the screen stays open with a fixed status (the returned revision is kept for a later retry). A keep re-creates the Fill form action with its new revision, so reopening still works; an answer whose revision was replaced by a newer notification on the same id changes nothing. No automatic resend.
-
-Runtime alert:
-1. `RuntimeState` change → `NotificationObserver` → `RuntimeErrorWatch.onState` → `postAlert`.
-2. Running → `bootstrapOnce()` (`ensureEnabled`) and `watchHealth()` (every 15 s).
-3. Health error → `onHealth` → `postAlert` (deduped).
+1. `RuntimeState` change → `NotificationObserver` → `RuntimeErrorWatch.onState`.
+2. Each new alert → `RuntimeAlertNotifier.postAlert`.
+3. Tap → `MainActivity` opens as usual.
 
 ## Integration
 
-- Depends on `data/LocalApiClient.kt` (HTTP, login, cookie jar), `runtime/` (`LocalRuntimeController`, `RuntimeState`, `FailurePhase`), `service/` (`RuntimeService` is not used directly here, but the foreground notification is its own channel), `MainActivity`, `NotificationFormActivity` (multi-field form screen; it uses `NotificationFormController`), and `R` strings (`channel_*`, `action_*` including `action_fill_form`, `reply_sent`, `reply_failed`, `alert_*`).
-- Wired in `di/AppModule.kt`: `OpenChamberNotifier`, `NotificationSink(get(), ProcessForeground, get())`, `NotificationObserver(...)`, `NotificationBootstrapStore`, `NotificationSettingsBootstrap` (inside the observer).
+- Depends on `runtime/` (`LocalRuntimeController`, `RuntimeState`, `FailurePhase`) and `R` strings
+  (`channel_errors`, `alert_setup_failed`, `alert_start_failed`, `alert_stopped`).
+- Wired in `di/AppModule.kt`: `RuntimeAlertNotifier`, `NotificationObserver(runtime, notifier,
+  watch = RuntimeErrorWatch(Titles(...)))`.
 - Started by `CoCodeApplication.onCreate`.
-- Receives stdout from `runtime/process/ProotOpenChamberServer` through the `notificationSink` lambda.
-- Manifest: `NotificationActionReceiver` and `NotificationFormActivity` are declared with `exported="false"`. `POST_NOTIFICATIONS` is requested.
-- UI consumes `OpenSessionLink.pending` and `OpenSessionLink.pathFor` (`ui/`), and feeds `LocalPageVisibility` from `ui/web/NotifyVisibility.kt`.
-- OpenChamber HTTP endpoints used (loopback, via `LocalApiClient`):
-  - `GET /health`: `NotificationObserver.watchHealth`.
-  - `GET /auth/session` and `POST /auth/session`: login, inside `LocalApiClient.login`.
-  - `GET /api/sessions/status`: `LocalApiClient.pending` (used by `NotificationSink.postQuestion`, `NotificationActionReceiver` form and permission checks).
-  - `POST /api/session/:sid/prompt`: `NotificationActions.sendReply`.
-  - `POST /api/session/:sid/permission/:rid/reply`: `NotificationActions.permissionReply`.
-  - `POST /api/session/:sid/form/:fid/reply`: `NotificationActions.formReply`.
-  - `GET` and `PUT /api/config/settings`: `NotificationSettingsBootstrap`.
+- The foreground service notification and the download notifications are separate (`service/`,
+  `data/HttpDownloads.kt`); they do not use this package.
+- Manifest: no components from this package; `POST_NOTIFICATIONS` is requested by the UI before a
+  runtime start.

@@ -8,16 +8,11 @@ import io.cocode.app.data.DefaultWebSessionAuthenticator
 import io.cocode.app.data.EncryptedRemoteServerStore
 import io.cocode.app.data.HttpDownloadStarter
 import io.cocode.app.data.LocalReadiness
-import io.cocode.app.data.LocalApiClient
 import io.cocode.app.data.WebSessionProfiles
 import io.cocode.app.R
-import io.cocode.app.notify.NotificationBootstrapStore
+import io.cocode.app.notify.RuntimeAlertNotifier
 import io.cocode.app.notify.RuntimeErrorWatch
 import io.cocode.app.notify.NotificationObserver
-import io.cocode.app.notify.NotificationSettingsBootstrap
-import io.cocode.app.notify.NotificationSink
-import io.cocode.app.notify.OpenChamberNotifier
-import io.cocode.app.notify.ProcessForeground
 import io.cocode.app.runtime.DefaultLocalRuntimeController
 import android.system.Os
 import io.cocode.app.runtime.ForegroundStarter
@@ -34,8 +29,6 @@ import io.cocode.app.runtime.LocalRuntimeController
 import io.cocode.app.runtime.RemoteServerStore
 import io.cocode.app.runtime.RuntimePaths
 import io.cocode.app.runtime.RuntimeSecrets
-import io.cocode.app.runtime.RuntimeState
-import io.cocode.app.runtime.RuntimeStateListener
 import io.cocode.app.runtime.WebSessionAuthenticator
 import io.cocode.app.runtime.install.DefaultPackageVersionSource
 import io.cocode.app.runtime.install.GithubT3ReleaseSource
@@ -78,7 +71,7 @@ val appModule =
 
         single<RemoteServerStore> { EncryptedRemoteServerStore.create(get<Context>()) }
 
-        single { OpenChamberNotifier(get<Context>()) }
+        single { RuntimeAlertNotifier(get<Context>()) }
 
         // "Keep screen on while the local server runs": one instance, read by MainActivity and Home.
         // The file is the one UiPrefs uses; Android hands out one SharedPreferences per file.
@@ -88,52 +81,18 @@ val appModule =
 
         single {
             val context = get<Context>()
-            val paths = RuntimePaths.under(context.filesDir)
-            LocalApiClient(
-                // The base URL is the live server's, so a stopped or restarting server is never called.
-                baseUrl = { (get<LocalRuntimeController>().state.value as? RuntimeState.Running)?.url },
-                password = { RuntimeSecrets.existingUiPassword(paths) },
-                // Without this, LocalApiClient denies every request by default.
-                localReady = LocalReadiness { get<T3Server>().readyLaunchId() },
-            )
-        }
-
-        single {
-            NotificationSink(
-                get(),
-                ProcessForeground,
-                get(),
-            )
-        }
-
-        single {
-            val context = get<Context>()
             NotificationObserver(
                 runtime = get(),
                 notifier = get(),
-                api = get(),
-                bootstrap = NotificationSettingsBootstrap(get(), get()),
                 watch =
                     RuntimeErrorWatch(
                         RuntimeErrorWatch.Titles(
                             setupFailed = context.getString(R.string.alert_setup_failed),
                             startFailed = context.getString(R.string.alert_start_failed),
                             stopped = context.getString(R.string.alert_stopped),
-                            opencodeError = context.getString(R.string.alert_opencode_error),
                         ),
                     ),
             )
-        }
-
-        single<NotificationBootstrapStore> {
-            val prefs = get<Context>().getSharedPreferences("cocode_notify", Context.MODE_PRIVATE)
-            object : NotificationBootstrapStore {
-                override fun bootstrapped(): Boolean = prefs.getBoolean(KEY_BOOTSTRAPPED, false)
-
-                override fun markBootstrapped() {
-                    prefs.edit().putBoolean(KEY_BOOTSTRAPPED, true).apply()
-                }
-            }
         }
 
         single<SharedStorageControllerImpl> {
@@ -252,5 +211,3 @@ val appModule =
     }
 
 private fun primaryAbi(): String = Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
-
-private const val KEY_BOOTSTRAPPED = "notifications_bootstrapped"

@@ -19,71 +19,14 @@
     <string name="runtime_notification_stopped">Stopped</string>
     <string name="runtime_notification_unsupported">Unsupported device</string>
 
-    <!-- Notification channels and actions -->
-    <string name="channel_agent_finished">Agent finished</string>
-    <string name="channel_needs_input">Needs your input</string>
+    <!-- Notification channels -->
     <string name="channel_errors">Errors</string>
     <string name="channel_other">Other</string>
-    <string name="action_reply">Reply</string>
-    <string name="action_allow_once">Allow once</string>
-    <string name="action_always_allow">Always allow</string>
-    <string name="action_deny">Deny</string>
-    <string name="reply_sent">Sent</string>
-    <string name="reply_failed">Couldn\'t send: %1$s</string>
-    <string name="permission_done">Permission answered</string>
-    <string name="notify_check_failed">Couldn\'t check with T3 Code, so nothing was sent. Make sure T3 Code is running, then try again.</string>
-    <string name="notify_result_unknown">Not sure your answer arrived. Open the session and check before you send it again.</string>
-    <string name="notify_answer_in_app">This can only be answered in T3 Code. Tap to open the session.</string>
-    <string name="notify_your_reply">Your reply: %1$s</string>
-    <string name="action_fill_form">Fill form</string>
-
-    <!-- Inline form, answered field by field inside the notification. Never shows an answer. -->
-    <string name="inline_step_title">%1$d/%2$d · %3$s</string>
-    <string name="inline_action_answer">Answer</string>
-    <string name="inline_action_answer_send">Answer &amp; send</string>
-    <string name="inline_action_back">Back</string>
-    <string name="inline_action_skip">Skip</string>
-    <string name="inline_action_skip_send">Skip &amp; send</string>
-    <string name="inline_action_cancel">Cancel</string>
-    <string name="inline_action_retry">Try again</string>
-    <string name="inline_action_resume">Check status</string>
-    <string name="inline_input_optional">%1$s (optional)</string>
-    <string name="inline_hint_staged">This answer is kept on this device for now. Everything is sent together after the last field.</string>
-    <string name="inline_hint_last">Last field. Your answer is sent together with the others, %1$d in all, once.</string>
-    <string name="inline_hint_single">Your answer is sent once.</string>
-    <string name="inline_status_required">This field is required. Type an answer to continue.</string>
-    <string name="inline_status_check_failed">Couldn\'t check with T3 Code, so nothing was sent. Your answers are kept. Make sure T3 Code is running, then try again.</string>
-    <string name="inline_status_send_failed">T3 Code didn\'t accept the answers. Check the fields and send again.</string>
-    <string name="inline_status_result_unknown">Not sure your answers arrived. Try again checks first and sends only if the form is still waiting.</string>
-    <string name="inline_status_schema_changed">The form changed, so nothing was sent. Please answer it again from the first field.</string>
-    <string name="inline_notice_restarted">Your earlier answers were cleared. Start again from the first field.</string>
-    <string name="inline_checking">Checking…</string>
-    <string name="inline_done_sent">Answers sent</string>
-    <string name="inline_done_gone">This form was already answered or closed</string>
-    <string name="inline_lookup_title">T3 Code needs your answer</string>
-    <string name="inline_lookup_body">Couldn\'t load the form. Try again, or tap to open the session.</string>
-
-    <!-- Form screen opened from a notification ("Fill form") -->
-    <string name="form_kicker">T3 Code needs your answer</string>
-    <string name="form_untitled">Answer the questions</string>
-    <string name="form_intro">Fill in the fields below, then send. Everything is sent together, once.</string>
-    <string name="form_required">Required</string>
-    <string name="form_required_missing">Fill this in before sending.</string>
-    <string name="form_send">Send</string>
-    <string name="form_sending">Sending…</string>
-    <string name="form_send_refused">T3 Code didn\'t accept the answer. Check the fields and send again.</string>
-    <string name="form_close">Close</string>
-    <string name="form_loading">Loading the form…</string>
-    <string name="form_check_failed_title">Couldn\'t load the form</string>
-    <string name="form_unavailable_title">Answer this in T3 Code</string>
-    <string name="form_unavailable_body">This form can only be answered in T3 Code. Open the session to answer it.</string>
-    <string name="form_open_session">Open the session</string>
 
     <!-- CoCode runtime alerts (notifications) -->
     <string name="alert_setup_failed">Setup failed</string>
     <string name="alert_start_failed">T3 Code didn\'t start</string>
     <string name="alert_stopped">T3 Code stopped</string>
-    <string name="alert_opencode_error">Agent error</string>
 
     <!-- Launch -->
     <string name="launch_checking">Checking…</string>

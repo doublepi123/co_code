@@ -87,7 +87,6 @@ import io.cocode.app.runtime.WebSessionResult
 import io.cocode.app.ui.displayAddress
 import io.cocode.app.ui.findActivity
 import io.cocode.app.ui.rememberLastNonNull
-import io.cocode.app.ui.withSessionPath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -148,10 +147,7 @@ internal fun WebScreen(
     onExit: () -> Unit,
     onStartLocal: () -> Unit,
     onSystemBarColor: (Color?) -> Unit,
-    /** A path such as `/?session=…` to show instead of the start page; reported back once used. */
-    deepLinkPath: String? = null,
-    onDeepLinkUsed: () -> Unit = {},
-    /** The remembered page of this instance, for the first load only; a deep link wins over it. */
+    /** The remembered page of this instance, for the first load only. */
     resumePath: String? = null,
     /** Trusted main-frame locations of this instance's page, so the app can remember the page. */
     onPageLocation: (String) -> Unit = {},
@@ -225,9 +221,7 @@ internal fun WebScreen(
     }
     // Read when the page is actually loaded, which can be long after this screen appeared
     // (e.g. the local server was still starting).
-    val latestDeepLink by rememberUpdatedState(deepLinkPath)
     val latestResumePath by rememberUpdatedState(resumePath)
-    val latestDeepLinkUsed by rememberUpdatedState(onDeepLinkUsed)
     val latestOnPageLocation by rememberUpdatedState(onPageLocation)
     DisposableEffect(web) {
         val report = { url: String -> latestOnPageLocation(url) }
@@ -290,19 +284,16 @@ internal fun WebScreen(
                         gatewayPreparations = 0
                         gatewayBudget.reset()
                     }
-                    // A session picked from a notification, or the remembered page of this instance,
-                    // is the first page, not a second load. The notification link wins over the
-                    // remembered page. Keep it pending through gateway retries so the final
-                    // authenticated prepare still loads the requested page. The saved page is an
-                    // absolute path on this origin, so it is not joined onto the base path again.
-                    val startPage = startPageUrl(start, current.baseUrl, latestDeepLink, latestResumePath, gateway)
+                    // The remembered page of this instance, when it is the first page, not a second
+                    // load. The path is read again on a gateway retry, so the authenticated prepare
+                    // still loads the requested page. It is an absolute path on this origin, so it
+                    // is not joined onto the base path again.
                     view.load(
-                        startPage.url,
+                        startPageUrl(start, current.baseUrl, latestResumePath),
                         key,
                         gatewayLogin = gateway && gatewayPreparations < 2,
                     )
                     if (ticket > 0) handoffTicket = 0L
-                    if (startPage.consume) latestDeepLinkUsed()
                     SessionPhase.Loaded
                 }
                 is WebSessionResult.Unreachable -> {
@@ -310,18 +301,6 @@ internal fun WebScreen(
                     SessionPhase.Unreachable(result.reason)
                 }
             }
-    }
-
-    // A session picked while this server's page is already loaded: open it in place. The
-    // remembered page is not applied here — the pooled page already is that page.
-    LaunchedEffect(web, deepLinkPath, phase, sessionKey, gatewayPending) {
-        val view = web ?: return@LaunchedEffect
-        val link = deepLinkPath ?: return@LaunchedEffect
-        val base = target?.baseUrl ?: return@LaunchedEffect
-        // A retained notification path must not be consumed by the already-loaded shortcut either.
-        if (gatewayPending || view.gatewayHandoffTicket != 0L) return@LaunchedEffect
-        if (phase != SessionPhase.Loaded || sessionKey == null || view.sessionKey != sessionKey) return@LaunchedEffect
-        if (view.navigateWithinSession(withSessionPath(base, link))) latestDeepLinkUsed()
     }
 
     val retry: () -> Unit = {
@@ -362,8 +341,6 @@ internal fun WebScreen(
             inspection -> WebOverlay.Connecting
             else -> null
         }
-    // T3 Code's own notifications are left to the page only while the local page is on screen.
-    LocalPageVisibilityEffect(isLocal = isLocal && !inspection, overlayShown = overlay != null)
 
     BackHandler {
         when {

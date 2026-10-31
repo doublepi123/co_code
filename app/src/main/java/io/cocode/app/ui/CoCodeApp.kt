@@ -21,7 +21,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,7 +51,6 @@ import androidx.navigation.navArgument
 import io.cocode.app.R
 import io.cocode.app.data.canonicalWebOrigin
 import io.cocode.app.data.WebProfileRemovalResult
-import io.cocode.app.notify.OpenSessionLink
 import io.cocode.app.runtime.FailurePhase
 import io.cocode.app.runtime.LocalRuntimeController
 import io.cocode.app.runtime.RemoteServerStore
@@ -254,12 +252,9 @@ internal fun CoCodeApp(
         val uiPrefs = rememberUiPrefs()
         val inspection = LocalInspectionMode.current
         val lifecycle = LocalLifecycleOwner.current.lifecycle
-        // A session picked from a notification (`/?session=…`), held until the local page shows it.
-        // Saved, so it survives recreation; cleared once used, so it never applies twice.
-        var sessionLink by rememberSaveable { mutableStateOf<String?>(null) }
-        // A notification tap asks for the local server even when opening it on launch is off.
+        // A launch opens the local server only when the user asked for it at startup.
         val wantsOpen = {
-            !inspection && (uiPrefs.autoOpenLocal || sessionLink != null || OpenSessionLink.pending.value != null)
+            !inspection && uiPrefs.autoOpenLocal
         }
         // The instance the user last had open, read once on the first frame. A remembered remote
         // needs no runtime detection, so its resume is decided already.
@@ -267,7 +262,7 @@ internal fun CoCodeApp(
         val rememberedRemoteId =
             remember {
                 val remoteIds = remotes.servers.value.mapTo(HashSet()) { it.id }
-                (resumeTarget(rememberedId, remoteIds, sessionLink != null || OpenSessionLink.pending.value != null) as? ResumeTarget.Remote)?.targetId
+                (resumeTarget(rememberedId, remoteIds) as? ResumeTarget.Remote)?.targetId
             }
         // Every instance keeps its own last page; a server removed elsewhere loses its page.
         LaunchedEffect(inspection) {
@@ -296,8 +291,7 @@ internal fun CoCodeApp(
                 try {
                     // Re-read at launch time: the frame-one values may have been overtaken by the
                     // watcher below (e.g. the user opened a server and went Home).
-                    val linkNow = sessionLink != null || OpenSessionLink.pending.value != null
-                    when (val choice = resumeTarget(uiPrefs.lastTargetId, remotes.servers.value.mapTo(HashSet()) { it.id }, linkNow)) {
+                    when (val choice = resumeTarget(uiPrefs.lastTargetId, remotes.servers.value.mapTo(HashSet()) { it.id })) {
                         is ResumeTarget.Remote ->
                             openRemoteOnLaunch(
                                 nav = nav,
@@ -347,36 +341,6 @@ internal fun CoCodeApp(
                         else -> uiPrefs.clearLastTarget()
                     }
                 }
-            }
-        }
-
-        // --- Notification taps: open the notified session in the local T3 Code. ---
-        var linkRequest by remember { mutableIntStateOf(0) }
-        LaunchedEffect(inspection) {
-            if (inspection) return@LaunchedEffect
-            OpenSessionLink.pending.collect { offered ->
-                if (offered == null) return@collect
-                val taken = OpenSessionLink.take() ?: return@collect
-                sessionLink = OpenSessionLink.pathFor(taken.sessionId)
-                linkRequest++
-            }
-        }
-        LaunchedEffect(linkRequest) {
-            if (sessionLink == null) return@LaunchedEffect
-            // A launch in progress opens the local server itself (it counts the link as a reason to).
-            snapshotFlow { launchPending }.first { pending -> !pending }
-            try {
-                openLocalForLink(
-                    runtime = runtime,
-                    nav = nav,
-                    lifecycle = lifecycle,
-                    local = local,
-                    onDiscard = { sessionLink = null },
-                )
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                sessionLink = null
             }
         }
 
@@ -523,14 +487,10 @@ internal fun CoCodeApp(
                             profiles = webDeps.profiles,
                             pool = pool,
                             onExit = {
-                                // Leaving on purpose: a session that never got to open isn't kept.
-                                if (isLocal) sessionLink = null
                                 nav.closeIfResumed(entry)
                             },
                             onStartLocal = local::startOrRetry,
                             onSystemBarColor = { webBarColor = it },
-                            deepLinkPath = if (isLocal) sessionLink else null,
-                            onDeepLinkUsed = { sessionLink = null },
                             // This instance's own last page, applied when its page is loaded fresh
                             // (switching instances or a cold launch), and only if the server still
                             // answers at the origin it was remembered on (a re-pointed remote drops it).
@@ -647,44 +607,6 @@ private suspend fun openRemoteOnLaunch(
         }
         withFrameNanos { }
         withFrameNanos { }
-    }
-}
-
-/**
- * A notification tap: show the local T3 Code, starting the server first if it is stopped. The
- * web screen then opens the session itself (on its first load, or in place if already loaded).
- * Setup, problems and unsupported devices land on Home, and the link is dropped ([onDiscard]).
- */
-private suspend fun openLocalForLink(
-    runtime: LocalRuntimeController,
-    nav: NavHostController,
-    lifecycle: Lifecycle,
-    local: LocalActions,
-    onDiscard: () -> Unit,
-) {
-    runtime.state.first { it != RuntimeState.Detecting }
-    withTimeoutOrNull(NAV_READY_TIMEOUT_MS) { nav.currentBackStackEntryFlow.first() } ?: return onDiscard()
-    // A tap brings the app to the foreground; a start needs it there. No suspension after this.
-    lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-    val entry = nav.currentBackStackEntry
-    val onLocal =
-        entry?.destination?.route == Routes.WEB && entry.arguments?.getString(Routes.ARG_TARGET) == ServerTarget.LOCAL_ID
-    // A start the launch just requested reads as Starting, so it isn't requested a second time.
-    when (launchTarget(shownLocalState(runtime.state.value, local.pendingStartFrom))) {
-        LaunchTarget.StartAndOpenLocal -> if (runCatching { local.start() }.isFailure) return onDiscard()
-        LaunchTarget.OpenLocal -> Unit
-        LaunchTarget.Home, LaunchTarget.Wait -> {
-            onDiscard()
-            if (entry?.destination?.route != Routes.HOME) nav.showHome()
-            return
-        }
-    }
-    if (!onLocal) {
-        nav.navigate(Routes.web(ServerTarget.LOCAL_ID)) {
-            // From another server's page, Back still leads to Home.
-            popUpTo(Routes.HOME)
-            launchSingleTop = true
-        }
     }
 }
 

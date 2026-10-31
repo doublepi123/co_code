@@ -20,8 +20,8 @@ Key constraints:
 
 | File | Role |
 |---|---|
-| `app/src/main/java/io/cocode/app/CoCodeApplication.kt` | Process entry: starts Koin (`di/AppModule.kt`) and the notification observer |
-| `app/src/main/java/io/cocode/app/MainActivity.kt` | Single launcher activity (singleTop): hosts Compose `CoCodeApp`, turns notification taps into `OpenSessionLink`, owns the optional foreground local-runtime screen hold |
+| `app/src/main/java/io/cocode/app/CoCodeApplication.kt` | Process entry: starts Koin (`di/AppModule.kt`) and the runtime-alert observer |
+| `app/src/main/java/io/cocode/app/MainActivity.kt` | Single launcher activity (singleTop): hosts Compose `CoCodeApp` and owns the optional foreground local-runtime screen hold |
 | `app/src/main/java/io/cocode/app/service/RuntimeService.kt` | `specialUse` foreground service that runs runtime operations and keeps the server alive |
 | `app/src/main/AndroidManifest.xml` | Components, permissions (FGS, notifications, all-files access, microphone), locale config |
 | `app/src/main/assets/runtime-manifest.json` | Pinned runtime: Alpine rootfs per ABI (URL + SHA-256), T3 Code repository/fallback version/asset pattern/arch map, agent CLI list, port 3773 |
@@ -50,9 +50,9 @@ ui/web ──► data/WebSessionProfiles ──► bound WebSessionCookies ─�
 HTTP downloads ──► data/HttpDownloadStarter ──► MediaStore or app-external Downloads
 ```
 
-The notification bridge under `notify/` still compiles, but the T3 Code server emits no
-`[OpenChamberDesktopNotify]` lines, so it currently has no data source. Runtime error notifications
-(`RuntimeErrorWatch`) keep working.
+Notifications are native only for CoCode's own runtime errors (`notify/RuntimeErrorWatch.kt` +
+`RuntimeAlertNotifier`): setup failure, start failure and an unexpected stop. The web UI's agent events
+have no native notification bridge; agent notifications are not implemented yet.
 
 ## Directory Map
 
@@ -67,13 +67,13 @@ The notification bridge under `notify/` still compiles, but the T3 Code server e
 | `…/app/runtime/network/` | Lifecycle-bound network observation and atomic guest `/etc/resolv.conf` updates from active-network DNS | [View Map](app/src/main/java/io/cocode/app/runtime/network/codemap.md) |
 | `…/app/runtime/manifest/` | Reads and validates `runtime-manifest.json` (rootfs pins, T3 release, agents, port) | [View Map](app/src/main/java/io/cocode/app/runtime/manifest/codemap.md) |
 | `…/app/service/` | `RuntimeService` foreground service: status notification, operation dispatch, wake lock, lifetime policy | [View Map](app/src/main/java/io/cocode/app/service/codemap.md) |
-| `…/app/notify/` | Native notification actions, visible-local-page suppression and session links; its OpenChamber stdout source is disconnected and the bridge is scheduled for removal | [View Map](app/src/main/java/io/cocode/app/notify/codemap.md) |
-| `…/app/data/` | Profile-bound authentication, launch-guarded loopback API, controlled HTTP downloads and encrypted remote server persistence | [View Map](app/src/main/java/io/cocode/app/data/codemap.md) |
+| `…/app/notify/` | Runtime error notifications (`RuntimeErrorWatch` + `RuntimeAlertNotifier`, one "Errors" channel); no agent-event bridge | [View Map](app/src/main/java/io/cocode/app/notify/codemap.md) |
+| `…/app/data/` | Profile-bound authentication, controlled HTTP downloads and encrypted remote server persistence | [View Map](app/src/main/java/io/cocode/app/data/codemap.md) |
 | `…/app/di/` | Koin composition root (`appModule`) | [View Map](app/src/main/java/io/cocode/app/di/codemap.md) |
 | `…/app/i18n/` | Maps runtime message keys and install steps to string resources (English / Simplified Chinese) | [View Map](app/src/main/java/io/cocode/app/i18n/codemap.md) |
-| `…/app/ui/` | Compose root: navigation (home, web), launch decision and cover, notification deep links, system bars, permission requests | [View Map](app/src/main/java/io/cocode/app/ui/codemap.md) |
+| `…/app/ui/` | Compose root: navigation (home, web), launch decision and cover, system bars, permission requests | [View Map](app/src/main/java/io/cocode/app/ui/codemap.md) |
 | `…/app/ui/home/` | Control-room home: local runtime card with agent selection, shared-storage card, remote servers | [View Map](app/src/main/java/io/cocode/app/ui/home/codemap.md) |
-| `…/app/ui/web/` | Profile-bound WebView pool, session/page loading, navigation and JS bridge, HTTP download handoff, visibility reporting and isolation/error overlays | [View Map](app/src/main/java/io/cocode/app/ui/web/codemap.md) |
+| `…/app/ui/web/` | Profile-bound WebView pool, session/page loading, navigation and JS bridge, HTTP download handoff, page remembering and isolation/error overlays | [View Map](app/src/main/java/io/cocode/app/ui/web/codemap.md) |
 | `…/app/ui/components/` | Stateless shared Compose widgets | [View Map](app/src/main/java/io/cocode/app/ui/components/codemap.md) |
 | `…/app/ui/theme/` | Material 3 color schemes, typography, shapes, extended `ChamberColors` | [View Map](app/src/main/java/io/cocode/app/ui/theme/codemap.md) |
 | `app/src/main/assets/` | Runtime manifest pins and the Node preload shim | [View Map](app/src/main/assets/codemap.md) |
@@ -83,7 +83,7 @@ The notification bridge under `notify/` still compiles, but the T3 Code server e
 
 ## Not Mapped
 
-- `app/src/test/` — JVM unit tests (runtime, storage, notifications, i18n string parity).
+- `app/src/test/` — JVM unit tests (runtime, storage, UI launch rules, i18n string parity).
 - `scripts/tests/` — offline Python tests for the native source build and the license assets (see [scripts/codemap.md](scripts/codemap.md)).
 - `app/src/main/java/io/cocode/app/ui/preview/` — Compose previews and fake contract implementations.
 - `app/src/main/res/` — resources (`values/` English, `values-zh/` Simplified Chinese, launcher/notification icons).

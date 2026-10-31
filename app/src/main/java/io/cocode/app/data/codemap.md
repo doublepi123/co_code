@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Network and persistence adapters for remote and local T3 Code servers, used by the UI and by the notification bridge:
+Network and persistence adapters for remote and local T3 Code servers, used by the UI:
 
 - `WebSessionAuthenticatorImpl.kt`: prepares a server for the WebView (health check, login, cookie hand-off). Implements `runtime.WebSessionAuthenticator`. Also defines `LocalReadiness`.
 - `WebSessionOrigin.kt`, `WebSessionProfiles.kt`: per-target WebView isolation. `canonicalWebOrigin` normalizes the origin. `WebSessionProfiles` hands out a `WebProfileBinding` per (target id, canonical origin). A `WebSessionCookies` capability is bound to that profile's `CookieManager`. No code path falls back to the global `CookieManager`. Isolation applies to the page's own profile. It does not promise per-origin isolation for every sub-resource inside that profile.
@@ -11,8 +11,6 @@ Network and persistence adapters for remote and local T3 Code servers, used by t
   - Redirects are followed by hand (`HttpDownloadTransfer`, `NO_COOKIES`, no automatic redirect). The Cookie header is sent only while the chain is on the binding's origin. Once a hop leaves that origin the rest of the chain has no Cookie, and it does not come back. https is never downgraded to http. At most 5 hops.
   - Writes are streamed. Android 10+ uses a pending MediaStore item, published on success. API 26–28 writes a hidden `.part` file and renames it. A failure or cancel removes partial output. Cancel is rethrown.
   - Lifetime: the download runs on the starter's application scope, so leaving the page does not stop it. It is not resumed after the process dies, and it is not retried. Downloads are not idempotent. A reply after a lost response is not repeated.
-- `LocalApiLease.kt`: internal helper for `LocalApiClient`. It holds `LocalApiLease(launchId, canonical loopback origin)` and the same-origin URL checks.
-- `LocalApiClient.kt`: loopback-only HTTP client used by notification actions and by `NotificationObserver`/`NotificationSettingsBootstrap`. Holds an in-memory cookie session. Also defines `ApiResult` and `MemoryCookieJar`.
 - `EncryptedRemoteServerStore.kt`: persists the list of remote servers (`ServerTarget.Remote`, including the UI password) in EncryptedSharedPreferences. Implements `runtime.RemoteServerStore`.
 
 ## Design
@@ -35,22 +33,6 @@ Network and persistence adapters for remote and local T3 Code servers, used by t
 - Only the exact derived profile is addressed; `Default` and other targets are never enumerated or cleared. Older origins from address edits are not claimed.
 - Cookie callback completion and WebStorage deletion must finish before the root commits `remotes.remove` and forgets the page. Failure, timeout or cancellation reopens the gate and keeps the server; success keeps the removed identity frozen against stale pages.
 
-### LocalApiClient
-
-- `baseUrl: () -> String?` is the live server URL (from `RuntimeState.Running`), so a stopped server is never called. `password: () -> String?` reads the UI password from `RuntimeSecrets.existingUiPassword`.
-- `localReady: LocalReadiness` defaults to deny. Every request is refused until DI injects a real readiness source (`T3Server.readyLaunchId()`).
-- Lease: each send captures `LocalApiLease(launchId, canonical loopback origin)`. Before bytes leave, a network interceptor checks that the lease still matches and that the URL is on the same origin. Any change clears the cookie jar and fails the call with `ApiResult(0, ...)`. The lease is checked again after login, after the business call, and before a 401 re-login.
-- Sends are serialized by a `Mutex`. Redirects are never followed. `resolveSameOrigin` rejects `//host`, absolute URLs and backslashes before any request.
-- HTTP is tied to coroutine cancellation: `executeCall` uses `Call.enqueue` + `suspendCancellableCoroutine`, and `invokeOnCancellation` calls `call.cancel()`, so a delayed pending/POST cannot keep the caller or the client mutex blocked. Each call gets a private cookie jar seeded from the shared snapshot; response cookies are merged back only after the call resumed successfully inside the send mutex, `ensureActive` passes and the captured lease is still current. A cancelled, late or stale-lease response can never overwrite a newer login. The response body is read and closed inside the callback; no `Response` escapes. A cancelled/failed call is `ApiResult(0, ...)` and is never automatically re-sent (only the explicit same-lease 401 re-login retries once).
-- Non-loopback hosts are refused (`ApiResult(0, ...)`). Redirects are never followed.
-- `send(request: ApiRequest, directory)`:
-  1. Login if `MemoryCookieJar.hasSession` is false (`POST /api/auth/browser-session`).
-  2. Execute the request. Header `x-opencode-directory` is set to a JS-`encodeURIComponent` style value (`+` becomes `%20`).
-  3. On 401: clear the jar, log in again, retry once.
-- `getJson(path)` and `pending()` (`GET /api/sessions/status`, returns its `pending` object) return null on failure.
-- Timeout default 8 s (connect, read, call).
-- `MemoryCookieJar`: in memory only, replaces cookies by name, nothing persisted.
-
 ### EncryptedRemoteServerStore
 
 - File `cocode_remote_servers`, key `servers`. Master key AES256_GCM; keys AES256_SIV; values AES256_GCM.
@@ -70,23 +52,15 @@ WebView login (`WebSessionAuthenticator.prepare(target, cookies)`):
 7. Remote transport check (see above).
 8. `POST /api/auth/browser-session` with `{"credential":...}` (no redirects) → store cookies → `Ready`, or `NeedsLogin` (4xx/3xx), or `Unreachable`.
 
-Notification action (`NotificationActionReceiver` → `LocalApiClient.send`):
-1. Check the lease (launch id and origin). Login if no `t3_session*` cookie is held.
-2. Execute the `ApiRequest` (for example `POST /api/session/:sid/prompt`).
-3. 401 → re-login once and retry.
-4. Return `ApiResult(status, body)`; the caller decides the notification update.
-
 Remote server CRUD: UI calls `upsert`/`remove` → JSON re-encoded → EncryptedSharedPreferences → `servers` flow emits.
 
 ## Integration
 
-- `di/AppModule.kt` constructs: `DefaultWebSessionAuthenticator` (with `LocalReadiness { get<T3Server>().readyLaunchId() }`), `LocalApiClient` (baseUrl from `LocalRuntimeController.state`, password from `RuntimeSecrets`, the same `localReady`), `EncryptedRemoteServerStore.create`, `WebSessionProfiles`, and the `AndroidHttpDownloadStarter` singleton.
+- `di/AppModule.kt` constructs: `DefaultWebSessionAuthenticator` (with `LocalReadiness { get<T3Server>().readyLaunchId() }`), `EncryptedRemoteServerStore.create`, `WebSessionProfiles`, and the `AndroidHttpDownloadStarter` singleton.
 - Interfaces implemented from `runtime/`: `WebSessionAuthenticator`, `RemoteServerStore`. Types used: `ServerTarget` (Local/Remote), `WebSessionResult`, `RuntimeSecrets`, `RuntimePaths`, `RuntimeState`.
-- Consumers: `MainActivity` and `ui/` (through `WebSessionAuthenticator` and `RemoteServerStore`); `notify/NotificationActionReceiver.kt`, `notify/NotificationObserver.kt`, `notify/NotificationSettings.kt`, `notify/NotificationSink.kt` (through `LocalApiClient`, which imports `notify.ApiRequest` from `notify/PendingPermissions.kt`).
+- Consumers: `MainActivity` and `ui/` (through `WebSessionAuthenticator` and `RemoteServerStore`); `ui/web` for the bound profile and download cookie hand-off.
 - T3 Code HTTP endpoints:
-  - `GET /.well-known/t3/environment` (`WebSessionAuthenticatorImpl`, `NotificationObserver`).
+  - `GET /.well-known/t3/environment` (`WebSessionAuthenticatorImpl`).
   - `GET /api/auth/session` (session probe).
   - `POST /api/auth/browser-session` (login with `{"credential":...}`).
-  - `GET /api/sessions/status` (`LocalApiClient.pending`, used by notify for form and permission checks).
-  - Any `ApiRequest` built by `notify/NotificationActions`, such as `/api/session/:id/prompt`, `/permission/:rid/reply`, `/form/:fid/reply`, and `/api/config/settings`.
 - Networking: `app/src/main/res/xml/network_security_config.xml` governs cleartext; the code-level plain-HTTP guard is in `WebSessionAuthenticatorImpl`.

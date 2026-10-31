@@ -3,7 +3,7 @@ package io.cocode.app.notify
 import io.cocode.app.runtime.FailurePhase
 import io.cocode.app.runtime.RuntimeState
 
-/** An CoCode-level error to show as a notification, with a stable key for dedupe. */
+/** A CoCode-level error to show as a notification, with a stable key for dedupe. */
 data class RuntimeAlert(
     /** Stable key: the same key is not shown twice until it has cleared. */
     val key: String,
@@ -12,18 +12,16 @@ data class RuntimeAlert(
 )
 
 /**
- * Turns controller state transitions and OpenCode health into alerts.
+ * Turns controller state transitions into runtime alerts.
  *
- * - Failed(Install) → "Setup failed", Failed(Start) → "OpenChamber didn't start",
- *   Failed(Runtime) → "OpenChamber stopped". A user-initiated Stop is never an alert: Stop goes to
+ * - Failed(Install) → "Setup failed", Failed(Start) → "T3 Code didn't start",
+ *   Failed(Runtime) → "T3 Code stopped". A user-initiated Stop is never an alert: Stop goes to
  *   Stopped/NotInstalled and never to Failed.
- * - While Running, a non-null OpenCode error with OpenCode not running → "OpenCode backend error".
- *   Repeats are suppressed until the error clears.
  */
 class RuntimeErrorWatch(
     /**
-     * Localised titles and bodies, given by the notifier from resources. The default keeps the
-     * English technical text, for logic tests that do not need a Context.
+     * Localised titles, given by the notifier from resources. The default keeps the English
+     * technical text, for logic tests that do not need a Context.
      */
     private val titles: Titles = Titles.English,
 ) {
@@ -32,10 +30,9 @@ class RuntimeErrorWatch(
         val setupFailed: String,
         val startFailed: String,
         val stopped: String,
-        val opencodeError: String,
     ) {
         companion object {
-            val English = Titles("Setup failed", "OpenChamber didn't start", "OpenChamber stopped", "OpenCode backend error")
+            val English = Titles("Setup failed", "T3 Code didn't start", "T3 Code stopped")
         }
     }
 
@@ -55,24 +52,6 @@ class RuntimeErrorWatch(
                 }
             }
         return listOfNotNull(alert).filter { shownKeys.add(it.key) }
-    }
-
-    /**
-     * Alerts from a `/health` reading while Running. [openCodeError] is OpenCode's last error;
-     * [openCodeRunning] tells whether it is currently running. A cleared error re-arms the alert.
-     */
-    fun onHealth(
-        openCodeError: String?,
-        openCodeRunning: Boolean,
-    ): List<RuntimeAlert> {
-        val failing = !openCodeError.isNullOrBlank() && !openCodeRunning
-        if (!failing) {
-            shownKeys.removeAll { it.startsWith("opencode:") }
-            return emptyList()
-        }
-        val key = "opencode:$openCodeError"
-        val alert = RuntimeAlert(key, titles.opencodeError, openCodeError!!)
-        return if (shownKeys.add(key)) listOf(alert) else emptyList()
     }
 
     /** Forget everything, e.g. when the user starts the runtime again. */

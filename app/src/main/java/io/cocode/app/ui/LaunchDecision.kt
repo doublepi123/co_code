@@ -80,17 +80,15 @@ internal sealed interface ResumeTarget {
 }
 
 /**
- * The instance a launch reopens. A pending notification link always means the local server.
- * [rememberedId] is what the user last had open; a remote id that is no longer saved falls back
- * to [ResumeTarget.Local] (the caller clears the stale record on its way).
+ * The instance a launch reopens. [rememberedId] is what the user last had open; a remote id that
+ * is no longer saved falls back to [ResumeTarget.Local] (the caller clears the stale record on its
+ * way).
  */
 internal fun resumeTarget(
     rememberedId: String?,
     remoteIds: Set<String>,
-    linkPending: Boolean,
 ): ResumeTarget =
     when {
-        linkPending -> ResumeTarget.Local
         rememberedId == null -> ResumeTarget.Local
         rememberedId == ServerTarget.LOCAL_ID -> ResumeTarget.Local
         rememberedId in remoteIds -> ResumeTarget.Remote(rememberedId)
@@ -128,12 +126,6 @@ internal fun sanitizedPagePath(
     return path
 }
 
-/** [path] (`/?session=…`) on the server at [baseUrl], e.g. `http://127.0.0.1:3000/?session=…`. */
-internal fun withSessionPath(
-    baseUrl: String,
-    path: String,
-): String = baseUrl.trimEnd('/') + "/" + path.trimStart('/')
-
 /**
  * The origin (`scheme://authority`) of [baseUrl] exactly as written, or null when it isn't a plain,
  * credential-free http(s) address. Validated by the same canonical origin profiles and the WebView
@@ -151,8 +143,8 @@ internal fun originAddress(baseUrl: String): String? {
 /**
  * A remembered page [path] (`/t3/?session=…`, already a same-origin path+query) restored on
  * the origin of [baseUrl]. The saved path is absolute, so it already contains the instance's base
- * path: joining it to the full base URL (as a notification link is joined) would repeat that path.
- * The path is appended untouched, so the characters saved on disk keep their original escaping.
+ * path; joining it to the full base URL would repeat that path. The path is appended untouched, so
+ * the characters saved on disk keep their original escaping.
  * Null when [baseUrl] has no usable origin or [path] isn't absolute.
  */
 internal fun withRememberedPagePath(

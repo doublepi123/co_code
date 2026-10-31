@@ -10,6 +10,8 @@
 
 CoCode is derived from AndChamber (MIT). The on-device runtime starts the T3 Code server (port 3773) inside Alpine Linux under PRoot (no root) and installs the coding-agent CLIs you select from npm. A foreground service keeps the server running, each WebView profile signs in separately, and remote T3 Code servers, shared storage and downloads are also supported.
 
+Runtime errors are notified natively; agent notifications from the web UI are not implemented yet.
+
 ### Runtime composition
 
 | Component | Version / source |

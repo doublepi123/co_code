@@ -67,13 +67,6 @@ class LaunchDecisionTest {
     }
 
     @Test
-    fun `session path joins the server address with one slash`() {
-        assertEquals("http://127.0.0.1:3000/?session=ses_1", withSessionPath("http://127.0.0.1:3000", "/?session=ses_1"))
-        assertEquals("http://127.0.0.1:3000/?session=ses_1", withSessionPath("http://127.0.0.1:3000/", "/?session=ses_1"))
-        assertEquals("http://127.0.0.1:3000/?session=a%20b", withSessionPath("http://127.0.0.1:3000", "?session=a%20b"))
-    }
-
-    @Test
     fun `origin address keeps the raw origin and refuses unusable bases`() {
         assertEquals("http://127.0.0.1:3000", originAddress("http://127.0.0.1:3000"))
         assertEquals("http://127.0.0.1:3000", originAddress("http://127.0.0.1:3000/t3/?x=1"))
@@ -113,13 +106,11 @@ class LaunchDecisionTest {
     @Test
     fun `resume target follows the remembered instance`() {
         val remotes = setOf("r1", "r2")
-        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes, linkPending = false))
-        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes, linkPending = false))
-        assertEquals(ResumeTarget.Remote("r1"), resumeTarget("r1", remotes, linkPending = false))
+        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes))
+        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes))
+        assertEquals(ResumeTarget.Remote("r1"), resumeTarget("r1", remotes))
         // A removed server falls back to the local logic.
-        assertEquals(ResumeTarget.Local, resumeTarget("gone", remotes, linkPending = false))
-        // A notification link always wins, even over a remembered remote.
-        assertEquals(ResumeTarget.Local, resumeTarget("r1", remotes, linkPending = true))
+        assertEquals(ResumeTarget.Local, resumeTarget("gone", remotes))
     }
 
     @Test
@@ -127,9 +118,9 @@ class LaunchDecisionTest {
         // Both Home and the native phone page clear the remembered instance, exactly like a
         // remembered local id: the next launch never reopens a remote behind the person's back.
         val remotes = setOf("r1")
-        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes, linkPending = false))
-        assertEquals(ResumeTarget.Local, resumeTarget(null, emptySet(), linkPending = false))
-        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes, linkPending = false))
+        assertEquals(ResumeTarget.Local, resumeTarget(null, remotes))
+        assertEquals(ResumeTarget.Local, resumeTarget(null, emptySet()))
+        assertEquals(ResumeTarget.Local, resumeTarget(ServerTarget.LOCAL_ID, remotes))
     }
 
     @Test

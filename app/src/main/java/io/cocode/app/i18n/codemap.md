@@ -24,7 +24,7 @@ Design rules:
 Not covered here:
 
 - Notification titles in `notify/RuntimeErrorWatch.kt` come from `RuntimeErrorWatch.Titles` (built in `di/AppModule.kt` from `R.string.alert_*`), not from this object.
-- The notification channel names (`R.string.channel_*`) and the action labels (`R.string.action_*`) are read directly in `notify/`.
+- The runtime-alert channel name (`R.string.channel_errors`) is read directly in `notify/`.
 
 ## Flow
 
