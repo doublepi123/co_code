@@ -1,5 +1,5 @@
 {
-  "description": "Source provenance and license texts for the native components compiled into the AndChamber APK (PRoot runtime). The license files in this directory are the single source of truth; the build copies them into the APK assets.",
+  "description": "Source provenance and license texts for the native components compiled into the CoCode APK (PRoot runtime). The license files in this directory are the single source of truth; the build copies them into the APK assets.",
   "lock": "runtime_tools/runtime_sources.lock.json",
   "components": [
     {
@@ -15,7 +15,7 @@
         {"path": "proot/COPYING", "source_path": "proot-5.1.107.98/COPYING", "sha256": "0ffa6454acbe7e410ac6f0007df83b9b3161fe55484c1f4b87487c0f2d228a6d"}
       ],
       "local_patches": [
-        "runtime_tools/patches/proot-5.1.107.97-andchamber-string-include.patch"
+        "runtime_tools/patches/proot-5.1.107.97-cocode-string-include.patch"
       ],
       "build_helpers": [
         "runtime_tools/patches/loader-info-posix-awk.awk"
@@ -49,7 +49,7 @@
         {"path": "libandroid-shmem/LICENSE", "source_path": "libandroid-shmem-0.7/LICENSE", "sha256": "0dd43abe17196b0224cb0b159819af798cd508a82a21e5870126fff4e899a7eb"}
       ],
       "local_patches": [
-        "runtime_tools/patches/libandroid-shmem-0.7-andchamber-tmpdir.patch"
+        "runtime_tools/patches/libandroid-shmem-0.7-cocode-tmpdir.patch"
       ],
       "build_instructions": "scripts/build_android_runtime_native.py (function build_shmem)"
     }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AndChamber launcher background: warm black (#151313) with a faint amber glow behind the cube's open top. -->
+<!-- CoCode launcher background: warm black (#151313) with a faint amber glow behind the cube's open top. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"

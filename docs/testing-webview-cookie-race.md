@@ -6,13 +6,13 @@ Run on a dedicated emulator with a WebView supporting `MULTI_PROFILE`:
 ANDROID_SERIAL=emulator-5580 ANDROID_HOME="$HOME/Android/Sdk" ./gradlew \
   :app:connectedDebugAndroidTest \
   -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true \
-  -Pandroid.testInstrumentationRunnerArguments.class=io.andchamber.app.ui.web.GatewayCookieRaceTest
+  -Pandroid.testInstrumentationRunnerArguments.class=io.cocode.app.ui.web.GatewayCookieRaceTest
 
 # Required: fresh instrumentation process deletes only profiles registered by fixtures.
 ANDROID_SERIAL=emulator-5580 ANDROID_HOME="$HOME/Android/Sdk" ./gradlew \
   :app:connectedDebugAndroidTest \
   -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true \
-  -Pandroid.testInstrumentationRunnerArguments.class=io.andchamber.app.ui.web.GatewayFixtureCleanupTest
+  -Pandroid.testInstrumentationRunnerArguments.class=io.cocode.app.ui.web.GatewayFixtureCleanupTest
 ```
 
 Do not omit `ANDROID_SERIAL` when other devices are connected. Do not clear or

@@ -59,7 +59,7 @@ TERMUX_MAIN_FALLBACK_BASE_URLS = (
 
 
 def force_ipv4_downloads() -> bool:
-    configured = os.environ.get("ANDCHAMBER_ANDROID_FORCE_IPV4")
+    configured = os.environ.get("COCODE_ANDROID_FORCE_IPV4")
     if configured is None:
         # Several Termux mirrors publish IPv6 records even when the Windows
         # host has no working IPv6 route. urllib can then spend minutes per
@@ -125,7 +125,7 @@ def download_bytes(url: str, attempts: int = 3) -> bytes:
 
 def configured_termux_main_base_urls() -> list[str]:
     configured = []
-    for key in ("ANDCHAMBER_ANDROID_TERMUX_MAIN_BASE_URLS", "ANDCHAMBER_ANDROID_TERMUX_MAIN_BASE_URL"):
+    for key in ("COCODE_ANDROID_TERMUX_MAIN_BASE_URLS", "COCODE_ANDROID_TERMUX_MAIN_BASE_URL"):
         raw = os.environ.get(key, "")
         configured.extend(item.strip() for item in raw.replace(";", ",").split(",") if item.strip())
     configured.extend(TERMUX_MAIN_FALLBACK_BASE_URLS)
@@ -610,7 +610,7 @@ def check_termux_mirror_health(termux_arch: str = "x86_64") -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare Android-native command assets for AndChamber builds")
+    parser = argparse.ArgumentParser(description="Prepare Android-native command assets for CoCode builds")
     parser.add_argument(
         "--output-dir",
         help="Directory where generated assets should be written (required unless --check-mirrors, "

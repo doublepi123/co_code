@@ -2,7 +2,7 @@
 <resources>
     <!-- Window theme only; the Compose theme is applied by the UI layer. The window background
          matches the app surface so the cold start does not flash white. -->
-    <style name="Theme.AndChamber" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.CoCode" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background_day</item>
     </style>
 </resources>

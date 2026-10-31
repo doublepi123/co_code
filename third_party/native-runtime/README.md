@@ -1,7 +1,7 @@
 # Native runtime license texts and provenance
 
 This directory is the single source of truth for the license texts of the native components
-compiled into the AndChamber APK: PRoot, talloc and libandroid-shmem. Gradle copies it, byte for
+compiled into the CoCode APK: PRoot, talloc and libandroid-shmem. Gradle copies it, byte for
 byte, into the APK assets under `licenses/native/` (task `syncNativeLicenseAssets` in
 `app/build.gradle.kts`). Do not add hand-maintained copies under `app/src/main/assets`.
 

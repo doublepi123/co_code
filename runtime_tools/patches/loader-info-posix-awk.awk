@@ -1,4 +1,4 @@
-# AndChamber build tool: POSIX-awk replacement for upstream proot/src/loader/loader-info.awk.
+# CoCode build tool: POSIX-awk replacement for upstream proot/src/loader/loader-info.awk.
 #
 # Upstream uses gawk-only strtonum(), which mawk (the default awk on many Linux hosts)
 # does not provide. This version parses hexadecimal symbol values with a small

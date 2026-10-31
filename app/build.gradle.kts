@@ -1,7 +1,7 @@
 import java.io.File
 import java.util.Properties
 
-// AndChamber app module. Native PRoot pipeline ported from AndCode (MIT); see NOTICE.
+// CoCode app module. Native PRoot pipeline ported from AndCode (MIT); see NOTICE.
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -21,7 +21,7 @@ val generatedNativeLicenseAssets = rootProject.layout.buildDirectory.dir("genera
 // The Gradle build then compiles them offline with the pinned NDK and emits the JNI libraries.
 // Relative override paths resolve against the project root (not the Gradle invocation directory).
 val runtimeSourcesDir: File =
-    providers.gradleProperty("andchamber.runtimeSourcesDir").orNull
+    providers.gradleProperty("cocode.runtimeSourcesDir").orNull
         ?.let { repoRoot.resolve(it) }
         ?: rootProject.layout.buildDirectory.get().asFile.resolve("runtime-sources")
 val runtimeSourcesLock = repoRoot.resolve("runtime_tools/runtime_sources.lock.json")
@@ -35,21 +35,21 @@ val ndkVersionPinned = "29.0.14206865"
 // Explicit file lists (no globs), so build/ outputs and __pycache__ never enter the fingerprint.
 val runtimePatchFiles: FileCollection =
     files(
-        repoRoot.resolve("runtime_tools/patches/libandroid-shmem-0.7-andchamber-tmpdir.patch"),
-        repoRoot.resolve("runtime_tools/patches/proot-5.1.107.97-andchamber-string-include.patch"),
+        repoRoot.resolve("runtime_tools/patches/libandroid-shmem-0.7-cocode-tmpdir.patch"),
+        repoRoot.resolve("runtime_tools/patches/proot-5.1.107.97-cocode-string-include.patch"),
         repoRoot.resolve("runtime_tools/patches/loader-info-posix-awk.awk"),
     )
 
 // SDK root resolved from the same sources AGP uses: explicit property, ANDROID_HOME/ANDROID_SDK_ROOT, local.properties.
 val androidSdkDir: File? =
-    (providers.gradleProperty("andchamber.sdkDir").orNull
+    (providers.gradleProperty("cocode.sdkDir").orNull
         ?: System.getenv("ANDROID_HOME")
         ?: System.getenv("ANDROID_SDK_ROOT")
         ?: rootProject.file("local.properties").takeIf { it.isFile }?.let { f ->
             Properties().apply { f.inputStream().use { load(it) } }.getProperty("sdk.dir")
         })?.let { repoRoot.resolve(it) }
 val ndkDirectory: File =
-    providers.gradleProperty("andchamber.ndkDir").orNull?.let { repoRoot.resolve(it) }
+    providers.gradleProperty("cocode.ndkDir").orNull?.let { repoRoot.resolve(it) }
         ?: androidSdkDir?.resolve("ndk/$ndkVersionPinned")
         ?: File("/nonexistent/ndk/$ndkVersionPinned")
 
@@ -58,8 +58,8 @@ val ndkDirectory: File =
 // NDK version. The script works in its own copies under build/runtime-native, so the source tree is never mutated
 // and is not an output. The doFirst checks run only when the task executes, so configuration and ./gradlew help
 // never compile native code.
-val buildAndChamberRuntimeNative =
-    tasks.register<Exec>("buildAndChamberRuntimeNative") {
+val buildCoCodeRuntimeNative =
+    tasks.register<Exec>("buildCoCodeRuntimeNative") {
         // Every input that changes the native output. Patches and the awk helper are part of the build.
         inputs.file(runtimeSourcesLock).withPropertyName("runtimeSourcesLock")
         inputs.file(runtimeNativeScript).withPropertyName("buildScript")
@@ -81,7 +81,7 @@ val buildAndChamberRuntimeNative =
             if (!ndkDirectory.isDirectory) {
                 throw GradleException(
                     "NDK $ndkVersionPinned not found at ${ndkDirectory.absolutePath}.\n" +
-                        "Install it with: sdkmanager \"ndk;$ndkVersionPinned\" (or pass -Pandchamber.ndkDir=<path>).",
+                        "Install it with: sdkmanager \"ndk;$ndkVersionPinned\" (or pass -Pcocode.ndkDir=<path>).",
                 )
             }
             // Sources must stay read-only inputs: the build works under runtime-native and writes only jniLibs output.
@@ -112,45 +112,45 @@ val buildAndChamberRuntimeNative =
     }
 
 // Debug-only opt-in application id for installing next to the production app on an emulator.
-// Example: ./gradlew :app:assembleDebug -Pandchamber.testApplicationId=io.andchamber.fdroidtest
-val productionApplicationId = "io.andchamber.app"
+// Example: ./gradlew :app:assembleDebug -Pcocode.testApplicationId=io.cocode.fdroidtest
+val productionApplicationId = "io.cocode.app"
 val testApplicationId: String? =
-    providers.gradleProperty("andchamber.testApplicationId").orNull?.takeIf { it.isNotBlank() }
+    providers.gradleProperty("cocode.testApplicationId").orNull?.takeIf { it.isNotBlank() }
 val appIdRegex = Regex("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$")
 val resolvedApplicationId: String =
     testApplicationId?.also { id ->
         require(id != productionApplicationId) {
-            "andchamber.testApplicationId must not equal the production id $productionApplicationId"
+            "cocode.testApplicationId must not equal the production id $productionApplicationId"
         }
         require(appIdRegex.matches(id) && id.split('.').size >= 3 && !id.startsWith("android.")) {
-            "andchamber.testApplicationId '$id' is not a valid Android application id"
+            "cocode.testApplicationId '$id' is not a valid Android application id"
         }
     } ?: productionApplicationId
 val isTestIdRequested = testApplicationId != null
 
 // Version: CI passes the tag-derived values as Gradle properties; local builds use the defaults.
-val appVersionName: String = providers.gradleProperty("andchamber.versionName").orNull ?: "0.0.1"
-val appVersionCode: Int = providers.gradleProperty("andchamber.versionCode").orNull?.toInt() ?: 1
+val appVersionName: String = providers.gradleProperty("cocode.versionName").orNull ?: "0.0.1"
+val appVersionCode: Int = providers.gradleProperty("cocode.versionCode").orNull?.toInt() ?: 1
 
 // Release signing is enabled only when all four values are provided (env var or Gradle property of
 // the same lowercase name). Without them release builds stay unsigned, so local builds still work.
 fun signingValue(name: String): String? =
     (System.getenv(name) ?: providers.gradleProperty(name.lowercase()).orNull)?.takeIf { it.isNotBlank() }
 
-val releaseKeystoreFile = signingValue("ANDCHAMBER_KEYSTORE_FILE")
-val releaseKeystorePassword = signingValue("ANDCHAMBER_KEYSTORE_PASSWORD")
-val releaseKeyAlias = signingValue("ANDCHAMBER_KEY_ALIAS")
-val releaseKeyPassword = signingValue("ANDCHAMBER_KEY_PASSWORD")
+val releaseKeystoreFile = signingValue("COCODE_KEYSTORE_FILE")
+val releaseKeystorePassword = signingValue("COCODE_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingValue("COCODE_KEY_ALIAS")
+val releaseKeyPassword = signingValue("COCODE_KEY_PASSWORD")
 val hasReleaseSigning =
     listOf(releaseKeystoreFile, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword).all { it != null }
 
 android {
-    namespace = "io.andchamber.app"
+    namespace = "io.cocode.app"
     compileSdk = 35
     ndkVersion = ndkVersionPinned
 
     defaultConfig {
-        // Production id. Only a debug build can override it, through andchamber.testApplicationId (see below).
+        // Production id. Only a debug build can override it, through cocode.testApplicationId (see below).
         applicationId = productionApplicationId
         minSdk = 26
         targetSdk = 35
@@ -248,11 +248,11 @@ val syncNativeLicenseAssets =
     }
 
 tasks.named("preBuild").configure {
-    dependsOn(buildAndChamberRuntimeNative)
+    dependsOn(buildCoCodeRuntimeNative)
     dependsOn(syncNativeLicenseAssets)
 }
 
-// Release APK is named AndChamber-<versionName>.apk for publishing. Debug keeps the AGP default.
+// Release APK is named CoCode-<versionName>.apk for publishing. Debug keeps the AGP default.
 // AGP 8.5 exposes the output file name on the variant's ApkVariantOutput (the applicationVariants API).
 // The debug test id is applied through the variant API (AGP 8.5 androidComponents), so release always keeps
 // the production id.
@@ -268,7 +268,7 @@ android.applicationVariants.all {
     if (buildType.name == "release") {
         outputs.all {
             (this as com.android.build.gradle.internal.api.ApkVariantOutputImpl).outputFileName =
-                "AndChamber-$appVersionName.apk"
+                "CoCode-$appVersionName.apk"
         }
     }
 }

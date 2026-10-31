@@ -28,8 +28,8 @@ NDK_VERSION = "29.0.14206865"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
 # Compiled-in loader fallback. The app always sets PROOT_LOADER / PROOT_LOADER_32.
 PROOT_UNBUNDLE_LOADER = f"{TERMUX_PREFIX}/libexec/proot"
-SHMEM_PATCH = REPO_ROOT / "runtime_tools" / "patches" / "libandroid-shmem-0.7-andchamber-tmpdir.patch"
-PROOT_STRING_PATCH = REPO_ROOT / "runtime_tools" / "patches" / "proot-5.1.107.97-andchamber-string-include.patch"
+SHMEM_PATCH = REPO_ROOT / "runtime_tools" / "patches" / "libandroid-shmem-0.7-cocode-tmpdir.patch"
+PROOT_STRING_PATCH = REPO_ROOT / "runtime_tools" / "patches" / "proot-5.1.107.97-cocode-string-include.patch"
 LOADER_INFO_AWK = REPO_ROOT / "runtime_tools" / "patches" / "loader-info-posix-awk.awk"
 NDK_TRIPLE = {"arm64-v8a": "aarch64-linux-android", "x86_64": "x86_64-linux-android"}
 # 32-bit companion loader per ABI: (ABI name, clang triple, LOADER_ADDRESS from upstream arch.h).
@@ -38,9 +38,9 @@ LOADER32 = {
     "x86_64": ("x86", "i686-linux-android", 0xA0000000),
 }
 NATIVE_LIBRARY_NAMES = {
-    "proot": "libandchamber_android_proot.so",
-    "loader": "libandchamber_android_proot_loader.so",
-    "loader32": "libandchamber_android_proot_loader32.so",
+    "proot": "libcocode_android_proot.so",
+    "loader": "libcocode_android_proot_loader.so",
+    "loader32": "libcocode_android_proot_loader32.so",
     "talloc": "libtalloc.so",
     "shmem": "libandroid-shmem.so",
 }
@@ -278,7 +278,7 @@ def install_talloc_as_app_name(prefix: Path) -> None:
 
 def build_shmem(bin_dir: Path, triple: str, source: Path, work: Path, prefix: Path, env: dict[str, str]) -> None:
     tree = fresh_copy(source, work / "shmem")
-    # AndChamber adaptation: key symlinks go to PROOT_TMP_DIR at runtime (see the patch header).
+    # CoCode adaptation: key symlinks go to PROOT_TMP_DIR at runtime (see the patch header).
     run(["patch", "-p1", "--quiet", "-i", str(SHMEM_PATCH)], tree, env)
     cc = clang(bin_dir, triple)
     run([cc, "-fpic", "-std=c11", "-Wall", "-Wextra", "-Werror",

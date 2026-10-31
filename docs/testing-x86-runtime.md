@@ -33,8 +33,8 @@ count as gate coverage.
 - Host: Linux x86_64, Android SDK with an emulator that runs an **x86_64 Android 15** image.
 - Use a dedicated emulator or serial. Do not use a physical phone or another emulator for this lane.
 - The test application id is independent of the production one:
-  `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -Pandchamber.testApplicationId=io.andchamber.x86probe`.
-  The production id `io.andchamber.app` is refused by the build.
+  `./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -Pcocode.testApplicationId=io.cocode.x86probe`.
+  The production id `io.cocode.app` is refused by the build.
 - `run-as` works only on the debuggable probe build. It is **not** the same as the app's zygote sandbox
   (a process started with `run-as` has a different SELinux context and is not the app's own process). The
   instrumentation runs inside the app process, which is the reference for the gate.
@@ -57,7 +57,7 @@ count as gate coverage.
 
    ```sh
    ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest \
-       -Pandchamber.testApplicationId=io.andchamber.x86probe --offline
+       -Pcocode.testApplicationId=io.cocode.x86probe --offline
    adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
    adb -s <serial> install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
    ```
@@ -65,18 +65,18 @@ count as gate coverage.
 4. Push the probe inputs into the probe app's private cache:
 
    ```sh
-   ADB=adb scripts/push_x86_probe.sh <serial> build/x86-probe io.andchamber.x86probe
+   ADB=adb scripts/push_x86_probe.sh <serial> build/x86-probe io.cocode.x86probe
    ```
 
 5. Run the probe class:
 
    ```sh
-   adb -s <serial> shell am instrument -w -e class io.andchamber.app.runtime.X86RuntimeProbeTest \
-       io.andchamber.x86probe.test/androidx.test.runner.AndroidJUnitRunner
+   adb -s <serial> shell am instrument -w -e class io.cocode.app.runtime.X86RuntimeProbeTest \
+       io.cocode.x86probe.test/androidx.test.runner.AndroidJUnitRunner
    ```
 
    Expected: `OK (N tests)` with no failures, where N is the number of `@Test` methods in
-   `X86RuntimeProbeTest` (`grep -c '@Test' app/src/androidTest/java/io/andchamber/app/runtime/X86RuntimeProbeTest.kt`).
+   `X86RuntimeProbeTest` (`grep -c '@Test' app/src/androidTest/java/io/cocode/app/runtime/X86RuntimeProbeTest.kt`).
    Of those, the gate tests in the list above must pass; the `guestDiagnostic*` tests only record output
    and never count as gate coverage.
 
@@ -95,7 +95,7 @@ placeholders (`<serial>`) and keep cookie jars and password files outside the re
    app's private `ui-password` file via `run-as`, and only its length is printed:
 
    ```sh
-   PW=$(adb -s <serial> shell "run-as io.andchamber.x86probe cat files/runtime/ui-password" | tr -d '\r\n')
+   PW=$(adb -s <serial> shell "run-as io.cocode.x86probe cat files/runtime/ui-password" | tr -d '\r\n')
    curl -s -c "$JAR" -H 'Content-Type: application/json' \
         -d "$(python3 -c 'import json,sys;print(json.dumps({"password":sys.argv[1]}))' "$PW")" \
         http://127.0.0.1:23000/auth/session
@@ -108,7 +108,7 @@ placeholders (`<serial>`) and keep cookie jars and password files outside the re
    curl -s -b "$JAR" http://127.0.0.1:23000/api/system/info
    curl -s -b "$JAR" http://127.0.0.1:23000/api/opencode/version
    curl -s -b "$JAR" http://127.0.0.1:23000/api/info
-   adb -s <serial> shell "run-as io.andchamber.x86probe cat files/runtime/environment/metadata.json"
+   adb -s <serial> shell "run-as io.cocode.x86probe cat files/runtime/environment/metadata.json"
    ```
 
 4. Real terminal I/O. The client accepts a marker only as a standalone output line, and the typed command
@@ -133,7 +133,7 @@ probe. Do not edit the downloaded or generated sources to make a probe pass.
 ## Established evidence (end-to-end, emulator)
 
 Recorded on an x86_64 emulator running Android 15 (kernel 6.6), with the probe application
-`io.andchamber.x86probe` built from the **current branch, not released**. The APK is uncommitted and is
+`io.cocode.x86probe` built from the **current branch, not released**. The APK is uncommitted and is
 not the v0.0.10 release artefact.
 
 | Area | Result |

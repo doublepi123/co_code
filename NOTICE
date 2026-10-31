@@ -1,7 +1,8 @@
-AndChamber
-Copyright (c) 2026 AndChamber contributors
+CoCode
+Copyright (c) 2026 CoCode contributors
 
-This application contains code ported and adapted from AndCode:
+CoCode is derived from AndChamber, Copyright (c) 2026 AndChamber contributors,
+released under the MIT License. This application contains code ported and adapted from AndCode:
 
   AndCode - https://github.com/yuga-hashimoto/and-code
   Copyright (c) 2026 AndCode contributors

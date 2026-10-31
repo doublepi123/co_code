@@ -2,8 +2,8 @@
 <!-- All user-visible copy. Keep keys in sync with values-zh/strings.xml (checked by StringResourcesTest). -->
 <resources>
     <string name="gateway_handoff_failed">Could not safely finish signing in. Try again or return Home.</string>
-    <string name="app_name">AndChamber</string>
-    <string name="tagline">OpenChamber on this phone, or on your computer</string>
+    <string name="app_name">CoCode</string>
+    <string name="tagline">A coding agent on this phone</string>
 
     <!-- Runtime notification (foreground service) -->
     <string name="runtime_notification_channel">OpenChamber runtime</string>
@@ -79,7 +79,7 @@
     <string name="form_unavailable_body">This form can only be answered in OpenChamber. Open the session to answer it.</string>
     <string name="form_open_session">Open the session</string>
 
-    <!-- AndChamber runtime alerts (notifications) -->
+    <!-- CoCode runtime alerts (notifications) -->
     <string name="alert_setup_failed">Setup failed</string>
     <string name="alert_start_failed">OpenChamber didn\'t start</string>
     <string name="alert_stopped">OpenChamber stopped</string>
@@ -90,7 +90,7 @@
     <string name="auto_open_label">Open last used OpenChamber when the app starts</string>
     <string name="auto_open_hint">Remembers the server and page you had open. Starts the local server first if it isn\'t running.</string>
     <string name="screen_awake_label">Keep screen on while the local server runs</string>
-    <string name="screen_awake_hint">Only while AndChamber is in the foreground. Leaving the app lets the screen sleep normally.</string>
+    <string name="screen_awake_hint">Only while CoCode is in the foreground. Leaving the app lets the screen sleep normally.</string>
 
     <!-- Sections -->
     <string name="section_this_device">On this phone</string>
@@ -199,10 +199,10 @@
     <string name="storage_off">Off</string>
     <string name="storage_needs_access">Needs access</string>
     <string name="storage_on">On</string>
-    <string name="storage_folder_name">AndChamber/</string>
-    <string name="storage_intro">Keep projects and OpenCode settings in AndChamber/ on your phone\'s storage, so you can edit them with a file manager or over USB.</string>
-    <string name="storage_needs_all_files">AndChamber needs all-files access to use this folder. You can turn it on in system settings.</string>
-    <string name="storage_needs_legacy">AndChamber needs access to your phone\'s storage to use this folder.</string>
+    <string name="storage_folder_name">CoCode/</string>
+    <string name="storage_intro">Keep projects and OpenCode settings in CoCode/ on your phone\'s storage, so you can edit them with a file manager or over USB.</string>
+    <string name="storage_needs_all_files">CoCode needs all-files access to use this folder. You can turn it on in system settings.</string>
+    <string name="storage_needs_legacy">CoCode needs access to your phone\'s storage to use this folder.</string>
     <string name="allow_access">Allow access</string>
     <string name="storage_others_all_files">Other apps with all-files access can read this folder.</string>
     <string name="storage_others_legacy">Other apps with storage access can read this folder.</string>
@@ -212,14 +212,14 @@
     <string name="guest_private_projects">~/projects-private</string>
     <string name="storage_opencode_target">OpenCode settings</string>
     <string name="storage_private">Private: sessions, sign-ins, plugins, ~/projects-private</string>
-    <string name="storage_unavailable">AndChamber has access, but can\'t create AndChamber/ on your phone\'s storage. Make sure the storage is available.</string>
+    <string name="storage_unavailable">CoCode has access, but can\'t create CoCode/ on your phone\'s storage. Make sure the storage is available.</string>
     <string name="check_again">Check again</string>
     <string name="storage_caveat">Shared storage doesn\'t keep symlinks or executable bits — use ~/projects-private for projects that need node_modules.</string>
     <string name="copy_folder_path">Copy folder path</string>
     <string name="restart_to_apply">Restart the server to apply</string>
     <string name="restart">Restart</string>
     <string name="storage_off_dialog_title">Stop using the shared folder?</string>
-    <string name="storage_off_dialog_body">Your files stay in AndChamber/ on your phone\'s storage. From the next server start, OpenChamber uses its private folders again and won\'t see them.</string>
+    <string name="storage_off_dialog_body">Your files stay in CoCode/ on your phone\'s storage. From the next server start, OpenChamber uses its private folders again and won\'t see them.</string>
     <string name="turn_off">Turn off</string>
     <string name="cant_open_settings">Couldn\'t open system settings</string>
 
@@ -228,7 +228,7 @@
     <string name="repair_dialog_body">This stops OpenChamber, deletes the Linux system and installs it again, which downloads about 1.2 GB. Your projects are kept when possible.</string>
     <string name="uninstall_dialog_title">Uninstall the local server?</string>
     <string name="uninstall_dialog_body">This stops OpenChamber and deletes the Linux system from this phone, including projects, sessions and settings stored inside it. Saved servers are not affected.</string>
-    <string name="uninstall_dialog_body_shared">This stops OpenChamber and deletes the Linux system from this phone, including everything stored inside it. The AndChamber/ folder on your phone\'s storage is kept. Saved servers are not affected.</string>
+    <string name="uninstall_dialog_body_shared">This stops OpenChamber and deletes the Linux system from this phone, including everything stored inside it. The CoCode/ folder on your phone\'s storage is kept. Saved servers are not affected.</string>
     <string name="cancel">Cancel</string>
 
     <!-- Remote servers -->
@@ -291,7 +291,7 @@
     <string name="local_not_set_up_body">Set it up from the home screen first.</string>
     <string name="setting_up_title">Setting up…</string>
     <string name="server_removed_title">This server is no longer saved</string>
-    <string name="menu_description">AndChamber menu</string>
+    <string name="menu_description">CoCode menu</string>
     <string name="page_crashed">The page stopped working and was reloaded</string>
     <string name="page_crashed_repeatedly">The page keeps stopping. Reload to try again.</string>
     <string name="no_app_for_link">No app can open this link</string>
@@ -304,7 +304,7 @@
     <string name="web_update_webview_title">Update Android System WebView</string>
     <string name="web_update_webview_body">This WebView can\'t keep each server\'s sign-in separate, so the page isn\'t opened. Update Android System WebView from your app store, then try again.</string>
     <string name="web_isolation_failed_title">Couldn\'t open the page safely</string>
-    <string name="web_isolation_failed_body">AndChamber couldn\'t give this server its own separate storage, so the page isn\'t opened. Try again, or update Android System WebView.</string>
+    <string name="web_isolation_failed_body">CoCode couldn\'t give this server its own separate storage, so the page isn\'t opened. Try again, or update Android System WebView.</string>
     <string name="web_bad_address_title">Can\'t open this address</string>
     <string name="web_bad_address_body">Edit the server\'s address on the home screen. It must start with http:// or https:// and can\'t include a user name or password.</string>
     <string name="web_local_keeps_running">OpenChamber keeps running on this phone. Notifications and the home screen work as before.</string>

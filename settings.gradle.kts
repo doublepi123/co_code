@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AndChamber"
+rootProject.name = "CoCode"
 include(":app")

@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Shared storage (/sdcard/AndChamber). API 30+ uses MANAGE_EXTERNAL_STORAGE granted from Settings;
+    <!-- Shared storage (/sdcard/CoCode). API 30+ uses MANAGE_EXTERNAL_STORAGE granted from Settings;
          API 26-29 use the runtime storage permissions, with legacy external storage requested. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission
@@ -22,7 +22,7 @@
         android:maxSdkVersion="29" />
 
     <application
-        android:name=".AndChamberApplication"
+        android:name=".CoCodeApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -32,7 +32,7 @@
         android:localeConfig="@xml/locales_config"
         android:requestLegacyExternalStorage="true"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AndChamber">
+        android:theme="@style/Theme.CoCode">
 
         <activity
             android:name=".MainActivity"

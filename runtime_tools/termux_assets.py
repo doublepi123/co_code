@@ -13,7 +13,7 @@ from typing import Iterable
 TERMUX_MAIN_BASE_URL = "https://packages.termux.dev/apt/termux-main"
 TERMUX_PACKAGES_INDEX_TEMPLATE = TERMUX_MAIN_BASE_URL + "/dists/stable/main/binary-{termux_arch}/Packages"
 TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-ANDROID_LINUX_ASSET_ROOT = "andchamber-runtime"
+ANDROID_LINUX_ASSET_ROOT = "cocode-runtime"
 
 ANDROID_TO_TERMUX_ARCH = {
     "arm64-v8a": "aarch64",
