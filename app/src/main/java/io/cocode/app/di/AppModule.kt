@@ -3,6 +3,10 @@ package io.cocode.app.di
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import io.cocode.app.agentlogin.CodexLogin
+import io.cocode.app.agentlogin.CodexLoginController
+import io.cocode.app.agentlogin.CodexLoginPreconditions
+import io.cocode.app.agentlogin.ProotCodexCommandRunner
 import io.cocode.app.data.AndroidHttpDownloadStarter
 import io.cocode.app.data.DefaultWebSessionAuthenticator
 import io.cocode.app.data.EncryptedRemoteServerStore
@@ -108,6 +112,34 @@ val appModule =
         }
 
         single<SharedStorageController> { get<SharedStorageControllerImpl>() }
+
+        // One-tap Codex sign-in: `codex login` runs in the same PRoot guest and environment as the
+        // server, so credentials land in the auth.json Codex and the server already use. The binds
+        // come from the shared-storage decision (prepareForStart is idempotent and ensures the
+        // mount points exist). PRoot is resolved lazily on the worker thread.
+        single<CodexLogin> {
+            val context = get<Context>()
+            val paths = RuntimePaths.under(context.filesDir)
+            val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+            val runtime = get<LocalRuntimeController>()
+            CodexLoginController(
+                runner =
+                    ProotCodexCommandRunner(
+                        paths = paths,
+                        suite = { EmbeddedCommandSuite(nativeDir, paths).resolve() },
+                        binds = { get<SharedStorageControllerImpl>().prepareForStart() },
+                        scanner = ProcessScanner(myUid = Os.getuid(), myPid = Os.getpid().toLong()),
+                        signal = { pid -> android.os.Process.killProcess(pid.toInt()) },
+                    ),
+                prerequisites = {
+                    CodexLoginPreconditions.failure(
+                        state = runtime.state.value,
+                        info = runtime.info.value,
+                        installedAgents = runtime.agents.value.installed,
+                    )
+                },
+            )
+        }
 
         // Shared environment, distinct process identities. The controller runs only one at a time.
         single<Map<ServerKind, RuntimeServer>> {

@@ -160,7 +160,7 @@
     <string name="storage_needs_access">Needs access</string>
     <string name="storage_on">On</string>
     <string name="storage_folder_name">CoCode/</string>
-    <string name="storage_intro">Keep projects and the OpenCode, Codex and Claude Code folders in CoCode/ on your phone\'s storage, so you can open them with a file manager or over USB. The Codex and Claude Code folders are shared in full, including sign-ins and session history.</string>
+    <string name="storage_intro">Keep projects, the OpenCode settings, Codex config and the Claude Code folder in CoCode/ on your phone\'s storage, so you can open them with a file manager or over USB. Claude Code is shared in full, including sign-ins and session history. Codex shares only its config; its sign-in and sessions stay inside the app.</string>
     <string name="storage_needs_all_files">CoCode needs all-files access to use this folder. You can turn it on in system settings.</string>
     <string name="storage_needs_legacy">CoCode needs access to your phone\'s storage to use this folder.</string>
     <string name="allow_access">Allow access</string>
@@ -174,25 +174,26 @@
     <string name="storage_claude_dir" translatable="false">claude/</string>
     <string name="guest_opencode" translatable="false">~/.config/opencode</string>
     <string name="guest_codex" translatable="false">~/.codex</string>
+    <string name="guest_codex_shared" translatable="false">~/.codex-shared</string>
     <string name="guest_claude" translatable="false">~/.claude</string>
     <string name="storage_projects_caption">Your projects</string>
     <string name="storage_opencode_caption">OpenCode settings</string>
-    <string name="storage_codex_caption">All of Codex, including the sign-in (auth.json) and sessions</string>
+    <string name="storage_codex_caption">Codex config (config.toml, AGENTS.md, skills, rules, prompts); sign-in and sessions stay inside the app</string>
     <string name="storage_claude_caption">All of Claude Code, including the sign-in (.credentials.json) and sessions</string>
-    <string name="storage_public_warning">Codex and Claude Code sign-ins and session history are in this folder. File managers and other apps with storage access can read them and use your accounts.</string>
-    <string name="storage_kept_private">Kept inside the app: ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
-    <string name="storage_on_dialog_title">Share the agent folders, including sign-ins?</string>
-    <string name="storage_on_dialog_intro">These folders on your phone\'s storage become the real folders the agents use:</string>
-    <string name="storage_on_dialog_warning">The Codex and Claude Code folders are shared in full: their login credentials (auth.json, .credentials.json), sessions and history are stored there. File managers and other apps with storage access can read them, copy them and use your accounts.</string>
-    <string name="storage_on_dialog_rest">Your current settings and sign-ins are copied there once; nothing inside the app is deleted. Turning this off later doesn\'t copy changes back.</string>
-    <string name="storage_on_dialog_ack">I understand that other apps can read my sign-ins and sessions</string>
+    <string name="storage_public_warning">Claude Code sign-ins and session history are in this folder. File managers and other apps with storage access can read them and use your account. Codex sign-ins and sessions stay inside the app.</string>
+    <string name="storage_kept_private">Kept inside the app: ~/.codex (Codex sign-ins, locks and sessions), ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
+    <string name="storage_on_dialog_title">Share the Claude Code folder and Codex config, including Claude sign-ins?</string>
+    <string name="storage_on_dialog_intro">These folders on your phone\'s storage become the shared folders: codex/ holds only Codex config linked from ~/.codex; claude/ is the real ~/.claude.</string>
+    <string name="storage_on_dialog_warning">The Claude Code folder is shared in full: its login credentials (.credentials.json), sessions and history are stored there. Codex shares only config files; its auth.json, locks and sessions stay inside the app. File managers and other apps with storage access can read the Claude data, copy it and use your account.</string>
+    <string name="storage_on_dialog_rest">Your current Codex config and Claude Code settings/sign-ins are copied there once; nothing inside the app is deleted. Turning this off later doesn\'t copy changes back.</string>
+    <string name="storage_on_dialog_ack">I understand that other apps can read my Claude Code sign-ins and sessions</string>
     <string name="storage_on_dialog_confirm">Turn on</string>
     <string name="storage_on_partial">On · projects and OpenCode only</string>
-    <string name="storage_public_warning_off">Turning this on puts the Codex and Claude Code sign-ins and session history in this folder. File managers and other apps with storage access can then read them and use your accounts.</string>
-    <string name="storage_consent_title">Codex and Claude Code aren\'t shared yet</string>
-    <string name="storage_consent_body">This folder was turned on in an earlier version, so only projects/ and opencode/ are shared. This version can also share the full Codex and Claude Code folders, including their sign-ins and sessions. Nothing changes until you agree.</string>
+    <string name="storage_public_warning_off">Turning this on puts Claude Code sign-ins and session history in this folder. Codex sign-ins and sessions stay inside the app. File managers and other apps with storage access can then read the Claude data and use your account.</string>
+    <string name="storage_consent_title">Codex config and Claude Code aren\'t shared yet</string>
+    <string name="storage_consent_body">Only projects/ and opencode/ are shared. This version can also share Codex config and the full Claude Code folder, including Claude sign-ins and sessions. Codex sign-ins and sessions stay inside the app. Nothing changes until you agree.</string>
     <string name="storage_consent_action">Review and share</string>
-    <string name="storage_kept_private_partial">Kept inside the app: ~/.codex, ~/.claude, ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
+    <string name="storage_kept_private_partial">Kept inside the app: ~/.codex (Codex sign-ins, locks and sessions), ~/.claude, ~/projects-private, ~/.claude.json, OpenCode sessions (~/.local/share/opencode), OpenCode\'s service password and node_modules.</string>
     <string name="storage_off_dialog_body_partial">Your files stay in CoCode/ on your phone\'s storage; nothing there is deleted or copied back. From the next server start, projects and OpenCode settings come from the app again.</string>
     <string name="storage_unavailable">CoCode has access, but can\'t create CoCode/ on your phone\'s storage. Make sure the storage is available.</string>
     <string name="check_again">Check again</string>
@@ -201,7 +202,7 @@
     <string name="restart_to_apply">Restart the server to apply</string>
     <string name="restart">Restart</string>
     <string name="storage_off_dialog_title">Stop using the shared folders?</string>
-    <string name="storage_off_dialog_body">Everything stays in CoCode/ on your phone\'s storage; nothing there is deleted or copied back. From the next server start, Codex and Claude Code use the copies inside the app again. Those are from before you turned this on, so they may be out of date: you may need to sign in again, and newer sessions and settings are only in CoCode/.</string>
+    <string name="storage_off_dialog_body">Everything stays in CoCode/ on your phone\'s storage; nothing there is deleted or copied back. From the next server start, Codex config links are restored to the in-app copies and Claude Code uses its in-app copy again. Codex sign-ins and sessions were always in the app; Claude\'s in-app copy may be out of date, so you may need to sign in again and newer Claude sessions/settings are only in CoCode/.</string>
     <string name="turn_off">Turn off</string>
     <string name="cant_open_settings">Couldn\'t open system settings</string>
 
@@ -210,7 +211,7 @@
     <string name="repair_dialog_body">This stops the local server, deletes the Linux system and installs it again with the servers and agents you picked, which downloads about 1.2 GB. Your projects are kept when possible.</string>
     <string name="uninstall_dialog_title">Uninstall the local server?</string>
     <string name="uninstall_dialog_body">This stops the local server and deletes the Linux system from this phone, including both servers, projects, sessions and settings stored inside it. Saved servers are not affected.</string>
-    <string name="uninstall_dialog_body_shared">This stops the local server and deletes the Linux system from this phone, including everything stored inside it. The CoCode/ folder on your phone\'s storage is kept, including the Codex and Claude Code sign-ins and sessions in it. Saved servers are not affected.</string>
+    <string name="uninstall_dialog_body_shared">This stops the local server and deletes the Linux system from this phone, including everything stored inside it, such as the Codex sign-in and sessions. The CoCode/ folder on your phone\'s storage is kept, including the Codex config and the Claude Code sign-ins and sessions in it. Saved servers are not affected.</string>
     <string name="cancel">Cancel</string>
 
     <!-- Remote servers -->
@@ -370,4 +371,34 @@
     <!-- Remote server protocol -->
     <string name="field_server_kind">Server type</string>
     <string name="server_kind_hint">Pick what runs at this address, so CoCode signs in the right way.</string>
+
+    <!-- Codex sign-in from the app (device code). -->
+    <string name="codex_sign_in">Sign in</string>
+    <string name="codex_signed_in">Signed in</string>
+    <string name="codex_sign_in_again">Sign in again</string>
+    <string name="codex_sign_in_options">Codex sign-in options</string>
+    <string name="codex_continue_sign_in">Continue</string>
+    <string name="codex_sign_in_title">Sign in to Codex</string>
+    <string name="codex_signed_in_title">Codex is signed in</string>
+    <string name="codex_failed_title">Codex sign-in didn\'t finish</string>
+    <string name="codex_starting">Starting Codex sign-in…</string>
+    <string name="codex_verifying">Checking sign-in…</string>
+    <string name="codex_step_open">Open the sign-in page</string>
+    <string name="codex_open_page">Open sign-in page</string>
+    <string name="codex_step_code">Enter this code</string>
+    <string name="codex_code_label">One-time code %1$s</string>
+    <string name="codex_copy_code">Copy code</string>
+    <string name="codex_expires_in">Expires in %1$s</string>
+    <string name="codex_waiting_note">Sign in with ChatGPT, enter this code, then come back — CoCode finishes automatically.</string>
+    <string name="codex_use_api_key">Use an API key instead</string>
+    <string name="codex_api_key_hint">For an OpenAI API key instead of a ChatGPT account. The key is passed to Codex and not kept by the app.</string>
+    <string name="codex_api_key_label">OpenAI API key</string>
+    <string name="codex_api_key_submit">Sign in with key</string>
+    <string name="codex_show_key">Show API key</string>
+    <string name="codex_hide_key">Hide API key</string>
+    <string name="codex_signed_in_body">Codex can now be used by the local server.</string>
+    <string name="codex_technical_details">Technical details</string>
+    <string name="codex_done">Done</string>
+    <string name="codex_close">Close</string>
+    <string name="codex_hide">Hide</string>
 </resources>

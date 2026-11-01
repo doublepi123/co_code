@@ -5,6 +5,7 @@
     <string name="storage_claude_dir" translatable="false">claude/</string>
     <string name="guest_opencode" translatable="false">~/.config/opencode</string>
     <string name="guest_codex" translatable="false">~/.codex</string>
+    <string name="guest_codex_shared" translatable="false">~/.codex-shared</string>
     <string name="guest_claude" translatable="false">~/.claude</string>
     <string name="server_t3" translatable="false">Cox</string>
     <string name="server_t3_legacy" translatable="false">T3 Code</string>
@@ -164,7 +165,7 @@
     <string name="storage_needs_access">需要授权</string>
     <string name="storage_on">开启</string>
     <string name="storage_folder_name">CoCode/</string>
-    <string name="storage_intro">把项目以及 OpenCode、Codex、Claude Code 的文件夹放在手机存储的 CoCode/ 里，可以用文件管理器或通过 USB 打开。Codex 和 Claude Code 的文件夹是完整共享的，包括登录凭据和会话记录。</string>
+    <string name="storage_intro">把项目、OpenCode 设置、Codex 配置和 Claude Code 文件夹放在手机存储的 CoCode/ 里，可以用文件管理器或通过 USB 打开。Claude Code 是完整共享的，包括登录凭据和会话记录。Codex 只共享配置，它的登录信息和会话仍保存在应用内。</string>
     <string name="storage_needs_all_files">CoCode 需要“所有文件访问”权限才能使用此文件夹。你可以在系统设置中开启。</string>
     <string name="storage_needs_legacy">CoCode 需要访问手机存储才能使用此文件夹。</string>
     <string name="allow_access">允许访问</string>
@@ -176,22 +177,22 @@
     <string name="guest_private_projects">~/projects-private</string>
     <string name="storage_projects_caption">你的项目</string>
     <string name="storage_opencode_caption">OpenCode 设置</string>
-    <string name="storage_codex_caption">Codex 的全部内容，包括登录凭据（auth.json）和会话</string>
+    <string name="storage_codex_caption">Codex 配置（config.toml、AGENTS.md、skills、rules、prompts）；登录信息和会话仍在应用内</string>
     <string name="storage_claude_caption">Claude Code 的全部内容，包括登录凭据（.credentials.json）和会话</string>
-    <string name="storage_public_warning">Codex 和 Claude Code 的登录凭据和会话记录都在这个文件夹里。文件管理器及其他获得存储权限的应用可以读取它们，并用它们登录你的账号。</string>
-    <string name="storage_kept_private">仍保存在应用内：~/projects-private、~/.claude.json、OpenCode 会话（~/.local/share/opencode）、OpenCode 的服务密码和 node_modules。</string>
-    <string name="storage_on_dialog_title">共享代理文件夹（包括登录凭据）？</string>
-    <string name="storage_on_dialog_intro">手机存储中的这些文件夹会直接成为代理实际使用的文件夹：</string>
-    <string name="storage_on_dialog_warning">Codex 和 Claude Code 的文件夹是完整共享的：登录凭据（auth.json、.credentials.json）、会话和历史记录都保存在那里。文件管理器及其他获得存储权限的应用可以读取、复制它们，并用它们登录你的账号。</string>
-    <string name="storage_on_dialog_rest">现有的设置和登录信息会复制过去一次，应用内的内容不会删除。之后关闭此功能时，不会把改动复制回来。</string>
-    <string name="storage_on_dialog_ack">我了解其他应用可以读取我的登录凭据和会话</string>
+    <string name="storage_public_warning">Claude Code 的登录凭据和会话记录都在这个文件夹里。文件管理器及其他获得存储权限的应用可以读取它们，并用它们登录你的账号。Codex 的登录信息和会话仍保存在应用内。</string>
+    <string name="storage_kept_private">仍保存在应用内：~/.codex（Codex 的登录信息、锁文件和会话）、~/projects-private、~/.claude.json、OpenCode 会话（~/.local/share/opencode）、OpenCode 的服务密码和 node_modules。</string>
+    <string name="storage_on_dialog_title">共享 Claude Code 文件夹和 Codex 配置（包括 Claude 登录凭据）？</string>
+    <string name="storage_on_dialog_intro">手机存储中的这些文件夹会成为共享文件夹：codex/ 只存放从 ~/.codex 链接过去的 Codex 配置；claude/ 就是真正的 ~/.claude。</string>
+    <string name="storage_on_dialog_warning">Claude Code 的文件夹是完整共享的：登录凭据（.credentials.json）、会话和历史记录都保存在那里。Codex 只共享配置文件，它的 auth.json、锁文件和会话仍保存在应用内。文件管理器及其他获得存储权限的应用可以读取、复制 Claude 的数据，并用它登录你的账号。</string>
+    <string name="storage_on_dialog_rest">现有的 Codex 配置和 Claude Code 的设置与登录信息会复制过去一次，应用内的内容不会删除。之后关闭此功能时，不会把改动复制回来。</string>
+    <string name="storage_on_dialog_ack">我了解其他应用可以读取我的 Claude Code 登录凭据和会话</string>
     <string name="storage_on_dialog_confirm">开启</string>
     <string name="storage_on_partial">开启 · 仅项目和 OpenCode</string>
-    <string name="storage_public_warning_off">开启后，Codex 和 Claude Code 的登录凭据和会话记录会放在这个文件夹里。文件管理器及其他获得存储权限的应用就能读取它们，并用它们登录你的账号。</string>
-    <string name="storage_consent_title">Codex 和 Claude Code 还没有共享</string>
-    <string name="storage_consent_body">这个文件夹是在旧版本中开启的，所以目前只共享 projects/ 和 opencode/。新版本还可以完整共享 Codex 和 Claude Code 的文件夹，包括登录凭据和会话。在你同意之前什么都不会改变。</string>
+    <string name="storage_public_warning_off">开启后，Claude Code 的登录凭据和会话记录会放在这个文件夹里，Codex 的登录信息和会话仍保存在应用内。文件管理器及其他获得存储权限的应用就能读取 Claude 的数据，并用它登录你的账号。</string>
+    <string name="storage_consent_title">Codex 配置和 Claude Code 还没有共享</string>
+    <string name="storage_consent_body">目前只共享 projects/ 和 opencode/。新版本还可以共享 Codex 配置和完整的 Claude Code 文件夹，包括 Claude 的登录凭据和会话。Codex 的登录信息和会话仍保存在应用内。在你同意之前什么都不会改变。</string>
     <string name="storage_consent_action">查看并共享</string>
-    <string name="storage_kept_private_partial">仍保存在应用内：~/.codex、~/.claude、~/projects-private、~/.claude.json、OpenCode 会话（~/.local/share/opencode）、OpenCode 的服务密码和 node_modules。</string>
+    <string name="storage_kept_private_partial">仍保存在应用内：~/.codex（Codex 的登录信息、锁文件和会话）、~/.claude、~/projects-private、~/.claude.json、OpenCode 会话（~/.local/share/opencode）、OpenCode 的服务密码和 node_modules。</string>
     <string name="storage_off_dialog_body_partial">CoCode/ 里的内容都会保留，不会删除，也不会复制回应用内。从下次启动服务器起，项目和 OpenCode 设置重新使用应用内的那份。</string>
     <string name="storage_unavailable">CoCode 已获得访问权限，但无法在手机存储中创建 CoCode/。请确认存储可用。</string>
     <string name="check_again">重新检查</string>
@@ -200,7 +201,7 @@
     <string name="restart_to_apply">重启服务器以生效</string>
     <string name="restart">重启</string>
     <string name="storage_off_dialog_title">停止使用共享文件夹？</string>
-    <string name="storage_off_dialog_body">CoCode/ 里的内容都会保留，不会删除，也不会复制回应用内。从下次启动服务器起，Codex 和 Claude Code 重新使用应用内的那份副本。那是开启共享之前的版本，可能已经过时：可能需要重新登录，较新的会话和设置只在 CoCode/ 里。</string>
+    <string name="storage_off_dialog_body">CoCode/ 里的内容都会保留，不会删除，也不会复制回应用内。从下次启动服务器起，Codex 配置的链接会改回应用内的副本，Claude Code 也重新使用应用内的副本。Codex 的登录信息和会话一直都在应用内；Claude 在应用内的副本可能已经过时，可能需要重新登录，较新的 Claude 会话和设置只在 CoCode/ 里。</string>
     <string name="turn_off">关闭</string>
     <string name="cant_open_settings">无法打开系统设置</string>
 
@@ -209,7 +210,7 @@
     <string name="repair_dialog_body">这会停止本地服务器，删除 Linux 系统并按你选的服务器和代理重新安装，将下载约 1.2 GB。可能的情况下会保留你的项目。</string>
     <string name="uninstall_dialog_title">卸载本地服务器？</string>
     <string name="uninstall_dialog_body">这会停止本地服务器，并从手机中删除 Linux 系统，包括两个服务器以及其中保存的项目、会话和设置。已保存的服务器不受影响。</string>
-    <string name="uninstall_dialog_body_shared">这会停止本地服务器，并从手机中删除 Linux 系统及其中的全部内容。手机存储中的 CoCode/ 文件夹会保留，包括其中 Codex 和 Claude Code 的登录凭据和会话。已保存的服务器不受影响。</string>
+    <string name="uninstall_dialog_body_shared">这会停止本地服务器，并从手机中删除 Linux 系统及其中的全部内容，包括 Codex 的登录信息和会话。手机存储中的 CoCode/ 文件夹会保留，包括其中的 Codex 配置以及 Claude Code 的登录凭据和会话。已保存的服务器不受影响。</string>
     <string name="cancel">取消</string>
 
     <!-- 远程服务器 -->
@@ -364,4 +365,34 @@
     <!-- 远程服务器类型 -->
     <string name="field_server_kind">服务器类型</string>
     <string name="server_kind_hint">选择这个地址上运行的是什么，CoCode 才能用正确的方式登录。</string>
+
+    <!-- 在应用内登录 Codex（设备码）。 -->
+    <string name="codex_sign_in">登录</string>
+    <string name="codex_signed_in">已登录</string>
+    <string name="codex_sign_in_again">重新登录</string>
+    <string name="codex_sign_in_options">Codex 登录选项</string>
+    <string name="codex_continue_sign_in">继续登录</string>
+    <string name="codex_sign_in_title">登录 Codex</string>
+    <string name="codex_signed_in_title">Codex 已登录</string>
+    <string name="codex_failed_title">Codex 登录没有完成</string>
+    <string name="codex_starting">正在启动 Codex 登录…</string>
+    <string name="codex_verifying">正在检查登录状态…</string>
+    <string name="codex_step_open">打开登录页面</string>
+    <string name="codex_open_page">打开登录页面</string>
+    <string name="codex_step_code">输入这个代码</string>
+    <string name="codex_code_label">一次性代码 %1$s</string>
+    <string name="codex_copy_code">复制代码</string>
+    <string name="codex_expires_in">%1$s 后过期</string>
+    <string name="codex_waiting_note">用 ChatGPT 账号登录，输入这个代码，然后回到这里——CoCode 会自动完成。</string>
+    <string name="codex_use_api_key">改用 API 密钥</string>
+    <string name="codex_api_key_hint">适用于 OpenAI API 密钥，而不是 ChatGPT 账号。密钥会交给 Codex，应用本身不会保存。</string>
+    <string name="codex_api_key_label">OpenAI API 密钥</string>
+    <string name="codex_api_key_submit">用密钥登录</string>
+    <string name="codex_show_key">显示 API 密钥</string>
+    <string name="codex_hide_key">隐藏 API 密钥</string>
+    <string name="codex_signed_in_body">本地服务器现在可以使用 Codex 了。</string>
+    <string name="codex_technical_details">技术详情</string>
+    <string name="codex_done">完成</string>
+    <string name="codex_close">关闭</string>
+    <string name="codex_hide">隐藏</string>
 </resources>

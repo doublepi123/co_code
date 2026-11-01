@@ -33,6 +33,16 @@ class ProcessScanner(
             .map { OwnedProcess(it.pid, it.ppid, it.startTime) }
             .sortedBy { it.pid }
 
+    /**
+     * Owned children of this app whose command line is exactly [argv]: a one-off guest command,
+     * told apart from the server's PRoot tree (same launcher and rootfs) by its full arguments.
+     */
+    fun ownedChildrenWithArgv(argv: List<String>): List<OwnedProcess> =
+        allProcesses()
+            .filter { it.pid != myPid && it.uid == myUid && it.ppid == myPid && it.argv == argv.filter(String::isNotEmpty) }
+            .map { OwnedProcess(it.pid, it.ppid, it.startTime) }
+            .sortedBy { it.pid }
+
     /** Children of [parentPid] (any process, used to walk a tree we already own). */
     fun childrenOf(parentPid: Long): List<Long> =
         allProcesses().filter { it.ppid == parentPid }.map { it.pid }.sorted()

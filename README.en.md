@@ -37,10 +37,12 @@ After explicit consent and storage permission, these directories are live-bound.
 |---|---|
 | `projects/` | `~/projects` |
 | `opencode/` | `~/.config/opencode` |
-| `codex/` | `~/.codex` (entire directory) |
+| `codex/` | `~/.codex-shared`: Codex `config.toml`, `AGENTS.md`, `skills/`, `rules/`, `prompts/` (linked from `~/.codex`) |
 | `claude/` | `~/.claude` (entire directory) |
 
-**Privacy warning: Codex and Claude login credentials, sessions and history are public too. Other storage-authorized apps can read or copy credentials and access your accounts. Enabling requires acknowledging this risk.** Configuration files may also contain API keys.
+**Privacy warning: Claude login credentials, sessions and history are public too. Other storage-authorized apps can read or copy credentials and access your accounts. Enabling requires acknowledging this risk.** Configuration files may also contain API keys.
+
+Codex shares configuration only: its credentials, sessions, history and lock files always stay in the app-private `~/.codex`, because Android shared storage does not implement the `flock` locks Codex relies on (saving a sign-in there fails with `os error 38`). When upgrading from the earlier full mapping, public Codex sessions and credentials are copied back to private storage; the public copies are kept, no longer used, and should be deleted manually.
 
 First enable copies existing files without overwriting shared files or deleting private originals. Disabling does not copy changes back: the older private copies become visible and may be stale. Public data remains; re-enable to use it again. Shared storage cannot preserve symbolic links or executable permissions; use `~/projects-private` for projects needing them.
 

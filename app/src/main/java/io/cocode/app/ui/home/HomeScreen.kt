@@ -128,6 +128,8 @@ internal fun HomeScreen(
     agents: AgentsState = AgentsState(),
     /** Local servers: picked, installed and active. */
     localServers: ServersState = ServersState(),
+    /** In-app Codex sign-in on the Codex agent row; null hides it. */
+    codexLogin: CodexSignInUi? = null,
     /**
      * "Keep screen on while the local server runs"; null hides the setting. By default the app's
      * own setting (the process-wide [io.cocode.app.ui.ScreenAwakeController]), null in previews.
@@ -200,6 +202,7 @@ internal fun HomeScreen(
                         servers = localServers,
                         onServersChange = actions.onServersChange,
                         onSelectServer = actions.onSelectServer,
+                        codexLogin = codexLogin,
                         modifier = Modifier.revealOnEnter(1, animate),
                     )
                     AnimatedVisibility(

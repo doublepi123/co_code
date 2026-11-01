@@ -11,15 +11,18 @@ import kotlinx.coroutines.flow.StateFlow
  * /sdcard/CoCode/
  *   projects/          -> guest ~/projects            (home is the working directory)
  *   opencode/          -> guest /root/.config/opencode/{opencode.jsonc,AGENTS.md,skills,agents,commands}
- *   codex/             -> guest /root/.codex (including credentials and sessions)
+ *   codex/             -> guest /root/.codex-shared (config entries only, linked from ~/.codex)
  *   claude/            -> guest /root/.claude (including credentials and sessions)
  * ```
- * Private storage keeps ~/projects-private, ~/.claude.json, ~/.local/share/opencode (including
- * OpenCode authentication and sessions), the OpenCode service password/plugin node_modules, and
- * both servers' data. Codex and Claude directory sharing intentionally includes their login tokens
- * and history after explicit consent; other storage-authorized apps may read or copy them.
- * Disabling sharing preserves the public tree but does not copy changes back to the older private
- * copies. Re-enabling uses the public tree again.
+ * Codex keeps CODEX_HOME (~/.codex) private because it needs flock(2), which Android shared storage
+ * does not implement: auth.json, auth.lock, sessions, history, SQLite state and helper locks stay in
+ * the app. Only config.toml, AGENTS.md, AGENTS.override.md, skills/, rules/ and prompts/ are
+ * symlinks into ~/.codex-shared while sharing is on; turning it off restores the in-app copies.
+ * Private storage also keeps ~/projects-private, ~/.claude.json, ~/.local/share/opencode (OpenCode
+ * authentication and sessions), the OpenCode service password/plugin node_modules, and both
+ * servers' data. Claude directory sharing intentionally includes its login tokens and history after
+ * explicit consent; other storage-authorized apps may read or copy them. Disabling sharing preserves
+ * the public tree but does not copy changes back to the older private copies.
  */
 enum class SharedStorageStatus {
     /** The user has not turned the feature on. Guest ~/projects is private storage. */

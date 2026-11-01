@@ -66,6 +66,21 @@ class ProcessTreeTest {
     }
 
     @Test
+    fun `a one-off command is matched by its exact argv, never the server tree`() {
+        val procRoot = folder.newFolder("proc-argv")
+        val login = listOf(proot, "-r", rootfs, "-w", "/root", "/usr/local/bin/codex", "login", "--device-auth")
+        proc(procRoot, 200, 1, listOf(proot, "-r", rootfs, "/bin/sh", "-c", "cox serve")) // server
+        proc(procRoot, 201, 1, login) // our login command
+        proc(procRoot, 202, 1, login, uid = 999) // other uid
+        proc(procRoot, 203, 7, login) // not our child
+        proc(procRoot, 204, 1, login + "extra") // different argv
+
+        val owned = ProcessScanner(procRoot, uid, myPid = 1L).ownedChildrenWithArgv(login)
+
+        assertEquals(listOf(201L), owned.map { it.pid })
+    }
+
+    @Test
     fun `our own pid is never owned`() {
         val procRoot = folder.newFolder("proc-self")
         proc(procRoot, 77, 1, listOf(proot, "-r", rootfs))

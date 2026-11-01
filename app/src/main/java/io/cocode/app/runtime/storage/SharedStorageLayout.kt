@@ -22,9 +22,13 @@ import io.cocode.app.runtime.install.RuntimeArchive
  * directory. The user explicitly accepted that the Codex and Claude folders contain live login
  * tokens and session history; shared storage permissions are not a secret boundary.
  *
- * Only OpenCode keeps nested private exceptions (`service.json`, its `.tmp`, `node_modules`). The
- * Codex and Claude directories are not selectively filtered: any nested file bind would break the
- * atomic rename that the agents use for their credentials and config.
+ * OpenCode and Claude are bound as whole directories. Codex is bound as a separate
+ * `~/.codex-shared` directory, with only config entries symlinked from the private `~/.codex`;
+ * its login/lock/session/state files stay on app-private ext4 because Codex uses `flock`, which
+ * returns ENOSYS on Android's shared-storage FUSE.
+ *
+ * The OpenCode private exception folder is the only nested private bind. Codex and Claude never
+ * get nested file binds: that would break the atomic writes their agents use.
  */
 object SharedStorageLayout {
     const val PROJECTS = "projects"
@@ -34,9 +38,9 @@ object SharedStorageLayout {
     const val README = "README.txt"
 
     /**
-     * Consent schema version for sharing the complete Codex/Claude folders. The user's accepted
-     * version is persisted by [SharedStoragePrefs.fullDirectoryConsentVersion]; a value below this
-     * constant keeps the legacy projects/OpenCode-only mapping.
+     * Consent schema version for sharing Codex config + the complete Claude folder. The user's
+     * accepted version is persisted by [SharedStoragePrefs.fullDirectoryConsentVersion]; a value
+     * below this constant keeps the legacy projects/OpenCode-only mapping.
      */
     const val FULL_DIRECTORY_CONSENT_VERSION = 1
 
@@ -49,11 +53,12 @@ object SharedStorageLayout {
     const val GUEST_PRIVATE_PROJECTS = "/root/projects-private"
     const val GUEST_OPENCODE_CONFIG = "/root/.config/opencode"
     const val GUEST_CODEX_CONFIG = "/root/.codex"
+    const val GUEST_CODEX_SHARED = "/root/.codex-shared"
     const val GUEST_CLAUDE_CONFIG = "/root/.claude"
 
     /** Mount points under the home bind, created in the home before PRoot binds onto them. */
     val MOUNT_POINTS: List<String> =
-        listOf("projects", "projects-private", ".config/opencode", ".codex", ".claude")
+        listOf("projects", "projects-private", ".config/opencode", ".codex", ".codex-shared", ".claude")
 
     /**
      * The home-relative directories PRoot needs for [binds]: `projects` always, the private
@@ -72,7 +77,10 @@ object SharedStorageLayout {
             if (binds.sharedOpencodeHostPath != null || hasOpencodeExceptions) {
                 add(File(home, ".config/opencode"))
             }
-            if (binds.sharedCodexHostPath != null) add(File(home, ".codex"))
+            if (binds.sharedCodexHostPath != null) {
+                add(File(home, ".codex"))
+                add(File(home, ".codex-shared"))
+            }
             if (binds.sharedClaudeHostPath != null) add(File(home, ".claude"))
         }
 
@@ -81,6 +89,19 @@ object SharedStorageLayout {
      * no config file is invented and the whole tool directory is already bound.
      */
     val CODEX_CONFIG_DIRS = listOf("rules", "skills", "prompts")
+
+    /**
+     * Codex config entries that are symlinked from private `~/.codex` into `~/.codex-shared`.
+     * Everything else in `~/.codex` stays private; `auth.lock`/flock, sessions, history, logs,
+     * SQLite and tmp must remain on the app-private filesystem.
+     */
+    val CODEX_SHARED_LINK_NAMES =
+        listOf("config.toml", "AGENTS.md", "AGENTS.override.md", "skills", "rules", "prompts")
+
+    private val CODEX_SHARED_LINK_DIRS = setOf("skills", "rules", "prompts")
+
+    /** Stash of pre-shared real entries; never shared and never overwritten. */
+    const val CODEX_STASH_DIR = ".cocode-private"
 
     val CLAUDE_CONFIG_DIRS = listOf("rules", "agents", "commands", "skills")
 
@@ -143,6 +164,157 @@ object SharedStorageLayout {
         Files.isSymbolicLink(path.toPath()) ||
             (path.isDirectory && path.listFiles().orEmpty().isNotEmpty())
 
+    /**
+     * Host-side Codex layout. Active: make the private `~/.codex` config entries symlinks into the
+     * shared `~/.codex-shared` bind, stashing pre-shared real entries under
+     * `~/.codex/.cocode-private` without overwriting. Inactive: replace our links with the stashed
+     * real entries (or remove them when no stash exists), never leaving a dangling link.
+     *
+     * All operations are host-side and no-follow. The symlink target is the guest absolute path
+     * `/root/.codex-shared/<name>`; PRoot resolves it through the bind inside the guest.
+     */
+    fun prepareCodexLinkLayout(
+        privateHome: File,
+        hostRoot: File,
+        active: Boolean,
+        journalDir: File,
+    ) {
+        val codexDir = File(privateHome, ".codex")
+        val stashDir = File(codexDir, CODEX_STASH_DIR)
+        if (!active) {
+            restoreCodexLinks(codexDir, stashDir)
+            return
+        }
+        codexDir.mkdirs()
+        val sharedDir = codexDir(hostRoot).apply { mkdirs() }
+        stashDir.mkdirs()
+        CODEX_SHARED_LINK_NAMES.forEach { name ->
+            val private = File(codexDir, name)
+            val stash = File(stashDir, name)
+            val privateExists = existsNoFollow(private)
+            if (!privateExists) {
+                ensureSharedCodexEntry(
+                    name,
+                    if (existsNoFollow(stash)) stash else null,
+                    sharedDir,
+                    journalDir,
+                    mergeIntoExisting = false,
+                )
+                if (!createCodexLink(private, name)) {
+                    throw IOException("cannot create Codex shared config link for $name")
+                }
+                return@forEach
+            }
+            if (isCodexSharedLink(private, name)) {
+                ensureSharedCodexEntry(
+                    name,
+                    if (existsNoFollow(stash)) stash else null,
+                    sharedDir,
+                    journalDir,
+                    mergeIntoExisting = false,
+                )
+                return@forEach
+            }
+            if (existsNoFollow(stash)) {
+                // A stash already holds the pre-shared real entry; keep the current entry and do
+                // not replace it, as requested.
+                return@forEach
+            }
+            ensureSharedCodexEntry(name, private, sharedDir, journalDir, mergeIntoExisting = true)
+            if (!moveAtomically(private, stash)) {
+                return@forEach
+            }
+            if (!createCodexLink(private, name)) {
+                runCatching { moveAtomically(stash, private) }
+                throw IOException("cannot create Codex shared config link for $name")
+            }
+        }
+    }
+
+    private fun restoreCodexLinks(
+        codexDir: File,
+        stashDir: File,
+    ) {
+        CODEX_SHARED_LINK_NAMES.forEach { name ->
+            val private = File(codexDir, name)
+            val stash = File(stashDir, name)
+            if (isCodexSharedLink(private, name)) {
+                runCatching { Files.deleteIfExists(private.toPath()) }
+                if (existsNoFollow(stash)) {
+                    runCatching { moveAtomically(stash, private) }
+                }
+            } else if (!existsNoFollow(private) && existsNoFollow(stash)) {
+                runCatching { moveAtomically(stash, private) }
+            }
+        }
+    }
+
+    private fun ensureSharedCodexEntry(
+        name: String,
+        source: File?,
+        sharedDir: File,
+        journalDir: File,
+        mergeIntoExisting: Boolean,
+    ) {
+        val target = File(sharedDir, name)
+        val targetExists = existsNoFollow(target)
+        if (source != null && existsNoFollow(source) && (mergeIntoExisting || !targetExists)) {
+            applyMigration(
+                planMigrationEntry(source, target, CODEX_MIGRATION_POLICY),
+                sharedDir,
+                journalDir,
+            )
+        }
+        if (!existsNoFollow(target)) {
+            if (name in CODEX_SHARED_LINK_DIRS) {
+                target.mkdirs()
+            } else {
+                target.parentFile?.mkdirs()
+                target.createNewFile()
+            }
+        }
+    }
+
+    private fun createCodexLink(
+        private: File,
+        name: String,
+    ): Boolean =
+        runCatching {
+            Files.createSymbolicLink(private.toPath(), java.nio.file.Paths.get("$GUEST_CODEX_SHARED/$name"))
+        }.isSuccess
+
+    private fun isCodexSharedLink(
+        private: File,
+        name: String,
+    ): Boolean =
+        Files.isSymbolicLink(private.toPath()) &&
+            runCatching {
+                val target = Files.readSymbolicLink(private.toPath())
+                val resolved =
+                    if (target.isAbsolute) {
+                        target.normalize()
+                    } else {
+                        java.nio.file.Paths.get(GUEST_CODEX_CONFIG).resolve(target).normalize()
+                    }
+                resolved.toString() == "$GUEST_CODEX_SHARED/$name"
+            }.getOrDefault(false)
+
+    private fun existsNoFollow(file: File): Boolean =
+        Files.exists(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+
+    private fun moveAtomically(
+        from: File,
+        to: File,
+    ): Boolean =
+        runCatching {
+            Files.move(
+                from.toPath(),
+                to.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
+            true
+        }.getOrDefault(false)
+
     /** One step of the migration plan: copy [from] (private) to [to] (shared), or skip with a reason. */
     sealed interface Step {
         data class Copy(val from: File, val to: File) : Step
@@ -161,13 +333,27 @@ object SharedStorageLayout {
         val privatePatterns: List<Regex> = emptyList(),
         val allowTopLevel: (File) -> Boolean = { true },
         val skipEmptyPlaceholders: Boolean = true,
+        /** Skip matching names at any depth, e.g. Codex `.lock` files during the legacy upgrade. */
+        val skipName: (String) -> Boolean = { false },
     )
 
     /** OpenCode migrates everything except its private service/node_modules entries. */
     val OPENCODE_MIGRATION_POLICY = MigrationPolicy(privateNames = PRIVATE_NAMES)
 
-    /** Codex is shared in full, so every regular file (auth/history/sessions included) is migrated. */
-    val CODEX_MIGRATION_POLICY = MigrationPolicy(skipEmptyPlaceholders = false)
+    /** Codex config is migrated private→shared; state/lock/session files are never shared. */
+    val CODEX_MIGRATION_POLICY =
+        MigrationPolicy(
+            allowTopLevel = { it.name in CODEX_SHARED_LINK_NAMES },
+            skipEmptyPlaceholders = false,
+        )
+
+    /** The legacy full-directory upgrade copies old public state back to private, never sharing it. */
+    val CODEX_UPGRADE_POLICY =
+        MigrationPolicy(
+            allowTopLevel = { it.name !in CODEX_SHARED_LINK_NAMES },
+            skipEmptyPlaceholders = false,
+            skipName = { it.endsWith(".lock") },
+        )
 
     /** Claude is shared in full, so every regular file (credentials/history/sessions included) is migrated. */
     val CLAUDE_MIGRATION_POLICY = MigrationPolicy(skipEmptyPlaceholders = false)
@@ -192,6 +378,17 @@ object SharedStorageLayout {
         return steps
     }
 
+    /** Plans one entry (file or directory tree) without walking its parent. */
+    fun planMigrationEntry(
+        source: File,
+        target: File,
+        policy: MigrationPolicy = MigrationPolicy(),
+    ): List<Step> {
+        val steps = mutableListOf<Step>()
+        planEntry(source, target, steps, policy, topLevel = true)
+        return steps
+    }
+
     private fun planEntry(
         source: File,
         target: File,
@@ -201,6 +398,14 @@ object SharedStorageLayout {
     ) {
         if (Files.isSymbolicLink(source.toPath())) {
             steps += Step.Skip(source, "symbolic link")
+            return
+        }
+        if (policy.skipName(source.name)) {
+            steps += Step.Skip(source, "excluded name")
+            return
+        }
+        if (!source.isDirectory && !source.isFile) {
+            steps += Step.Skip(source, "not a regular file")
             return
         }
         if (Files.isSymbolicLink(target.toPath())) {
@@ -653,19 +858,23 @@ object SharedStorageLayout {
           opencode/   The OpenCode global config folder. It is bound over ~/.config/opencode,
                       so every file here is live config: opencode.jsonc, AGENTS.md, skills/,
                       agents/, commands/, and any other file OpenCode or its plugins read.
-          codex/      The whole Codex folder, bound live over ~/.codex. It contains config.toml,
-                      AGENTS.md, rules/, skills/, prompts/ AND the login token (auth.json),
-                      session transcripts, history, logs and SQLite state.
+          codex/      Shared Codex config, bound at ~/.codex-shared. Only config.toml,
+                      AGENTS.md, AGENTS.override.md, rules/, skills/ and prompts/ are symlinked
+                      from the private ~/.codex. Codex's login (auth.json), auth.lock, sessions,
+                      archived_sessions, history, logs, SQLite and tmp stay private. Files left
+                      here by an older full-directory layout are no longer live; delete any old
+                      auth.json/sessions/history here if you do not want them in public storage.
           claude/     The whole Claude folder, bound live over ~/.claude. It contains
                       settings.json, CLAUDE.md, rules/, agents/, commands/, skills/ AND the
                       login token (.credentials.json), transcripts, history and session state.
 
         PUBLIC STORAGE WARNING
         ----------------------
-        The codex/ and claude/ folders include live authentication tokens and full session history.
+        The claude/ folder includes live authentication tokens and full session history.
         Anyone and any app with access to shared storage may read them. Android/FUSE permissions
         are NOT a secret boundary. Enable shared storage only if you accept that these credentials
-        and conversations are readable outside the app.
+        and conversations are readable outside the app. Codex sign-ins and sessions are not in
+        this folder with the current layout.
 
         Claude's ~/.claude.json file is outside ~/.claude and is NOT mapped. It stays private.
 
@@ -680,6 +889,8 @@ object SharedStorageLayout {
         file. Delete the incomplete public file to retry from the private snapshot.
 
         Kept private to the app (never placed here, not readable by other apps):
+          - Codex auth.json, auth.lock, sessions/, history, logs, SQLite, tmp and the
+            ~/.codex/.cocode-private stash of pre-shared config entries,
           - OpenCode's service.json, service.json.tmp and node_modules,
           - ~/.local/share/opencode and T3 Code's data directory,
           - ~/.claude.json (outside the mapped ~/.claude folder).

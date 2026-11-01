@@ -9,7 +9,7 @@ import java.io.File
  * Order matters and is fixed:
  *  1. the persistent private home over /root,
  *  2. the project binds: `~/projects` and, in Active mode, `~/projects-private`,
- *  3. the shared config folders: OpenCode over `~/.config/opencode`, Codex over `~/.codex`, Claude
+ *  3. the shared config folders: OpenCode over `~/.config/opencode`, Codex over `~/.codex-shared` (private `~/.codex` is the CODEX_HOME), Claude
  *     over `~/.claude` (full directories, so atomic config and credential saves land in shared),
  *  4. private exceptions nested on top of the OpenCode folder: service.json, service.json.tmp,
  *     node_modules.
@@ -28,7 +28,7 @@ data class GuestBinds(
     val sharedOpencodeHostPath: File?,
     /** OpenCode private exceptions nested over the shared folder: (host path, guest path). */
     val privateExceptions: List<Pair<File, String>>,
-    /** Shared Codex folder, bound over `~/.codex`. Null when shared config is off. */
+    /** Shared Codex folder, bound over `~/.codex-shared` (only config entries are symlinked). Null when off. */
     val sharedCodexHostPath: File? = null,
     /** Shared Claude folder, bound over `~/.claude`. Null when shared config is off. */
     val sharedClaudeHostPath: File? = null,
@@ -40,7 +40,7 @@ data class GuestBinds(
             add("${projectsHostPath.absolutePath}:${SharedStorageLayout.GUEST_PROJECTS}")
             privateProjectsHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_PRIVATE_PROJECTS}") }
             sharedOpencodeHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_OPENCODE_CONFIG}") }
-            sharedCodexHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_CODEX_CONFIG}") }
+            sharedCodexHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_CODEX_SHARED}") }
             sharedClaudeHostPath?.let { add("${it.absolutePath}:${SharedStorageLayout.GUEST_CLAUDE_CONFIG}") }
             privateExceptions.forEach { (host, guest) -> add("${host.absolutePath}:$guest") }
         }

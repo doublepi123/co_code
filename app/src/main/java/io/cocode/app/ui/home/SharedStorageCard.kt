@@ -94,9 +94,10 @@ private val RailReach = 6.dp
 private const val STATUS_SETTLE_MS = 900L
 
 /**
- * "Projects and agent folders": keeps ~/projects and the OpenCode, Codex and Claude Code folders in
- * CoCode/ on shared storage. The Codex and Claude Code folders are shared in full, sign-ins and
- * session history included (the user's explicit choice), so turning it on asks first with a
+ * "Projects and agent folders": keeps ~/projects, OpenCode settings, Codex config and the Claude Code
+ * folder in CoCode/ on shared storage. Claude Code is shared in full, sign-ins and session history
+ * included (the user's explicit choice); Codex shares config only via ~/.codex-shared, its sign-in
+ * and sessions stay in the app. Turning it on asks first with a
  * prominent warning and an acknowledgement, and the active body keeps that warning in view.
  * The switch is the setting; a notice offers a restart when the running server still uses the old
  * folders.
@@ -454,7 +455,7 @@ private fun FolderLayout(
                 }
             }
             // Only what is actually mapped: partial mode never lists codex/ or claude/ as active.
-            val folders = sharedFolders().filterNot { partial && it.sensitive }
+            val folders = sharedFolders().filterNot { partial && it.fullModeOnly }
             folders.forEachIndexed { index, folder ->
                 FolderRow(
                     folder = folder,
@@ -474,6 +475,8 @@ private data class SharedFolder(
     val caption: String,
     /** Holds sign-ins and history: drawn in the warning colour. */
     val sensitive: Boolean,
+    /** Shared only after the full-sharing consent; never listed in the legacy partial mode. */
+    val fullModeOnly: Boolean = false,
 )
 
 @Composable
@@ -481,8 +484,10 @@ private fun sharedFolders(): List<SharedFolder> =
     listOf(
         SharedFolder(stringResource(R.string.storage_projects_dir), stringResource(R.string.guest_projects), stringResource(R.string.storage_projects_caption), false),
         SharedFolder(stringResource(R.string.storage_opencode_dir), stringResource(R.string.guest_opencode), stringResource(R.string.storage_opencode_caption), false),
-        SharedFolder(stringResource(R.string.storage_codex_dir), stringResource(R.string.guest_codex), stringResource(R.string.storage_codex_caption), true),
-        SharedFolder(stringResource(R.string.storage_claude_dir), stringResource(R.string.guest_claude), stringResource(R.string.storage_claude_caption), true),
+        // Codex shares config only (linked from ~/.codex); its sign-in and sessions stay in the app.
+        SharedFolder(stringResource(R.string.storage_codex_dir), stringResource(R.string.guest_codex_shared), stringResource(R.string.storage_codex_caption), sensitive = false, fullModeOnly = true),
+        // Claude Code is shared in full, sign-ins included.
+        SharedFolder(stringResource(R.string.storage_claude_dir), stringResource(R.string.guest_claude), stringResource(R.string.storage_claude_caption), sensitive = true, fullModeOnly = true),
     )
 
 @Composable

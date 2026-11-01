@@ -102,6 +102,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import io.cocode.app.agentlogin.CodexLoginState
 import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.RuntimeInfo
@@ -249,6 +250,8 @@ internal fun LocalRuntimeCard(
     onServersChange: (Set<ServerKind>) -> Unit = {},
     /** Makes another installed server the active one (stops the current one, starts that one). */
     onSelectServer: (ServerKind) -> Unit = {},
+    /** In-app Codex sign-in; null hides it (previews, or no sign-in support). */
+    codexLogin: CodexSignInUi? = null,
 ) {
     val phase = if (checking || state == RuntimeState.Detecting) RuntimePhase.Checking else state.phase
     val activeName = servers.active.label()
@@ -395,6 +398,62 @@ internal fun LocalRuntimeCard(
             }
         }
 
+        // Codex sign-in: only for an installed Codex in an installed runtime.
+        val codexInstalled = info != null && CODEX_AGENT_ID in agents.installed
+        var codexHidden by rememberSaveable { mutableStateOf(false) }
+        // Results (signed in / failed) only for a flow the user started here: the background status
+        // check also reports "signed in", and that must not pop a dialog.
+        var codexRequested by rememberSaveable { mutableStateOf(false) }
+        val codexState = codexLogin?.state ?: CodexLoginState.Idle
+        val codexRunning = codexState.isRunning
+        // A flow the user stepped away from comes back once it ends (success or failure).
+        LaunchedEffect(codexRunning) { if (!codexRunning) codexHidden = false }
+        // Unknown status: ask once when the card shows with Codex installed.
+        LaunchedEffect(codexLogin != null, codexInstalled) {
+            if (codexLogin != null && codexInstalled && codexLogin.signedIn == null) codexLogin.refreshStatus()
+        }
+        val codexActions =
+            codexLogin?.actions?.let { base ->
+                remember(base) {
+                    CodexSignInActions(
+                        start = {
+                            codexRequested = true
+                            codexHidden = false
+                            base.start()
+                        },
+                        signInWithApiKey = base.signInWithApiKey,
+                        cancel = base.cancel,
+                        dismiss = {
+                            codexRequested = false
+                            base.dismiss()
+                        },
+                        openUrl = base.openUrl,
+                        copyCode = base.copyCode,
+                    )
+                }
+            }
+        val codexStatus: (@Composable () -> Unit)? =
+            codexLogin?.takeIf { codexInstalled }?.let { login ->
+                {
+                    CodexSignInStatus(
+                        signedIn = login.signedIn,
+                        inProgress = codexRunning && codexHidden,
+                        enabled = !phase.isBusy && !codexRunning,
+                        onSignIn = { codexActions?.start?.invoke() },
+                        onContinue = { codexHidden = false },
+                    )
+                }
+            }
+        val showCodexDialog =
+            when {
+                codexState == CodexLoginState.Cancelled -> true
+                codexRunning -> !codexHidden
+                else -> codexRequested && codexState.isActive
+            }
+        if (codexActions != null && showCodexDialog) {
+            CodexSignInDialog(state = codexState, actions = codexActions, onHide = { codexHidden = true })
+        }
+
         if (showAgents) {
             SelectionSection(
                 title = stringResource(R.string.servers_title),
@@ -432,6 +491,7 @@ internal fun LocalRuntimeCard(
                 additions = agentDraft.additions,
                 removals = agentDraft.removals,
                 locked = agentDraft.locked,
+                codexStatus = codexStatus,
                 onToggle = { id ->
                     val (next, save) = agentDraft.toggle(id)
                     agentDraft = next
@@ -1675,6 +1735,8 @@ private fun AgentSelectionSection(
     removals: Set<String> = emptySet(),
     /** Needed by an installed or picked server: checked and can't be unchecked. */
     locked: Set<String> = emptySet(),
+    /** Sign-in status and action at the end of the Codex row; null hides it. */
+    codexStatus: (@Composable () -> Unit)? = null,
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -1727,7 +1789,7 @@ private fun AgentSelectionSection(
                     when (spec.id) {
                         in removals -> AgentChangeTag(stringResource(R.string.agents_will_remove), MaterialTheme.colorScheme.error)
                         in additions -> AgentChangeTag(stringResource(R.string.agents_will_install), MaterialTheme.colorScheme.primary)
-                        else ->
+                        else -> {
                             installed[spec.id]?.let {
                                 Text(
                                     text = it,
@@ -1736,6 +1798,11 @@ private fun AgentSelectionSection(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            if (spec.id == CODEX_AGENT_ID && codexStatus != null) {
+                                Spacer(Modifier.width(4.dp))
+                                codexStatus()
+                            }
+                        }
                     }
                 }
             }
@@ -2037,3 +2104,12 @@ private fun DetailsSection(
     }
 }
 
+
+/** What the card shows of the Codex sign-in: the flow's state, the known status and the actions. */
+internal class CodexSignInUi(
+    val state: CodexLoginState,
+    /** null = not checked yet. */
+    val signedIn: Boolean?,
+    val actions: CodexSignInActions,
+    val refreshStatus: () -> Unit,
+)

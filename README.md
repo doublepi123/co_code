@@ -37,10 +37,12 @@ CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot�
 |---|---|
 | `projects/` | `~/projects` |
 | `opencode/` | `~/.config/opencode` |
-| `codex/` | `~/.codex`（整个目录） |
+| `codex/` | `~/.codex-shared`：Codex 的 `config.toml`、`AGENTS.md`、`skills/`、`rules/`、`prompts/`（从 `~/.codex` 链接过去） |
 | `claude/` | `~/.claude`（整个目录） |
 
-**隐私警告：Codex 和 Claude 的登录凭据、会话和历史记录也会进入公共目录。其他获存储权限的 App 可以读取、复制这些凭据并访问你的账号。开启前必须明确确认此风险。** 配置文件本身也可能包含 API Key，请自行保护。
+**隐私警告：Claude 的登录凭据、会话和历史记录也会进入公共目录。其他获存储权限的 App 可以读取、复制这些凭据并访问你的账号。开启前必须明确确认此风险。** 配置文件本身也可能包含 API Key，请自行保护。
+
+Codex 只共享配置：它的登录凭据、会话、历史和锁文件始终留在 App 私有的 `~/.codex`。原因是 Android 公共存储不支持 Codex 依赖的 `flock` 文件锁，放在公共目录会导致登录无法保存（`os error 38`）。从旧版完整映射升级时，公共目录里的 Codex 会话和凭据会复制回私有目录，公共副本不会删除，也不再使用，建议手动删除。
 
 首次开启会复制已有文件，不覆盖公共目录里的同名文件、不删除私有原件。关闭后不自动复制回来：改用开启前的私有副本，可能过时；公共目录保留，重新开启可继续使用。共享存储不支持符号链接和可执行权限；需要这些能力的项目请用私有工作区 `~/projects-private`。
 

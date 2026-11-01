@@ -81,7 +81,7 @@ class SharedStorageConsentComposeTest {
 
         assertEquals("the switch alone must not turn it on", emptyList<Boolean>(), changes)
         inDialog(s(R.string.storage_on_dialog_warning)).performScrollTo().assertIsDisplayed()
-        inDialog("codex/  →  ~/.codex").assertExists()
+        inDialog("codex/  →  ~/.codex-shared").assertExists()
         inDialog("claude/  →  ~/.claude").assertExists()
         confirm().assertIsNotEnabled()
 
@@ -111,10 +111,13 @@ class SharedStorageConsentComposeTest {
         show(SharedStorageStatus.Active)
 
         compose.onNodeWithText(s(R.string.storage_public_warning)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("~/.codex").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("~/.codex-shared").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("~/.claude").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("~/.config/opencode").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(s(R.string.storage_codex_caption)).performScrollTo().assertIsDisplayed()
+        // Codex sign-ins stay in the app: the in-app ~/.codex is named in the kept-private note only.
+        compose.onNodeWithText(s(R.string.storage_kept_private)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("~/.codex").assertDoesNotExist()
     }
 
     @Test
@@ -126,7 +129,7 @@ class SharedStorageConsentComposeTest {
         // Only what is mapped: projects and OpenCode.
         compose.onNodeWithText("~/projects").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("~/.config/opencode").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("~/.codex").assertDoesNotExist()
+        compose.onNodeWithText("~/.codex-shared").assertDoesNotExist()
         compose.onNodeWithText("~/.claude").assertDoesNotExist()
         compose.onNodeWithText(s(R.string.storage_codex_caption)).assertDoesNotExist()
         // No claim that sign-ins are in the folder yet.

@@ -75,7 +75,7 @@ class SharedStorageMigrationDeviceTest {
 
         val copied =
             SharedStorageLayout.applyMigration(
-                SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY),
+                SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY),
                 shared,
                 journal,
             )
@@ -95,7 +95,7 @@ class SharedStorageMigrationDeviceTest {
         val journal = newJournalDir("existing")
 
         SharedStorageLayout.applyMigration(
-            SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY),
+            SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY),
             shared,
             journal,
         )
@@ -111,7 +111,7 @@ class SharedStorageMigrationDeviceTest {
         File(source, "auth.json").writeText("SYNTHETIC_SOURCE")
         val shared = newSharedDir("migration-raced")
         val journal = newJournalDir("raced")
-        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY)
+        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY)
 
         SharedStorageLayout.applyMigration(
             steps,
@@ -134,7 +134,7 @@ class SharedStorageMigrationDeviceTest {
         File(source, "auth.json").writeText("SYNTHETIC_COMPLETE")
         val shared = newSharedDir("migration-partial")
         val journal = newJournalDir("partial")
-        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY)
+        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY)
 
         try {
             SharedStorageLayout.applyMigration(
@@ -170,7 +170,7 @@ class SharedStorageMigrationDeviceTest {
         File(source, "auth.json").writeText("SYNTHETIC_COMPLETE")
         val shared = newSharedDir("migration-completed-pending")
         val journal = newJournalDir("completed-pending")
-        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY)
+        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY)
 
         try {
             SharedStorageLayout.applyMigration(
@@ -199,7 +199,7 @@ class SharedStorageMigrationDeviceTest {
         File(source, "auth.json").writeText("SYNTHETIC_RETRY")
         val shared = newSharedDir("migration-missing")
         val journal = newJournalDir("missing")
-        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY)
+        val steps = SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY)
 
         try {
             SharedStorageLayout.applyMigration(
@@ -232,7 +232,7 @@ class SharedStorageMigrationDeviceTest {
         var threw = false
         try {
             SharedStorageLayout.applyMigration(
-                SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CODEX_MIGRATION_POLICY),
+                SharedStorageLayout.planMigration(source, shared, SharedStorageLayout.CLAUDE_MIGRATION_POLICY),
                 shared,
                 journalAsFile,
             )

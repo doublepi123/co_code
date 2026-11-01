@@ -15,19 +15,22 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 /**
- * On-device proof for the full-directory Codex/Claude binds. It runs the real PRoot launcher against
- * the installed guest rootfs and checks that atomic saves land in the shared folder:
+ * On-device proof for the final Codex config-link + Claude full-directory layout. It runs the real
+ * PRoot launcher against the installed guest rootfs:
  *
- *  - Codex `config.toml` AND `auth.json` written as temp + rename;
- *  - Claude `settings.json` AND `.credentials.json` written as temp + rename, including the
- *    randomly named credential temporary.
+ *  - Codex keeps `~/.codex` on app-private storage, so `flock(auth.lock)` works; only config entries
+ *    are symlinks into `~/.codex-shared`;
+ *  - Codex config writes resolve the symlink, create the temp in the shared directory, rename
+ *    there, and leave the private link a link;
+ *  - Codex `skills/` writes land in shared;
+ *  - Claude full-directory `settings.json` and `.credentials.json` temp+rename stay live.
  *
- * This is the accepted full-mapping model: credentials and history are in shared storage. The test
- * uses only synthetic markers and a fresh `.storage-test-*` directory directly under the real
- * `/sdcard/CoCode`, removed afterwards; it never touches existing CoCode folders. It requires
+ * The test uses only synthetic markers and a fresh `.storage-test-*` directory directly under the
+ * real `/sdcard/CoCode`, removed afterwards; it never touches existing CoCode folders. It requires
  * all-files access and the runtime/rootfs and fails rather than skips.
  */
 @RunWith(AndroidJUnit4::class)
@@ -116,35 +119,45 @@ class SharedStorageGuestBindTest {
     }
 
     @Test
-    fun codexConfigAndAuthAtomicSavesStayLiveInShared() {
+    fun codexPrivateHomeKeepsFlockAndConfigLinksWriteToShared() {
         val home = File(sandbox, "home-codex").apply { mkdirs() }
-        val shared = newSharedDir("codex")
-        File(home, ".codex").mkdirs()
-        val config = File(shared, "config.toml").apply { writeText("model = \"OLD\"\n") }
-        val auth = File(shared, "auth.json").apply { writeText("{\"token\":\"SYNTHETIC_OLD\"}") }
+        val shared = newSharedDir("codex-config")
+        val privateCodex = File(home, ".codex").apply { mkdirs() }
+        File(home, ".codex-shared").mkdirs()
+        File(privateCodex, "auth.lock").writeText("")
+        val sharedConfig = File(shared, "config.toml").apply { writeText("model = \"OLD\"\n") }
+        File(shared, "skills").mkdirs()
+        Files.createSymbolicLink(
+            File(privateCodex, "config.toml").toPath(),
+            File("/root/.codex-shared/config.toml").toPath(),
+        )
+        Files.createSymbolicLink(
+            File(privateCodex, "skills").toPath(),
+            File("/root/.codex-shared/skills").toPath(),
+        )
 
         val output =
             runGuest(
                 home = home,
-                extraBinds = listOf("${shared.absolutePath}:/root/.codex"),
+                extraBinds = listOf("${shared.absolutePath}:/root/.codex-shared"),
                 script =
                     """
-                    printf 'model = "SYNTHETIC_CODEX_CONFIG"\n' > /root/.codex/config.toml.tmp
-                    mv /root/.codex/config.toml.tmp /root/.codex/config.toml
-                    printf '{"token":"SYNTHETIC_CODEX_AUTH"}' > /root/.codex/auth.json.tmp
-                    mv /root/.codex/auth.json.tmp /root/.codex/auth.json
-                    mkdir -p /root/.codex/sessions/2026
-                    printf 'SYNTHETIC_SESSION' > /root/.codex/sessions/2026/01.jsonl
-                    cat /root/.codex/config.toml
+                    python3 -c 'import fcntl,os;fd=os.open("/root/.codex/auth.lock",os.O_RDWR|os.O_CREAT);fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(fd,fcntl.LOCK_UN);os.close(fd)'
+                    TARGET=$(readlink /root/.codex/config.toml)
+                    printf 'model = "SYNTHETIC_SHARED_CONFIG"\n' > "${'$'}{TARGET}.tmp"
+                    mv "${'$'}{TARGET}.tmp" "${'$'}{TARGET}"
+                    mkdir -p /root/.codex/skills/x
+                    printf 'skill' > /root/.codex/skills/x/SKILL.md
+                    printf '%s' "${'$'}TARGET"
                     """.trimIndent(),
             )
 
-        assertTrue("guest did not see the new config: $output", output.contains("SYNTHETIC_CODEX_CONFIG"))
-        assertEquals("model = \"SYNTHETIC_CODEX_CONFIG\"\n", config.readText())
-        assertEquals("{\"token\":\"SYNTHETIC_CODEX_AUTH\"}", auth.readText())
-        assertEquals("SYNTHETIC_SESSION", File(shared, "sessions/2026/01.jsonl").readText())
-        assertFalse("the config temporary must be consumed by rename", File(shared, "config.toml.tmp").exists())
-        assertFalse("the auth temporary must be consumed by rename", File(shared, "auth.json.tmp").exists())
+        assertTrue("guest did not resolve the shared config link: $output", output.contains("/root/.codex-shared/config.toml"))
+        assertEquals("model = \"SYNTHETIC_SHARED_CONFIG\"\n", sharedConfig.readText())
+        assertTrue("the private config entry must remain a link", Files.isSymbolicLink(File(privateCodex, "config.toml").toPath()))
+        assertEquals("skill", File(shared, "skills/x/SKILL.md").readText())
+        assertTrue("Codex auth.lock must stay private", File(privateCodex, "auth.lock").isFile)
+        assertFalse("Codex auth must never be shared", File(shared, "auth.json").exists())
     }
 
     @Test

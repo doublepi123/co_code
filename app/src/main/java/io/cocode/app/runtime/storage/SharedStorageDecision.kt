@@ -23,9 +23,11 @@ object SharedStorageDecision {
     /**
      * The binds a server start uses for [status]. Active requires the shared folders to exist.
      *
-     * Codex and Claude are whole-directory binds only when [fullDirectoryConsent] is true. An
-     * existing enabled user without the current consent version keeps the legacy projects/OpenCode
-     * mapping; the UI asks for consent before the credential-bearing folders are shared.
+     * Codex config sharing and Claude full-directory sharing are enabled only when
+     * [fullDirectoryConsent] is true. Codex still uses the private `/root/.codex`; only
+     * `/root/.codex-shared` is bound and its config entries are symlinked. Claude is a whole-dir
+     * bind. An existing enabled user without the current consent version keeps the legacy
+     * projects/OpenCode mapping.
      *
      * The OpenCode private exception folder is the same in both modes, so toggling the switch never
      * changes which service.json/node_modules the server reads and writes.

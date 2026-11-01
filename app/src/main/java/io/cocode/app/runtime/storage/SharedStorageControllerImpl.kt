@@ -92,13 +92,45 @@ class SharedStorageControllerImpl(
             }
         }
         // Both modes need the OpenCode private placeholders because the exception binds are nested
-        // over the config dir in both. Codex and Claude are whole-directory binds with no exceptions.
+        // over the config dir in both. Codex links are prepared below; Claude is a whole-dir bind.
         runCatching {
             SharedStorageDecision.prepareOpencodePrivate(
                 privateExceptionsDir = legacyOpencodeDir(),
                 legacyConfigDir = File(paths.home, ".config/opencode"),
             )
         }.onFailure { android.util.Log.w("CoCode", "Could not prepare private config", it) }
+        if (status == SharedStorageStatus.Active && fullDirectoryConsent) {
+            val linked =
+                runCatching {
+                    SharedStorageLayout.prepareCodexLinkLayout(
+                        privateHome = paths.home,
+                        hostRoot = hostRoot,
+                        active = true,
+                        journalDir = codexLinkJournalDir(),
+                    )
+                }
+            if (linked.isFailure) {
+                android.util.Log.w("CoCode", "Could not prepare Codex shared config links; using private", linked.exceptionOrNull())
+                runCatching {
+                    SharedStorageLayout.prepareCodexLinkLayout(
+                        privateHome = paths.home,
+                        hostRoot = hostRoot,
+                        active = false,
+                        journalDir = codexLinkJournalDir(),
+                    )
+                }
+                status = SharedStorageStatus.NeedsPermission
+            }
+        } else {
+            runCatching {
+                SharedStorageLayout.prepareCodexLinkLayout(
+                    privateHome = paths.home,
+                    hostRoot = hostRoot,
+                    active = false,
+                    journalDir = codexLinkJournalDir(),
+                )
+            }.onFailure { android.util.Log.w("CoCode", "Could not restore Codex private config links", it) }
+        }
         val binds = bindsFor(status, fullDirectoryConsent)
         // Git on shared storage needs its config before any repo is touched. Applied in every mode:
         // harmless when shared storage is off, since the gitdir include matches only ~/projects.
@@ -125,6 +157,8 @@ class SharedStorageControllerImpl(
         )
 
     private fun legacyOpencodeDir(): File = File(paths.root, "home-private/opencode")
+
+    private fun codexLinkJournalDir(): File = File(paths.root, "home-private/codex/.link-journal")
 
     /**
      * Creates the directories PRoot binds onto inside the home. Only the mounts the current bind set
@@ -198,16 +232,11 @@ class SharedStorageControllerImpl(
             journalDir = File(legacyOpencodeDir(), ".migration-journal"),
         )
         if (fullDirectoryConsent) {
-            migrateOnce(
+            prepareCodexShared(
                 privateDir = File(paths.home, ".codex"),
                 sharedDir = SharedStorageLayout.codexDir(hostRoot),
                 marker = File(paths.root, "home-private/codex/.migrated-to-shared"),
-                policy = SharedStorageLayout.CODEX_MIGRATION_POLICY,
-                ensure = SharedStorageLayout::ensureCodexMinimal,
                 journalDir = File(paths.root, "home-private/codex/.migration-journal"),
-                // Version 2 is the full-directory policy (auth/sessions/history included). A marker
-                // from the earlier config-only policy is upgraded once; existing shared files are not replaced.
-                version = "2",
             )
             migrateOnce(
                 privateDir = File(paths.home, ".claude"),
@@ -223,6 +252,40 @@ class SharedStorageControllerImpl(
         File(hostRoot, SharedStorageLayout.README).writeText(
             SharedStorageLayout.readme(hostRoot, fullDirectoryShared = fullDirectoryConsent),
         )
+    }
+
+    /**
+     * Codex shares only config entries. The old full-directory layout is upgraded once: public
+     * auth/sessions/history/state files that are missing privately are copied back to the private
+     * `~/.codex`, never overwriting and never copying `.lock` files. Public copies are left in place
+     * but are no longer live.
+     */
+    private fun prepareCodexShared(
+        privateDir: File,
+        sharedDir: File,
+        marker: File,
+        journalDir: File,
+    ) {
+        val configJournal = File(journalDir, "config")
+        val upgradeJournal = File(journalDir, "upgrade")
+        SharedStorageLayout.recoverPending(configJournal, sharedDir)
+        SharedStorageLayout.recoverPending(upgradeJournal, privateDir)
+        val upToDate = marker.isFile && runCatching { marker.readText().trim() }.getOrDefault("") == "3"
+        if (!upToDate) {
+            SharedStorageLayout.applyMigration(
+                SharedStorageLayout.planMigration(privateDir, sharedDir, SharedStorageLayout.CODEX_MIGRATION_POLICY),
+                sharedDir,
+                configJournal,
+            )
+            SharedStorageLayout.applyMigration(
+                SharedStorageLayout.planMigration(sharedDir, privateDir, SharedStorageLayout.CODEX_UPGRADE_POLICY),
+                privateDir,
+                upgradeJournal,
+            )
+            marker.parentFile?.mkdirs()
+            marker.writeText("3\n")
+        }
+        SharedStorageLayout.ensureCodexMinimal(sharedDir)
     }
 
     /**
