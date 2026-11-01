@@ -21,7 +21,7 @@ class RuntimeEnvironmentInstallerTest {
     @Test
     fun `apk installs the runtime packages and no native build toolchain`() {
         val packages = APK_PACKAGES.split(" ")
-        listOf("nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client", "ca-certificates", "libstdc++", "python3").forEach {
+        listOf("nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client", "ca-certificates", "libstdc++", "python3", "gcompat").forEach {
             assertTrue("$it missing from apk packages", it in packages)
         }
         listOf("make", "g++", "linux-headers").forEach {

@@ -28,4 +28,5 @@ Packaged static inputs read at runtime by the app, not by the build:
 - `app/src/main/java/io/cocode/app/runtime/process/ProotCommands.kt`: sets `NODE_OPTIONS`. Tests `ProotCommandsTest.kt` and `RuntimeEnvironmentInstallerTest.kt` assert both the path and the env value.
 - `app/src/main/java/io/cocode/app/di/AppModule.kt`: loads the shim text and the manifest via Koin wiring.
 - Versions here must stay consistent with the `runtimeVersion` and release notes. Changing `alpineSha256` without changing `alpineUrl` breaks installs. Verify both together.
+- Runtime `2026.11.01.5` pins Cox `0.1.9`; the installer supplies `gcompat` for Cursor SDK's glibc native bindings and repairs older staged environments before activation.
 - `.slim/codemap.json` tracks content hashes of these files.

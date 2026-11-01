@@ -665,6 +665,7 @@ class RuntimeEnvironmentInstaller(
             require(InstalledComponents.serverAssetsPresent(rootfs, ServerKind.T3)) {
                 "Cox install is incomplete"
             }
+            verifyCursorSdkRuntime(runner, rootfs)
             verifyPty(runner, rootfs)
         }
         if (ServerKind.OpenChamber in kinds) {
@@ -1011,7 +1012,7 @@ class RuntimeEnvironmentInstaller(
         val APK_PACKAGES =
             listOf(
                 "nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client",
-                "ca-certificates", "libstdc++", "python3",
+                "ca-certificates", "libstdc++", "python3", "gcompat",
             ).joinToString(" ")
 
         /** Extra packages needed to rebuild OpenChamber's node-pty in the guest. */
@@ -1023,6 +1024,35 @@ class RuntimeEnvironmentInstaller(
             } else {
                 (APK_PACKAGES.split(" ") + NATIVE_BUILD_PACKAGES).distinct().joinToString(" ")
             }
+
+        internal fun verifyCursorSdkRuntime(
+            runner: AgentCommandRunner,
+            rootfs: File,
+        ) {
+            if (!File(rootfs, "opt/t3/node_modules/@cursor/sdk").isDirectory) return
+            runner.mustSucceed(
+                "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
+                    "apk info -e gcompat >/dev/null 2>&1 || " +
+                    "apk --cache-dir /var/cache/apk add gcompat",
+                MessageKey.PackagesFailed,
+                "Unable to install the compatibility libraries Cursor SDK needs.",
+                timeoutMinutes = APK_TIMEOUT_MINUTES,
+            )
+            val smoke = "$T3_GUEST/cursor-sdk-smoke.cjs"
+            val script =
+                if (File(rootfs, smoke.removePrefix("/")).isFile) {
+                    "node $smoke"
+                } else {
+                    "node -e \"const base = '$T3_GUEST/node_modules/@cursor/sdk-linux-' + process.arch + '/vendor/'; " +
+                        "require(base + 'tree-sitter'); require(base + 'tree-sitter-bash');\""
+                }
+            runner.mustSucceed(
+                "set -e; $script",
+                MessageKey.ServerInstallFailed,
+                "Cox's Cursor SDK does not work in the guest.",
+                timeoutMinutes = VERIFY_TIMEOUT_MINUTES,
+            )
+        }
 
         /** How many trailing output lines travel with a failure, for the technical detail. */
         const val MAX_DETAIL_LINES = 40
