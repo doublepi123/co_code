@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "2026.11.01.1",
+  "runtimeVersion": "2026.11.01.2",
   "alpineVersion": "3.24.1",
   "port": 3773,
   "t3": {
     "repository": "doublepi123/cox",
-    "version": "0.1.1",
+    "version": "0.1.3",
     "assetPattern": "cox-{version}-android-linux-{arch}-musl.tar.gz",
     "architectures": {
       "arm64-v8a": "arm64",
