@@ -44,12 +44,20 @@ class GithubT3ReleaseSource(
     private val repository: String,
     private val apiBaseUrl: String = DEFAULT_API,
     private val downloadBaseUrl: String = DEFAULT_DOWNLOAD,
+    /**
+     * This device's bundle name for a version. When set, [latest] only returns a release whose
+     * `SHA256SUMS` already lists that bundle: a new tag becomes `latest` on GitHub minutes before its
+     * Android bundles are built and attached, and installing it then would fail closed.
+     */
+    private val bundleAssetName: ((version: String) -> String)? = null,
 ) : T3ReleaseSource {
     override suspend fun latest(): T3Release? =
         withContext(Dispatchers.IO) {
             try {
                 val tag = fetchTag() ?: return@withContext null
-                releaseFor(T3Spec.TAG.matchEntire(tag)?.groupValues?.get(1))
+                val release = releaseFor(T3Spec.TAG.matchEntire(tag)?.groupValues?.get(1)) ?: return@withContext null
+                val asset = bundleAssetName?.invoke(release.version) ?: return@withContext release
+                release.takeIf { asset in parseSums(fetch(release.sha256SumsUrl)) }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {

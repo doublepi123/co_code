@@ -111,4 +111,43 @@ class T3ReleaseSourceTest {
         assertNull(GithubT3ReleaseSource.parseVersionOrNull("""{"tag_name":"nightly"}"""))
         assertNull(GithubT3ReleaseSource.parseVersionOrNull("not json"))
     }
+
+    private fun bundleAwareSource() =
+        GithubT3ReleaseSource(
+            client = client,
+            repository = "doublepi123/cox",
+            apiBaseUrl = server.url("/").toString().trimEnd('/'),
+            downloadBaseUrl = server.url("/download").toString().trimEnd('/'),
+            bundleAssetName = { version -> "cox-$version-android-linux-x64-musl.tar.gz" },
+        )
+
+    @Test
+    fun `a latest release whose bundle is not published yet is skipped`() =
+        runBlocking {
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.6"}"""))
+            // The tag exists but the Android bundle workflow has not attached its asset yet.
+            server.enqueue(MockResponse().setBody("${"a".repeat(64)}  cox-v0.1.6.tar.gz\n"))
+
+            assertNull(bundleAwareSource().latest())
+            server.takeRequest()
+            assertEquals("/download/doublepi123/cox/releases/download/v0.1.6/SHA256SUMS", server.takeRequest().path)
+        }
+
+    @Test
+    fun `a latest release with this device's bundle is returned`() =
+        runBlocking {
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.6"}"""))
+            server.enqueue(MockResponse().setBody("${"b".repeat(64)}  cox-0.1.6-android-linux-x64-musl.tar.gz\n"))
+
+            assertEquals("0.1.6", bundleAwareSource().latest()?.version)
+        }
+
+    @Test
+    fun `a missing checksum list for latest falls back to the pinned version`() =
+        runBlocking {
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.6"}"""))
+            server.enqueue(MockResponse().setResponseCode(404))
+
+            assertNull(bundleAwareSource().latest())
+        }
 }

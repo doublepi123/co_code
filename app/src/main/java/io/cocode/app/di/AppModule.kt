@@ -192,6 +192,13 @@ val appModule =
                     context.assets.open(RuntimeManifestReader.ASSET_NAME).bufferedReader().use { it.readText() }
                 }.read()
             val dnsProvider = AndroidSystemDnsProvider(context)
+            // Only a release whose Android bundle for this ABI is already published counts as latest.
+            val coxReleases =
+                GithubT3ReleaseSource(
+                    client = get<OkHttpClient>(),
+                    repository = manifest.t3.repository,
+                    bundleAssetName = { version -> manifest.t3.assetName(version, manifest.t3Arch(abi)) },
+                )
             val installer =
                 RuntimeInstallerImpl(
                     paths = paths,
@@ -199,7 +206,7 @@ val appModule =
                     manifest = manifest,
                     suite = suite,
                     downloader = VerifiedRuntimeDownloader(get<OkHttpClient>()),
-                    releaseSource = GithubT3ReleaseSource(get<OkHttpClient>(), manifest.t3.repository),
+                    releaseSource = coxReleases,
                     shimAsset = {
                         context.assets.open("android-shim.cjs").bufferedReader().use { it.readText() }
                     },
@@ -233,7 +240,7 @@ val appModule =
                 versionSource =
                     DefaultPackageVersionSource(
                         npm = NpmPackageVersionSource(get<OkHttpClient>()),
-                        t3 = GithubT3ReleaseSource(get<OkHttpClient>(), manifest.t3.repository),
+                        t3 = coxReleases,
                         agents = manifest.agents,
                         fallbackT3Version = manifest.t3.version,
                         openChamberPackage = manifest.openchamber.npmPackage,
