@@ -37,7 +37,7 @@ Network and persistence adapters for remote and local Cox / T3 Code servers, use
 
 - File `cocode_remote_servers`, key `servers`. Master key AES256_GCM; keys AES256_SIV; values AES256_GCM.
 - Persisted format: JSON list of `StoredServer(id, displayName, baseUrl, uiPassword?, allowInsecureHttp=false)`, `ignoreUnknownKeys = true`.
-- `servers: StateFlow<List<ServerTarget.Remote>>` is the source of truth in memory. `upsert` and `remove` are `@Synchronized`, write-through, then update the flow. A decode failure yields an empty list.
+- `servers: StateFlow<List<ServerTarget.Remote>>` is the source of truth in memory. `upsert`, `remove` and `move` are `@Synchronized`, write-through (one write each), then update the flow. The list order is the user's: `upsert` appends a new id and replaces an existing one in place; `move(id, toIndex)` clamps the index, ignores unknown ids and no-op moves (no write). Both use the pure helpers in `runtime/RemoteServerOrder.kt`. A decode failure yields an empty list.
 - Created in DI via `EncryptedRemoteServerStore.create(context)`.
 
 ## Flow
@@ -52,7 +52,7 @@ WebView login (`WebSessionAuthenticator.prepare(target, cookies)`):
 7. Remote transport check (see above).
 8. `POST /api/auth/browser-session` with `{"credential":...}` (no redirects) → store cookies → `Ready`, or `NeedsLogin` (4xx/3xx), or `Unreachable`.
 
-Remote server CRUD: UI calls `upsert`/`remove` → JSON re-encoded → EncryptedSharedPreferences → `servers` flow emits.
+Remote server CRUD: UI calls `upsert`/`remove`/`move` → JSON re-encoded → EncryptedSharedPreferences → `servers` flow emits.
 
 ## Integration
 

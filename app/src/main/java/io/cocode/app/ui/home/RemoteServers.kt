@@ -19,8 +19,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
@@ -43,11 +46,15 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +62,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -78,6 +92,11 @@ import io.cocode.app.ui.theme.ChamberTextStyles
 import io.cocode.app.ui.theme.ChamberTheme
 import java.util.UUID
 
+/**
+ * The saved servers, in the user's order. With two or more, a row can be moved: touch and hold,
+ * then drag (the others step aside, release settles it), or Move up / Move down in its menu and
+ * as accessibility actions. [onMove] is called once per move, with the server's new index.
+ */
 @Composable
 internal fun RemoteServersSection(
     servers: List<ServerTarget.Remote>,
@@ -86,20 +105,46 @@ internal fun RemoteServersSection(
     onEdit: (ServerTarget.Remote) -> Unit,
     onRemove: (ServerTarget.Remote) -> Unit,
     modifier: Modifier = Modifier,
+    onMove: (server: ServerTarget.Remote, toIndex: Int) -> Unit = { _, _ -> },
 ) {
     if (servers.isEmpty()) {
         EmptyServersCard(onAdd = onAdd, modifier = modifier)
         return
     }
+    val order = rememberServerOrderState()
+    val currentServers by rememberUpdatedState(servers)
+    val currentOnMove by rememberUpdatedState(onMove)
+    val savedIds = servers.map { it.id }
+    LaunchedEffect(savedIds) { order.onSavedOrder(savedIds) }
+    val shown = order.shownOrder(servers) { it.id }
+    val shownIds = shown.map { it.id }
+    SideEffect {
+        order.order = shownIds
+        order.onCommit = { id, to -> currentServers.firstOrNull { it.id == id }?.let { currentOnMove(it, to) } }
+    }
+    val reorderable = shown.size >= 2
+    // Dividers would stay put while rows slide past them, so they fade out during a move.
+    val dividerAlpha by animateFloatAsState(if (order.raisedId == null) 1f else 0f, label = "dividers")
+
     ChamberCard(modifier = modifier) {
-        servers.forEachIndexed { index, server ->
-            if (index > 0) HorizontalDivider(color = ChamberTheme.colors.cardBorder, modifier = Modifier.padding(start = 68.dp))
-            RemoteServerRow(
-                server = server,
-                onOpen = { onOpen(server) },
-                onEdit = { onEdit(server) },
-                onRemove = { onRemove(server) },
-            )
+        shown.forEachIndexed { index, server ->
+            key(server.id) {
+                if (index > 0) {
+                    HorizontalDivider(
+                        color = ChamberTheme.colors.cardBorder,
+                        modifier = Modifier.padding(start = 68.dp).graphicsLayer { alpha = dividerAlpha },
+                    )
+                }
+                RemoteServerRow(
+                    server = server,
+                    onOpen = { onOpen(server) },
+                    onEdit = { onEdit(server) },
+                    onRemove = { onRemove(server) },
+                    onMoveUp = if (reorderable && index > 0) ({ order.move(server.id, index - 1) }) else null,
+                    onMoveDown = if (reorderable && index < shown.lastIndex) ({ order.move(server.id, index + 1) }) else null,
+                    reorder = if (reorderable) order else null,
+                )
+            }
         }
     }
 }
@@ -144,12 +189,53 @@ private fun RemoteServerRow(
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onRemove: () -> Unit,
+    /** Null at the top (or with a single server): no Move up. */
+    onMoveUp: (() -> Unit)? = null,
+    /** Null at the bottom (or with a single server): no Move down. */
+    onMoveDown: (() -> Unit)? = null,
+    /** Null when the list can't be reordered (one server). */
+    reorder: ServerOrderState? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val dragging = reorder?.draggingId == server.id
+    val raised = reorder?.raisedId == server.id
+    val lift by animateFloatAsState(if (dragging) 1f else 0f, label = "lift")
+    val moveUpLabel = stringResource(R.string.move_up)
+    val moveDownLabel = stringResource(R.string.move_down)
+    val rowShape = MaterialTheme.shapes.medium
     Surface(
         onClick = onOpen,
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth(),
+        // Opaque while it moves, so it passes over the other rows; a lighter tone while held.
+        color =
+            when {
+                dragging -> MaterialTheme.colorScheme.surfaceContainerHigh
+                raised -> ChamberTheme.colors.card
+                else -> Color.Transparent
+            },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .zIndex(if (raised) 1f else 0f)
+                .then(
+                    if (reorder == null) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .onPlaced { reorder.place(server.id, it.positionInParent().y, it.size.height) }
+                            .graphicsLayer {
+                                translationY = reorder.offsetOf(server.id)
+                                shadowElevation = lift * 8.dp.toPx()
+                                shape = rowShape
+                                clip = lift > 0f
+                            }.reorderOnHold(server.id, reorder)
+                    },
+                ).semantics {
+                    customActions =
+                        listOfNotNull(
+                            onMoveUp?.let { move -> CustomAccessibilityAction(moveUpLabel) { move(); true } },
+                            onMoveDown?.let { move -> CustomAccessibilityAction(moveDownLabel) { move(); true } },
+                        )
+                },
     ) {
         Row(
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
@@ -188,6 +274,15 @@ private fun RemoteServerRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (reorder != null) {
+                // A cue only: the whole row is held to move it, and screen readers get actions.
+                Icon(
+                    Icons.Rounded.DragIndicator,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f + 0.55f * lift),
+                    modifier = Modifier.padding(start = 8.dp).size(20.dp),
+                )
+            }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(
@@ -209,6 +304,26 @@ private fun RemoteServerRow(
                             onEdit()
                         },
                     )
+                    onMoveUp?.let { move ->
+                        DropdownMenuItem(
+                            text = { Text(moveUpLabel) },
+                            leadingIcon = { Icon(Icons.Rounded.ArrowUpward, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                move()
+                            },
+                        )
+                    }
+                    onMoveDown?.let { move ->
+                        DropdownMenuItem(
+                            text = { Text(moveDownLabel) },
+                            leadingIcon = { Icon(Icons.Rounded.ArrowDownward, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                move()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {

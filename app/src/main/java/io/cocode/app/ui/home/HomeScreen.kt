@@ -83,6 +83,8 @@ internal class HomeActions(
     val onOpenRemote: (ServerTarget.Remote) -> Unit,
     val onSaveRemote: (ServerTarget.Remote) -> Unit,
     val onRemoveRemote: (ServerTarget.Remote) -> Unit,
+    /** Moves a saved server to a new place in the list (once per move, after it has settled). */
+    val onMoveRemote: (server: ServerTarget.Remote, toIndex: Int) -> Unit = { _, _ -> },
     val onSharedStorageChange: (Boolean) -> Unit = {},
     val onAllowStorageAccess: () -> Unit = {},
     val onCheckStorageAgain: () -> Unit = {},
@@ -249,6 +251,7 @@ internal fun HomeScreen(
                         onAdd = { editingId = NEW_SERVER },
                         onEdit = { editingId = it.id },
                         onRemove = { removingId = it.id },
+                        onMove = actions.onMoveRemote,
                         modifier = Modifier.revealOnEnter(3, animate),
                     )
 

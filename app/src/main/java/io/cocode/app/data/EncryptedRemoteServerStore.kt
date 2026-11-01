@@ -6,6 +6,8 @@ import androidx.security.crypto.MasterKey
 import io.cocode.app.runtime.RemoteServerStore
 import io.cocode.app.runtime.ServerTarget
 import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.withServerMoved
+import io.cocode.app.runtime.withServerUpserted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,15 +26,25 @@ class EncryptedRemoteServerStore(
     private val mutable = MutableStateFlow(read())
     override val servers: StateFlow<List<ServerTarget.Remote>> = mutable.asStateFlow()
 
+    /** A new server goes to the end; an edited one keeps its place in the user's order. */
     @Synchronized
     override fun upsert(server: ServerTarget.Remote) {
-        val next = mutable.value.filterNot { it.id == server.id } + server
-        write(next)
+        write(mutable.value.withServerUpserted(server))
     }
 
     @Synchronized
     override fun remove(id: String) {
         write(mutable.value.filterNot { it.id == id })
+    }
+
+    @Synchronized
+    override fun move(
+        id: String,
+        toIndex: Int,
+    ) {
+        val current = mutable.value
+        val next = current.withServerMoved(id, toIndex)
+        if (next !== current) write(next)
     }
 
     private fun read(): List<ServerTarget.Remote> {

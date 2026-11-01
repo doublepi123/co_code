@@ -222,6 +222,8 @@
     <string name="edit">编辑</string>
     <string name="remove">移除</string>
     <string name="more_options">更多选项</string>
+    <string name="move_up">上移</string>
+    <string name="move_down">下移</string>
     <string name="password_saved">密码已保存</string>
     <string name="remove_server_title">移除 %1$s？</string>
     <string name="remove_server_body">已保存的地址、密码和此服务器的网站数据将从手机中删除。服务器本身不会改变。</string>

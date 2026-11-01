@@ -66,7 +66,7 @@ Shared-storage permission:
 
 - Entry point: `CoCodeApp(runtime, remotes, auth, storage)`, called by `MainActivity` (outside these folders). The launcher-tap listener needs `launchMode="singleTop"`.
 - `runtime.LocalRuntimeController`: `state`, `info` and `logTail` flows, plus `install`, `start`, `stop`, `restart`, `repair`, `uninstall`. Consumes `RuntimeState` (`Running` carries `url`, `port`, `sinceEpochMs`), `FailurePhase`, `RuntimeInfo`, `InstallStep`, and `ServerTarget.Local(url)`.
-- `runtime.RemoteServerStore`: `servers` flow, `upsert`, `remove`. The web session key uses the remote id, baseUrl and a hash of the UI password.
+- `runtime.RemoteServerStore`: `servers` flow, `upsert`, `remove`, `move`. The web session key uses the remote id, baseUrl and a hash of the UI password.
 - `runtime.WebSessionAuthenticator.prepare(target, cookies)` → `WebSessionResult` (`Ready`, `NeedsLogin`, `Unreachable`). Used by `WebScreen` only after the target's profile is bound (`WebSessionProfiles` via `ui/web/WebDependencies.kt`). The root passes `WebViewPool(downloads)` the app's `HttpDownloadStarter`.
 - `runtime.SharedStorageController`: `state` flow, `setEnabled`, `refreshPermission`. Drives `SharedStorageState` and `SharedStorageStatus`.
 - `i18n.UserMessages.stepLabel(InstallStep)` maps install steps to `R.string`.

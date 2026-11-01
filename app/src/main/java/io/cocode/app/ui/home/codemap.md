@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The control-room home screen (`Routes.HOME`). Shows the on-device Cox runtime (setup, install progress, start and stop, failures, Cox / agent updates, agent selection, details, log), the shared-storage folder card, and saved remote servers with add, edit and remove.
+The control-room home screen (`Routes.HOME`). Shows the on-device Cox runtime (setup, install progress, start and stop, failures, Cox / agent updates, agent selection, details, log), the shared-storage folder card, and saved remote servers with add, edit, remove and reorder.
 
 Files:
 - `HomeScreen.kt`: `HomeScreen`, `HomeActions` (lambdas passed in from the root), header, one-shot `HomeEntrance`.
@@ -10,6 +10,7 @@ Files:
 - `LocalRuntimeCard.kt`: `LocalRuntimeCard`, `RuntimePhase` (coarse phase of `RuntimeState`), per-phase bodies, `AgentSelectionSection` (checkboxes for the manifest agents, installed versions, Apply after install), the update notice (`UpdateOfferRow`, `UpdateProblemRow`, `RawOutput`, `VersionChanges`), footer toggles, `AutoOpenRow`, `ScreenAwakeRow`, `UpdateCheckRow`.
 - `SharedStorageCard.kt`: `SharedStorageCard` (switch, status, folder tree, restart notice, permission and unavailable bodies).
 - `RemoteServers.kt`: `RemoteServersSection`, server rows, `RemoveServerDialog`, `ServerEditorDialog`.
+- `ServerOrder.kt`: reordering the saved servers. `ServerOrderGeometry` (pure, unit tested: target slot, clamp, step-aside, settle offset), `ServerOrderState` (drag/menu move animation, one commit per move, pending order until the saved list catches up), `Modifier.reorderOnHold` (touch-and-hold then drag).
 
 ## Design
 
@@ -25,6 +26,7 @@ Files:
 - `NotInstalledBody` shows free space from `filesDir.usableSpace` and warns below 3 GiB (`LOW_SPACE_BYTES`).
 - `SharedStorageCard` has three states: `Off`, `NeedsPermission`, `Active`. Claude Code is shared in full; Codex shares config only via ~/.codex-shared (its sign-in, locks and sessions stay in the app's ~/.codex). So: turning it on always opens `EnableSharedStorageDialog` (folder map `CoCode/{projects,opencode,codex,claude}` → `~/projects`, `~/.config/opencode`, `~/.codex-shared`, `~/.claude`, an error-tinted warning, and an acknowledgement checkbox that gates Turn on; Cancel sends nothing). Every state shows `ExposureWarning`. The Active tree marks only claude/ as holding credentials (codex/ is config only) and lists what stays in the app (`~/projects-private`, `~/.claude.json`, `~/.local/share/opencode`, OpenCode service password, node_modules). Turning it off while Active asks first and says the in-app copies may be stale and nothing is copied back. `SharedStorageState.needsConsent` (legacy v0.1.0 users, projects + OpenCode only): header reads "On · projects and OpenCode only", a `ConsentNeededBanner` explains the partial mode with a "Review and share" action that opens the same consent dialog; only an accepted dialog calls `onEnabledChange(true)`. In that mode codex/ and claude/ are never listed as mapped and the exposure warning is not shown as current; the switch can still turn it off (with a partial-mode off text). `codeSpans()` sets paths in mono.
 - Remote editor: address and name use `rememberSaveable`. The password uses plain `remember`, so it is never saved in instance state. The address is normalized as the user types (`checkServerAddress`). Plain HTTP to a non-loopback host needs an explicit opt-in checkbox.
+- Server order: the saved list order is the user's. With ≥2 servers each row shows a faint `DragIndicator` cue; touch-and-hold anywhere on the row (long-press timeout, no movement past touch slop and nothing consumed by the page scroll) lifts it with a LongPress haptic, a shadow and a lighter tone; it follows the finger (clamped to the list), the others slide aside (spring) with a tick haptic each time the target slot changes, and on release it settles into the slot. Only then `onMove(server, toIndex)` is called, once; `shownOrder` keeps the new order on screen until `servers` comes back with it (1 s fallback). The hold watches the Final pass, so ordinary taps (open) and scrolls never start a drag, and after lifting every move and the release are consumed, so letting go never opens the server. Dividers fade while a row moves. The ⋮ menu has Move up / Move down (not shown at the ends or with one server) and the row carries the same two as accessibility custom actions; they animate like a drag and commit once.
 - Dialog state: `editingId` and `removingId` are `rememberSaveable` ids. `NEW_SERVER` is a sentinel for the add flow. A dialog closes itself if its server disappears.
 - Layout: a `verticalScroll` column with safe-drawing horizontal insets, `widthIn(max = 640.dp)`, and top and bottom spacers. Content scrolls under the transparent system bars.
 - Entrance: `revealOnEnter(index)` staggers items by 70 ms. `HomeEntrance` makes it run once per process. Inspection mode skips it.
@@ -53,8 +55,8 @@ Update:
 Remote servers:
 1. Empty list: `EmptyServersCard`. Otherwise, a `SectionHeader` with an Add button.
 2. Row tap → `onOpenRemote` → `openIfResumed(Routes.web(server.id))`.
-3. Row menu: Edit → `ServerEditorDialog`. Remove → `RemoveServerDialog` → `onRemoveRemote`. The root freezes that server, drains started cookie writes, discards the pooled WebView and clears its named profile's cookies/WebStorage. Only success commits `remotes.remove` and forgets the page; failure keeps the server and shows a retry message.
-4. Save: `checkServerAddress` must return `Valid`. An insecure remote with a password needs the opt-in. Then `onSaveRemote(ServerTarget.Remote(...))`. New servers get a UUID, and the id is kept on edit.
+3. Row menu: Edit → `ServerEditorDialog`. Move up / Move down (or hold-and-drag, or accessibility actions) → `onMoveRemote` → `remotes.move(id, toIndex)` (ignored while the server is being removed). Remove → `RemoveServerDialog` → `onRemoveRemote`. The root freezes that server, drains started cookie writes, discards the pooled WebView and clears its named profile's cookies/WebStorage. Only success commits `remotes.remove` and forgets the page; failure keeps the server and shows a retry message.
+4. Save: `checkServerAddress` must return `Valid`. An insecure remote with a password needs the opt-in. Then `onSaveRemote(ServerTarget.Remote(...))`. New servers get a UUID and go to the end; the id and the place in the list are kept on edit.
 
 Auto-open setting: `AutoOpenRow` appears in Details when `autoOpenLocal != null` and `info != null`. It calls `onAutoOpenChange`, which updates `UiPrefs`.
 

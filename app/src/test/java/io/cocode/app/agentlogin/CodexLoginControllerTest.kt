@@ -216,6 +216,35 @@ class CodexLoginControllerTest {
     }
 
     @Test
+    fun `a status check killed mid-run is retried and never reported as signed out`() {
+        var calls = 0
+        val runner =
+            FakeRunner {
+                calls++
+                // First run: killed by the server's start-up cleanup (no output, signal exit).
+                if (calls == 1) FakeHandle(emptyList(), exit = 137) else FakeHandle(listOf("Logged in using ChatGPT"), exit = 0)
+            }
+        val controller = controller(runner, unconfined)
+
+        controller.refreshStatus()
+
+        assertEquals(2, calls)
+        assertEquals(true, controller.signedIn.value)
+    }
+
+    @Test
+    fun `a status check that keeps failing leaves the sign-in unknown`() {
+        val runner = FakeRunner { FakeHandle(listOf("error: something broke"), exit = 1) }
+        val controller = controller(runner, unconfined)
+
+        controller.refreshStatus()
+
+        assertEquals(null, controller.signedIn.value)
+        assertEquals(CodexLoginState.Idle, controller.state.value)
+        assertTrue(runner.commands.size > 1)
+    }
+
+    @Test
     fun `refreshStatus reports not signed in without changing a clean Idle`() {
         val runner = FakeRunner { FakeHandle(listOf("Not logged in"), exit = 1) }
         val controller = controller(runner, unconfined)
@@ -249,7 +278,8 @@ class CodexLoginControllerTest {
         runner: GuestCommandRunner,
         scope: CoroutineScope,
         prerequisites: () -> String? = { null },
-    ): CodexLoginController = CodexLoginController(runner = runner, prerequisites = prerequisites, scope = scope)
+    ): CodexLoginController =
+        CodexLoginController(runner = runner, prerequisites = prerequisites, scope = scope, statusRetryDelayMillis = 1L)
 
     /** Cancel terminates on the IO scope; wait for it instead of sampling once. */
     private suspend fun awaitTerminated(handle: FakeHandle) {

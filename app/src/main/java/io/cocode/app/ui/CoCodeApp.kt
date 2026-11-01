@@ -424,6 +424,9 @@ internal fun CoCodeApp(
                                     onSaveRemote = { server ->
                                         if (server.id !in pendingRemovalIds) remotes.upsert(server)
                                     },
+                                    onMoveRemote = { server, toIndex ->
+                                        if (server.id !in pendingRemovalIds) remotes.move(server.id, toIndex)
+                                    },
                                     onRemoveRemote = { server ->
                                         if (server.id !in pendingRemovalIds) {
                                             pendingRemovalIds[server.id] = Unit

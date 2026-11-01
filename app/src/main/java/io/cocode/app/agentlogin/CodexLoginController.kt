@@ -36,6 +36,7 @@ class CodexLoginController(
     private val loginTimeoutMillis: Long = LOGIN_TIMEOUT_MILLIS,
     private val apiKeyTimeoutMillis: Long = API_KEY_TIMEOUT_MILLIS,
     private val statusTimeoutMillis: Long = STATUS_TIMEOUT_MILLIS,
+    private val statusRetryDelayMillis: Long = STATUS_RETRY_DELAY_MILLIS,
 ) : CodexLogin {
     private val mutableState = MutableStateFlow<CodexLoginState>(Idle)
     override val state: StateFlow<CodexLoginState> = mutableState.asStateFlow()
@@ -266,15 +267,32 @@ class CodexLoginController(
             return
         }
         if (prerequisites() != null) return
-        val status = runStatus() ?: return
-        if (cancelRequested) {
-            publish(Cancelled)
-            return
+        // The background check can be killed by the server starting at the same moment (its stale
+        // cleanup stops every runtime PRoot tree), which says nothing about the sign-in. Only a
+        // definite answer changes [signedIn]; otherwise retry, and stay unknown if it never comes.
+        var signedIn: Boolean? = null
+        var firstLine: String? = null
+        for (attempt in 0 until STATUS_ATTEMPTS) {
+            if (attempt > 0) {
+                Thread.sleep(statusRetryDelayMillis)
+                if (cancelRequested) {
+                    publish(Cancelled)
+                    return
+                }
+            }
+            val status = runStatus() ?: return
+            if (cancelRequested) {
+                publish(Cancelled)
+                return
+            }
+            signedIn = status.signedIn()
+            firstLine = status.firstLine
+            if (signedIn != null) break
         }
-        val signedIn = status.exitCode == 0
+        if (signedIn == null) return
         mutableSignedIn.value = signedIn
         if (signedIn) {
-            publish(SignedIn(status.firstLine ?: "Signed in"))
+            publish(SignedIn(firstLine ?: "Signed in"))
         } else if (mutableState.value is SignedIn) {
             publish(Idle)
         }
@@ -302,7 +320,15 @@ class CodexLoginController(
         val exitCode: Int,
         val firstLine: String?,
         val detail: String?,
-    )
+    ) {
+        /** True/false only for an answer Codex actually gave; null when the check itself failed. */
+        fun signedIn(): Boolean? =
+            when {
+                exitCode == 0 -> true
+                detail?.contains(NOT_LOGGED_IN, ignoreCase = true) == true -> false
+                else -> null
+            }
+    }
 
     /** Runs `codex login status`; returns null when it could not be run at all. */
     private fun runStatus(): StatusResult? {
@@ -403,6 +429,9 @@ class CodexLoginController(
         const val LOGIN_TIMEOUT_MILLIS: Long = 16 * 60_000L
         const val API_KEY_TIMEOUT_MILLIS: Long = 2 * 60_000L
         const val STATUS_TIMEOUT_MILLIS: Long = 30_000L
+        const val STATUS_RETRY_DELAY_MILLIS: Long = 3_000L
+        private const val STATUS_ATTEMPTS = 4
+        private const val NOT_LOGGED_IN = "Not logged in"
 
         private const val READ_POLL_MILLIS: Long = 200L
         private const val WAIT_FOR_EXIT_MILLIS: Long = 5_000L

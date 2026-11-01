@@ -17,6 +17,8 @@ import io.cocode.app.runtime.SharedStorageStatus
 import io.cocode.app.runtime.WebSessionAuthenticator
 import io.cocode.app.runtime.WebSessionCookies
 import io.cocode.app.runtime.WebSessionResult
+import io.cocode.app.runtime.withServerMoved
+import io.cocode.app.runtime.withServerUpserted
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -118,11 +120,18 @@ internal class FakeRemoteServerStore(
     override val servers: StateFlow<List<ServerTarget.Remote>> = mutable.asStateFlow()
 
     override fun upsert(server: ServerTarget.Remote) {
-        mutable.value = mutable.value.filterNot { it.id == server.id } + server
+        mutable.value = mutable.value.withServerUpserted(server)
     }
 
     override fun remove(id: String) {
         mutable.value = mutable.value.filterNot { it.id == id }
+    }
+
+    override fun move(
+        id: String,
+        toIndex: Int,
+    ) {
+        mutable.value = mutable.value.withServerMoved(id, toIndex)
     }
 }
 

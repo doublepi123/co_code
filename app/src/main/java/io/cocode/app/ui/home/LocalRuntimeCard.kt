@@ -408,8 +408,9 @@ internal fun LocalRuntimeCard(
         val codexRunning = codexState.isRunning
         // A flow the user stepped away from comes back once it ends (success or failure).
         LaunchedEffect(codexRunning) { if (!codexRunning) codexHidden = false }
-        // Unknown status: ask once when the card shows with Codex installed.
-        LaunchedEffect(codexLogin != null, codexInstalled) {
+        // Unknown status: ask when the card shows with Codex installed, and again once the server is
+        // up (a check that overlapped the server start may have stayed unknown).
+        LaunchedEffect(codexLogin != null, codexInstalled, state is RuntimeState.Running) {
             if (codexLogin != null && codexInstalled && codexLogin.signedIn == null) codexLogin.refreshStatus()
         }
         val codexActions =

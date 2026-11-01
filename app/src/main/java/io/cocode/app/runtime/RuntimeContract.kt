@@ -352,9 +352,19 @@ sealed interface ServerTarget {
 interface RemoteServerStore {
     val servers: StateFlow<List<ServerTarget.Remote>>
 
+    /** Adds [server] at the end, or replaces the saved server with the same id in place. */
     fun upsert(server: ServerTarget.Remote)
 
     fun remove(id: String)
+
+    /**
+     * Moves server [id] so it ends up at [toIndex] (clamped), in one write. Unknown ids are
+     * ignored; the list keeps its length.
+     */
+    fun move(
+        id: String,
+        toIndex: Int,
+    )
 }
 
 sealed interface WebSessionResult {
