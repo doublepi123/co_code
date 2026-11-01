@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Full-screen T3 Code web UI for one server (`Routes.WEB`, `web/{targetId}`). Owns the WebView pool, session preparation and page loading, navigation policy, the JS bridge, downloads, file and microphone requests, and the overlay panels. It hosts T3 Code's own web UI; it does not implement it.
+Full-screen Cox web UI for one server (`Routes.WEB`, `web/{targetId}`). Owns the WebView pool, session preparation and page loading, navigation policy, the JS bridge, downloads, file and microphone requests, and the overlay panels. It hosts Cox's own (T3 Code protocol) web UI; it does not implement it.
 
 Files:
 - `ChamberWebView.kt`: `ChamberWebView` (one WebView bound to one profile, clients, bridge, helper script), `WebViewPool`, `WebHost`, `originOf()`. Its `Client.shouldInterceptRequest` answers the local server's update check.
@@ -39,7 +39,7 @@ Files:
 ## Flow
 
 1. Root `Routes.web(targetId)` → `WebScreen` → `bindWeb`: `profiles.acquire(target)`, then `pool.obtain` returns the `ChamberWebView` bound to that profile. Initial `phase` is `Loaded` if `view.sessionKey == sessionKey`, else `Connecting`.
-2. `LaunchedEffect(web, sessionKey, attempt)` runs only when the view is bound (`isolationFailure == null`, `view != null`, `sessionCookies != null`). It calls `auth.prepare(target, web.sessionCookies)`. `Ready(url)` or `NeedsLogin(url)` (T3 Code shows its own sign-in at the same address) leads to `view.load(start)`. `Unreachable(reason)` gives `SessionPhase.Unreachable`. If the binding failed, no `prepare` call is made.
+2. `LaunchedEffect(web, sessionKey, attempt)` runs only when the view is bound (`isolationFailure == null`, `view != null`, `sessionCookies != null`). It calls `auth.prepare(target, web.sessionCookies)`. `Ready(url)` or `NeedsLogin(url)` (Cox shows its own sign-in at the same address) leads to `view.load(start)`. `Unreachable(reason)` gives `SessionPhase.Unreachable`. If the binding failed, no `prepare` call is made.
 3. `startPageUrl(start, base, resumePath)` chooses the first URL: the remembered absolute path restored on the origin alone, or `start` when there is none; an already-loaded pooled page is left as is. `latestResumePath` is `rememberUpdatedState`, so the value read is current at load time. Trusted page locations are reported up (`onPageLocation`) from `onPageFinished` and `doUpdateVisitedHistory` (pushState included), never in gateway mode or off-origin.
 4. Already-loaded same session: the pooled page is reused as is; nothing is navigated a second time.
 5. `onPageFinished` (trusted origin) sets `committed` and `currentUrl`, clears history once per session, and injects the helper script. Overlay is null once committed and no error or phase overlay applies. The progress bar shows while `progress < 100`.

@@ -12,7 +12,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-/** One published T3 Code Android release. [version] has no `v`, [tag] is what the download URL uses. */
+/** One published Cox Android release. [version] has no `v`, [tag] is what the download URL uses. */
 data class T3Release(
     val version: String,
     val tag: String,
@@ -24,10 +24,10 @@ data class T3Release(
 }
 
 /**
- * Resolves the newest T3 Code release and its checksums. [latest] returns null when GitHub cannot be
- * reached or answers with a tag that is not a `v<x.y.z>-pw.<n>` release; the caller then falls back
- * to the version pinned in the app's manifest. [sha256Sums] failing is not a fallback: the checksum
- * list is required to verify the bundle (fail closed).
+ * Resolves the newest Cox release and its checksums. [latest] returns null when GitHub cannot be
+ * reached or answers with a tag that is not a semver release (`v0.1.1`, or a legacy `v0.1.6-pw.5` as
+ * well); the caller then falls back to the version pinned in the app's manifest. [sha256Sums]
+ * failing is not a fallback: the checksum list is required to verify the bundle (fail closed).
  */
 interface T3ReleaseSource {
     suspend fun latest(): T3Release?
@@ -61,7 +61,7 @@ class GithubT3ReleaseSource(
         withContext(Dispatchers.IO) {
             val body = fetch(release.sha256SumsUrl)
             parseSums(body).also {
-                check(it.isNotEmpty()) { "T3 Code SHA256SUMS is empty" }
+                check(it.isNotEmpty()) { "Cox SHA256SUMS is empty" }
             }
         }
 
@@ -81,7 +81,7 @@ class GithubT3ReleaseSource(
 
     private fun fetch(url: String): String {
         val parsed = url.toHttpUrl()
-        require(parsed.isHttps || parsed.host in LOOPBACK_HOSTS) { "T3 Code release URLs must use HTTPS" }
+        require(parsed.isHttps || parsed.host in LOOPBACK_HOSTS) { "Cox release URLs must use HTTPS" }
         val bounded =
             client.newBuilder()
                 .callTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -95,7 +95,7 @@ class GithubT3ReleaseSource(
         bounded.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "GitHub answered ${response.code} for $url" }
             val body = response.body?.string().orEmpty()
-            check(body.length <= MAX_BODY_CHARS) { "T3 Code release metadata is too large" }
+            check(body.length <= MAX_BODY_CHARS) { "Cox release metadata is too large" }
             return body
         }
     }

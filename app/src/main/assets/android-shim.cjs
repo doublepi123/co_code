@@ -6,7 +6,7 @@ const fs = require('fs');
 const { syncBuiltinESMExports } = require('module');
 
 // On Android, SELinux makes uv_interface_addresses (behind os.networkInterfaces) fail with EACCES,
-// which crashes T3 Code at startup. Fall back to a loopback-only interface list instead.
+// which crashes Cox at startup. Fall back to a loopback-only interface list instead.
 const original = os.networkInterfaces;
 if (typeof original === 'function') {
   os.networkInterfaces = function networkInterfaces(...args) {
@@ -31,7 +31,7 @@ if (typeof original === 'function') {
 
 // Android forbids hard links in app storage, so PRoot runs with --link2symlink and fakes them with
 // hidden `.l2s.*` files next to the original. Those fakes break the "write a temp file, link it into
-// place, then remove the temp directory" pattern T3 Code uses for atomic first-writer-wins files:
+// place, then remove the temp directory" pattern Cox uses for atomic first-writer-wins files:
 // the directory removal fails with ENOTEMPTY and the server exits. A no-replace copy keeps the
 // semantics callers rely on (the target appears with the full content, EEXIST when it already
 // exists, ENOENT when the source is missing) without creating link artefacts.

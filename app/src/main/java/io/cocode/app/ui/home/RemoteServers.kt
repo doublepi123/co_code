@@ -73,6 +73,7 @@ import io.cocode.app.ui.components.IconTile
 import io.cocode.app.ui.displayAddress
 import io.cocode.app.ui.isLoopbackHost
 import io.cocode.app.ui.label
+import io.cocode.app.ui.protocolLabel
 import io.cocode.app.ui.theme.ChamberTextStyles
 import io.cocode.app.ui.theme.ChamberTheme
 import java.util.UUID
@@ -449,7 +450,7 @@ private fun ServerKindPicker(
                     onClick = { onSelect(kind) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = ServerKind.entries.size),
                 ) {
-                    Text(kind.label(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(kind.protocolLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

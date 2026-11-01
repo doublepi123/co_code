@@ -9,22 +9,31 @@ import kotlinx.serialization.json.put
 import java.io.File
 
 /**
- * T3 Code enables only its Codex and Claude providers until a provider instance is configured. An
- * agent the person installed on purpose should simply be usable, so before each start the app adds
- * `providerInstances.<id> = {"driver": <id>, "enabled": true}` to T3's `settings.json` for every
- * installed agent whose driver T3 keeps off by default.
+ * Cox (and the legacy T3 Code build it replaces) enables only its Codex and Claude providers until a
+ * provider instance is configured. An agent the person installed on purpose should simply be usable,
+ * so before each start the app adds `providerInstances.<id> = {"driver": <id>, "enabled": true}` to the
+ * server's `settings.json` for every installed agent whose driver is off by default.
  *
  * Only missing instances are added: an instance the person configured (including one they turned
  * off) is never touched, and an unreadable settings file is left as it is.
  */
 object T3ProviderDefaults {
-    /** Agent id → T3 provider driver/instance id, for drivers T3 disables until configured. */
+    /** Agent id → provider driver/instance id, for drivers the server disables until configured. */
     private val OFF_BY_DEFAULT = mapOf("opencode" to "opencode")
+
+    /** Cox's data directory name under the guest home. */
+    const val COX_HOME_DIR = ".cox"
+
+    /** The legacy T3 Code data directory name, used only while an old bundle is installed. */
+    const val T3_HOME_DIR = ".t3"
 
     private val json = Json { prettyPrint = true }
 
-    /** `<home>/.t3/userdata/settings.json` for the bind-mounted guest home. */
-    fun settingsFile(home: File): File = File(home, ".t3/userdata/settings.json")
+    /** `<home>/<homeDir>/userdata/settings.json` for the bind-mounted guest home. */
+    fun settingsFile(
+        home: File,
+        homeDir: String = T3_HOME_DIR,
+    ): File = File(File(home, homeDir), "userdata/settings.json")
 
     /**
      * Returns the new settings text, or null when nothing has to change. Pure, for tests.
@@ -57,8 +66,12 @@ object T3ProviderDefaults {
     }
 
     /** Applies [merge] to the file under [home]. Best effort; callers ignore failures. */
-    fun apply(home: File, installedAgents: Set<String>) {
-        val file = settingsFile(home)
+    fun apply(
+        home: File,
+        installedAgents: Set<String>,
+        homeDir: String = T3_HOME_DIR,
+    ) {
+        val file = settingsFile(home, homeDir)
         val current = if (file.isFile) file.readText() else null
         val next = merge(current, installedAgents) ?: return
         file.parentFile?.mkdirs()

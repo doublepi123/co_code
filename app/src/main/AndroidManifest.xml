@@ -52,7 +52,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the on-device T3 Code web server running while the app is in the background." />
+                android:value="Keeps the on-device Cox web server running while the app is in the background." />
         </service>
 
     </application>

@@ -53,3 +53,16 @@ internal fun ServerKind.label(): String =
             ServerKind.OpenChamber -> R.string.server_openchamber
         },
     )
+
+/**
+ * The label for a server kind as a remote protocol. Cox and T3 Code share the same HTTP contract, so
+ * an address that runs either one is described by both names.
+ */
+@Composable
+internal fun ServerKind.protocolLabel(): String =
+    stringResource(
+        when (this) {
+            ServerKind.T3 -> R.string.server_t3_remote
+            ServerKind.OpenChamber -> R.string.server_openchamber
+        },
+    )

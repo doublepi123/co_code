@@ -14,7 +14,10 @@ object ProotCommands {
     const val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     const val GUEST_NODE = "/usr/bin/node"
     const val T3_CLI = "/opt/t3/bin.mjs"
+    /** Legacy T3 Code data directory; still used while an old T3 bundle is installed. */
     const val T3_HOME = "/root/.t3"
+    /** Cox data directory (`COX_HOME`); schema-compatible with a migrated T3 data directory. */
+    const val COX_HOME = "/root/.cox"
     const val OPENCHAMBER_CLI = "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js"
     const val GUEST_OPENCODE = "/usr/local/bin/opencode"
     const val SHIM_PATH = "/opt/cocode/android-shim.cjs"
@@ -119,6 +122,8 @@ object ProotCommands {
         port: Int,
         uiPassword: String,
         kind: ServerKind = ServerKind.T3,
+        /** True for the Cox bundle; false only while a legacy T3 Code bundle is still installed. */
+        coxBundle: Boolean = true,
     ): Map<String, String> =
         buildMap {
             putAll(suiteEnvironment)
@@ -133,7 +138,9 @@ object ProotCommands {
                     put("T3CODE_HOST", "127.0.0.1")
                     put("T3CODE_PORT", port.toString())
                     put("T3CODE_NO_BROWSER", "true")
-                    put("T3CODE_HOME", T3_HOME)
+                    // Cox reads COX_HOME; the legacy T3 bundle (still runnable until updated) reads
+                    // T3CODE_HOME. Both point at the same userdata layout.
+                    if (coxBundle) put("COX_HOME", COX_HOME) else put("T3CODE_HOME", T3_HOME)
                     put("T3CODE_AUTH_PASSWORD", uiPassword)
                     // PRoot's -0 fakes uid 0 inside an unprivileged Android app sandbox. Claude Code
                     // refuses T3's bypassPermissions mode for root unless the process says it is

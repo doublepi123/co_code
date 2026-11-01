@@ -188,7 +188,8 @@ class ForeignListenerTest {
 
     @Test
     fun `readyLaunchId is null as soon as our child is dead, without any watchdog tick`() {
-        val child = FakeChild(output = "Listening on http://127.0.0.1:$port\n", exitCode = 0, lifetimeMillis = 300L)
+        // Long enough to outlive start() on a loaded machine; the assertion below is about death.
+        val child = FakeChild(output = "Listening on http://127.0.0.1:$port\n", exitCode = 0, lifetimeMillis = 2_000L)
         val srv = server(child, RecordingHealth(foreignOk()), mutableListOf())
 
         val id = srv.start(runtime(), "ui-secret", {}, { false })

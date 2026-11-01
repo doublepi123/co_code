@@ -9,8 +9,8 @@ agent events: T3 Code has no native notification bridge, so agent notifications 
 
 - `RuntimeErrorWatch.kt` (pure): `RuntimeAlert(key, title, body)` plus `onState(RuntimeState)`.
   - `Failed(Install)` → key `install:<reason>`, "Setup failed".
-  - `Failed(Start)` → key `start:<reason>`, "T3 Code didn't start".
-  - `Failed(Runtime)` → key `runtime:<reason>`, "T3 Code stopped".
+  - `Failed(Start)` → key `start:<reason>`, "Cox didn't start".
+  - `Failed(Runtime)` → key `runtime:<reason>`, "Cox stopped".
   - A user Stop goes to `Stopped`/`NotInstalled`, never `Failed`, so it is not alerted. The same key
     is shown once until `reset()` clears the dedupe set.
   - Titles come from `RuntimeErrorWatch.Titles` (`di/AppModule.kt`, `R.string.alert_*`); the default

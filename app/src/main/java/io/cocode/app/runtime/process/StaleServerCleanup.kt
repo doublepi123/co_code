@@ -5,10 +5,11 @@ import io.cocode.app.runtime.RuntimePaths
 /**
  * Clears what a crashed earlier run left behind before a new server start.
  *
- * T3 Code keeps its state under `T3CODE_HOME` (`/root/.t3`) and does not use a pid file this app can
- * trust. Cleanup is therefore owned-process-only: [ProcessScanner] proves which PRoot trees belong
- * to this app (uid + launcher + rootfs) and only those are killed. The port wait then decides whether
- * a foreign listener is in the way; a foreign listener is never touched.
+ * Cox keeps its state under `COX_HOME` (`/root/.cox`; a legacy T3 Code bundle uses `/root/.t3`)
+ * and does not use a pid file this app can trust. Cleanup is therefore owned-process-only:
+ * [ProcessScanner] proves which PRoot trees belong to this app (uid + launcher + rootfs) and only
+ * those are killed. The port wait then decides whether a foreign listener is in the way; a foreign
+ * listener is never touched.
  */
 object StaleServerCleanup {
     /**

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.io.File
 
 class T3ProviderDefaultsTest {
     private fun instances(text: String) = Json.parseToJsonElement(text).jsonObject["providerInstances"]!!.jsonObject
@@ -43,5 +44,22 @@ class T3ProviderDefaultsTest {
         assertNull(T3ProviderDefaults.merge("{not json", setOf("opencode")))
         assertNull(T3ProviderDefaults.merge("[]", setOf("opencode")))
         assertNull(T3ProviderDefaults.merge("""{"providerInstances":[]}""", setOf("opencode")))
+    }
+
+    @Test
+    fun `the settings path follows the active server home`() {
+        val home = File("runtime/home")
+        assertEquals(
+            File("runtime/home/.cox/userdata/settings.json"),
+            T3ProviderDefaults.settingsFile(home, T3ProviderDefaults.COX_HOME_DIR),
+        )
+        assertEquals(
+            File("runtime/home/.t3/userdata/settings.json"),
+            T3ProviderDefaults.settingsFile(home, T3ProviderDefaults.T3_HOME_DIR),
+        )
+        assertEquals(
+            File("runtime/home/.t3/userdata/settings.json"),
+            T3ProviderDefaults.settingsFile(home),
+        )
     }
 }

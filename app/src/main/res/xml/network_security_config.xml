@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Cleartext is required: remote T3 Code servers are reached over http on LAN, Tailscale
+  Cleartext is required: remote Cox / T3 Code servers are reached over http on LAN, Tailscale
   and loopback addresses, which cannot be expressed as domain rules. Only system CAs are trusted.
 -->
 <network-security-config>

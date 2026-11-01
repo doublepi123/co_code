@@ -8,7 +8,7 @@ Files:
 - `CoCodeApp.kt`: `CoCodeApp(...)` root, `Routes`, `LocalActions`, launch and record-keeping coroutines.
 - `LaunchDecision.kt`: pure rules (`launchTarget`, `resumeTarget`, `initialLaunchStage`, `shownLocalState`, `sanitizedPagePath`). No Android or Compose imports (okhttp only, via `canonicalWebOrigin`), so unit tests call them directly.
 - `LaunchFlow.kt`: launch timing constants, `UiPrefs`, `LaunchCover`, `isLauncherLaunch()`.
-- `LocalServers.kt`: on-device target ids (`local-t3`, `local-openchamber`; legacy `local` = T3 Code), `localKindOf`, `isLocalTargetId`, `migratedTargetId`, `ServersState.openableKind()` (active, or the installed one; never a non-installed server), `ServerKind.label()`.
+- `LocalServers.kt`: on-device target ids (`local-t3`, `local-openchamber`; legacy `local` = Cox), `localKindOf`, `isLocalTargetId`, `migratedTargetId`, `ServersState.openableKind()` (active, or the installed one; never a non-installed server), `ServerKind.label()` (local product name) and `ServerKind.protocolLabel()` (remote "Cox / T3 Code").
 - `AppUpdatePrompt.kt`: `AppUpdatePrompt` (CoCode's own GitHub release check: one process-wide `update.AppReleaseChecker` on `BuildConfig.VERSION_NAME`, checked on every `ON_START`, dialog over Home or a server page once the launch cover is gone), `AppUpdateDialog` (Later / View release, which opens the official https GitHub release page in the browser; nothing is downloaded or installed), `releaseNotesPreview` (Markdown notes as short plain text).
 - `SystemUi.kt`: `findActivity()`, `SystemBarsEffect`, `WindowBackgroundEffect`.
 - `ScreenAwake.kt`: opt-in local-runtime screen hold. `ScreenAwakeController` shares `ui_prefs` with `UiPrefs` and exposes the setting and recorded target as StateFlows; `MainActivity` combines them with runtime and lifecycle state and sets `FLAG_KEEP_SCREEN_ON` only while Running, foreground and not on a remote page. No WakeLock.
@@ -33,7 +33,7 @@ Files:
 
 ## Flow
 
-Cold launch to the last used T3 Code:
+Cold launch to the last used Cox:
 0. `resumeTarget(rememberedId, remoteIds)` picks the instance: a remembered remote opens it directly (no detection wait, no local start); a remembered remote that no longer exists falls back to local; otherwise the local logic below runs. The launch cover covers a remote resume from frame one (`remoteResume`). The instance's remembered page (`page_path:<id>`) is loaded only if the target's canonical origin still matches `page_origin:<id>`.
 1. `CoCodeApp` composes with `launchPending = true`. `initialLaunchStage` yields `Waiting` (Detecting, auto-open on), `Opening` (Running, Starting or Stopped, auto-open on, or a remembered remote), or `Done`.
 2. `Waiting` shows only `LaunchCover` (background plus `CoCodeMark`). `NavHost` is not composed yet.

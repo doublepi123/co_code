@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Network and persistence adapters for remote and local T3 Code servers, used by the UI:
+Network and persistence adapters for remote and local Cox / T3 Code servers, used by the UI:
 
 - `WebSessionAuthenticatorImpl.kt`: prepares a server for the WebView (health check, login, cookie hand-off). Implements `runtime.WebSessionAuthenticator`. Also defines `LocalReadiness`.
 - `WebSessionOrigin.kt`, `WebSessionProfiles.kt`: per-target WebView isolation. `canonicalWebOrigin` normalizes the origin. `WebSessionProfiles` hands out a `WebProfileBinding` per (target id, canonical origin). A `WebSessionCookies` capability is bound to that profile's `CookieManager`. No code path falls back to the global `CookieManager`. Isolation applies to the page's own profile. It does not promise per-origin isolation for every sub-resource inside that profile.
@@ -24,7 +24,7 @@ Network and persistence adapters for remote and local T3 Code servers, used by t
 - Local targets are trusted only while `LocalReadiness.runningLaunchId()` returns the same non-null id before and right before the POST. A restart in between yields `Unreachable("...restarted; try again")`. Null id yields `Unreachable("not running")`.
 - Transport rule: a remote target without `allowInsecureHttp` is refused unless the URL is https or loopback (`HttpUrl.isTransportSafe`). Refusal happens before any login request.
 - Results include `NeedsGatewayLogin(base)` when Cloudflare Access gates health, probe or login; its pure detector recognizes Access redirects and challenge headers. This result never sends the UI password.
-- Set-Cookie headers are written through the bound profile's `WebSessionCookies.storeCookies` and flushed there. T3 Code names the cookie `t3_session_<port>`, which keeps two servers on one host apart.
+- Set-Cookie headers are written through the bound profile's `WebSessionCookies.storeCookies` and flushed there. The T3 protocol names the cookie `t3_session_<port>`; Cox keeps that name, which keeps two servers on one host apart.
 - Login body: `{"password": ..., "trustDevice": true}`. 401 and 3xx map to `NeedsLogin`; other non-2xx map to `Unreachable`.
 
 ### Named profile removal
@@ -59,7 +59,7 @@ Remote server CRUD: UI calls `upsert`/`remove` → JSON re-encoded → Encrypted
 - `di/AppModule.kt` constructs: `DefaultWebSessionAuthenticator` (with `LocalReadiness { get<T3Server>().readyLaunchId() }`), `EncryptedRemoteServerStore.create`, `WebSessionProfiles`, and the `AndroidHttpDownloadStarter` singleton.
 - Interfaces implemented from `runtime/`: `WebSessionAuthenticator`, `RemoteServerStore`. Types used: `ServerTarget` (Local/Remote), `WebSessionResult`, `RuntimeSecrets`, `RuntimePaths`, `RuntimeState`.
 - Consumers: `MainActivity` and `ui/` (through `WebSessionAuthenticator` and `RemoteServerStore`); `ui/web` for the bound profile and download cookie hand-off.
-- T3 Code HTTP endpoints:
+- T3 protocol HTTP endpoints (Cox and legacy T3 Code):
   - `GET /.well-known/t3/environment` (`WebSessionAuthenticatorImpl`).
   - `GET /api/auth/session` (session probe).
   - `POST /api/auth/browser-session` (login with `{"credential":...}`).

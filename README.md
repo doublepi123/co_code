@@ -8,7 +8,7 @@
 
 **CoCode 在 Android 手机上本地运行一个编码代理服务器，不依赖电脑，也不需要 root。**
 
-CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot，无 root）环境中，可安装 **T3 Code、OpenChamber，或两者都装**；同一时间运行一个，切换前会提示中断当前服务。两者共用主目录、项目与 OpenCode 配置，但登录密码、页面数据和服务数据分别保存。也支持连接这两种远程服务器。
+CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot，无 root）环境中，可安装 **Cox、OpenChamber，或两者都装**；同一时间运行一个，切换前会提示中断当前服务。Cox 是 T3 Code 的本地化分支，沿用同一协议，因此也能连接远程 T3 Code 服务器。两者共用主目录、项目与 OpenCode 配置，但登录密码、页面数据和服务数据分别保存。也支持连接这些远程服务器。
 
 - **代理任选**：Codex、Claude Code、OpenCode。追加安装保留已有代理；卸载需要确认。OpenChamber 依赖的 OpenCode 会标明为必需组件。
 - **App 更新提示**：打开 App 时检查本项目的 GitHub Releases（包括 0.x 预发布版），有新版时提示前往下载；不会自动安装或中断任务。
@@ -23,11 +23,11 @@ CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot�
 |---|---|
 | Alpine Linux | 3.24.1（每个 ABI 固定 URL 与 SHA-256） |
 | Node.js | Alpine 24.x |
-| T3 Code 服务器 | GitHub `doublepi123/t3code` 发布包，默认 0.1.6-pw.5 |
+| Cox 服务器 | GitHub `doublepi123/cox` 发布包，默认 0.1.1（兼容 T3 Code 协议） |
 | OpenChamber 服务器（可选） | npm `@openchamber/web`，安装时取最新版 |
 | 编码代理 CLI | `@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode），安装时取最新版 |
 | PRoot | 本地编译的 5.1.107.98 |
-| 端口 | T3 Code 3773、OpenChamber 3000（仅回环） |
+| 端口 | Cox 3773、OpenChamber 3000（仅回环） |
 
 ### 公共目录（可选）
 

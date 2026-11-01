@@ -2,14 +2,14 @@
 
 ## Project Responsibility
 
-CoCode is an Android app (`io.cocode.app`, Kotlin + Jetpack Compose, minSdk 26, target 35) that installs T3 Code, OpenChamber, or both alongside user-selected agent CLIs in one Alpine Linux 3.24/Node.js 24 environment under PRoot (no root). One server runs at a time, kept alive by a foreground service. Both share the persistent home and OpenCode configuration; explicit server kinds select separate ports, passwords, logs, authentication protocols and isolated WebView profiles (AndroidX WebKit 1.14.0). Remote servers support both kinds too.
+CoCode is an Android app (`io.cocode.app`, Kotlin + Jetpack Compose, minSdk 26, target 35) that installs Cox, OpenChamber, or both alongside user-selected agent CLIs in one Alpine Linux 3.24/Node.js 24 environment under PRoot (no root). One server runs at a time, kept alive by a foreground service. Both share the persistent home and OpenCode configuration; explicit server kinds select separate ports, passwords, logs, authentication protocols and isolated WebView profiles (AndroidX WebKit 1.14.0). Remote servers support both kinds too; Cox keeps the T3 Code protocol, so remote T3 Code servers remain usable.
 
 Key constraints:
 - On-device mode runs on arm64-v8a and x86_64 (PRoot 5.1.107.98 rewrites the guest's raw `fork` to `clone`, which Android's x86_64 app seccomp policy allows). Other ABIs can only use remote servers. The x86_64 gate is the emulator probe in `docs/testing-x86-runtime.md`; it is not yet verified on a physical x86_64 device.
-- The T3 Code server is a GitHub release bundle (`doublepi123/t3code`, `t3-<ver>-android-linux-<arch>-musl.tar.gz`) verified against the release's `SHA256SUMS`. The manifest's version is the offline fallback; updates always take the latest release. Agent CLIs are installed from npm without version locks (`codex`, `claude`, `opencode`), and at least one must be selected.
+- The on-device server is Cox, a local-only fork of T3 Code (`doublepi123/cox`, plain semver release bundles `cox-<ver>-android-linux-<arch>-musl.tar.gz`) verified against the release's `SHA256SUMS`. The manifest's version is the offline fallback; updates always take the latest release. An installed legacy T3 Code bundle (`-pw.N`, no `server:"cox"` in `ANDROID-BUNDLE.json`) is always offered the latest Cox release; product versions are never compared across the two. Agent CLIs are installed from npm without version locks (`codex`, `claude`, `opencode`), and at least one must be selected.
 - Optional shared storage `/sdcard/CoCode`: `projects/` → `~/projects`, `opencode/` → `~/.config/opencode`, `codex/` → `~/.codex`, `claude/` → `~/.claude`. Codex and Claude directories intentionally include credentials/history after explicit risk acknowledgement. OpenCode service secrets/plugin modules, `~/.local/share/opencode`, `~/.claude.json` and both servers' data stay private. Disabling sharing reveals older private copies; no automatic copy-back. The private workspace is `~/projects-private`.
-- OpenChamber is installed from npm and requires the shared OpenCode CLI. Its own node-pty is rebuilt for musl and smoke-tested separately from T3's bundled node-pty. All environment package mutations stage, verify survivors and swap atomically; metadata schema 2 records both servers and migrates legacy T3-only installs.
-- Guest paths: home `~` = `/root` (bind of `<runtime>/home`), server working directory `/root`, T3 Code home `/root/.t3`; OpenChamber state is separate under the same home. T3 port 3773, OpenChamber port 3000, both loopback-only. Local target IDs are `local-t3` and `local-openchamber`; legacy `local` migrates to T3.
+- OpenChamber is installed from npm and requires the shared OpenCode CLI. Its own node-pty is rebuilt for musl and smoke-tested separately from Cox's bundled node-pty. All environment package mutations stage, verify survivors and swap atomically; metadata schema 2 records both servers and migrates legacy T3-only installs.
+- Guest paths: home `~` = `/root` (bind of `<runtime>/home`), server working directory `/root`, Cox data `~/.cox` (a legacy T3 bundle reads `~/.t3`; an existing `.t3` is renamed once when Cox first starts); OpenChamber state is separate under the same home. Cox port 3773, OpenChamber port 3000, both loopback-only. Local target IDs are `local-t3` and `local-openchamber`; legacy `local` migrates to Cox (id `t3`).
 - All embedded pages require `WebViewFeature.MULTI_PROFILE`: unsupported or failed binding blocks page loading before authentication. Home and the local runtime remain available; remote addresses can be opened explicitly in a browser without adding credentials.
 - Profiles are keyed by target ID and canonical origin. Old default-profile data is neither cleared nor migrated; isolation between target profiles does not change browser Cookie rules for subresources inside one profile.
 - Native HTTP downloads use controlled redirects and the app process; they do not resume after process death.
@@ -25,7 +25,7 @@ Key constraints:
 | `app/src/main/java/io/cocode/app/MainActivity.kt` | Single launcher activity (singleTop): hosts Compose `CoCodeApp` and owns the optional foreground local-runtime screen hold |
 | `app/src/main/java/io/cocode/app/service/RuntimeService.kt` | `specialUse` foreground service that runs runtime operations and keeps the server alive |
 | `app/src/main/AndroidManifest.xml` | Components, permissions (FGS, notifications, all-files access, microphone), locale config |
-| `app/src/main/assets/runtime-manifest.json` | Pinned runtime: Alpine rootfs per ABI (URL + SHA-256), T3 Code repository/fallback version/asset pattern/arch map, agent CLI list, port 3773 |
+| `app/src/main/assets/runtime-manifest.json` | Pinned runtime: Alpine rootfs per ABI (URL + SHA-256), Cox repository/fallback version/asset pattern/arch map, agent CLI list, port 3773 |
 | `app/build.gradle.kts` | App build; offline Exec task `buildCoCodeRuntimeNative` compiles PRoot JNI libs from prepared sources (NDK 29.0.14206865); Sync task `syncNativeLicenseAssets` packages `third_party/native-runtime/` as `assets/licenses/native/` in every variant; env-driven release signing (`COCODE_*`); debug-only `cocode.testApplicationId` override |
 | `gradle.properties` | Canonical release version as literal `cocode.versionName` / `cocode.versionCode` (currently 0.2.0 / 200); the release workflow checks them against the tag |
 | `build.gradle.kts`, `settings.gradle.kts` | AGP 8.5.2, Kotlin 2.0.21; single `:app` module |
@@ -47,7 +47,7 @@ service/RuntimeService (FGS) ──► runtime/LocalRuntimeController (state mac
                                    ├─ runtime/network   (live system DNS → atomic resolv.conf)
                                    ├─ runtime/fs        (no-follow delete/size/copy)
                                    └─ runtime/manifest  (pinned versions, agent list, T3 asset mapping)
-ui/web ──► data/WebSessionProfiles ──► bound WebSessionCookies ──► T3 Code login and WebView
+ui/web ──► data/WebSessionProfiles ──► bound WebSessionCookies ──► Cox login and WebView
 HTTP downloads ──► data/HttpDownloadStarter ──► MediaStore or app-external Downloads
 ```
 
@@ -61,12 +61,12 @@ have no native notification bridge; agent notifications are not implemented yet.
 |---|---|---|
 | `app/src/main/java/io/cocode/app/` | Package root: Application (Koin + notification observer) and the single launcher activity | [View Map](app/src/main/java/io/cocode/app/codemap.md) |
 | `…/app/runtime/` | Lifecycle of the on-device runtime (install, start, stop, repair, restart, uninstall, agent selection, crash recovery) and the contract types the UI and service depend on | [View Map](app/src/main/java/io/cocode/app/runtime/codemap.md) |
-| `…/app/runtime/install/` | Builds Alpine + Node + T3 Code + agent CLIs in staging, verifies it, activates it by atomic directory swap; verified downloads; interrupted-swap recovery | [View Map](app/src/main/java/io/cocode/app/runtime/install/codemap.md) |
-| `…/app/runtime/process/` | Runs, probes and stops the T3 Code server inside PRoot: command lines, guest env, readiness and process identity | [View Map](app/src/main/java/io/cocode/app/runtime/process/codemap.md) |
+| `…/app/runtime/install/` | Builds Alpine + Node + Cox (or a still-installed legacy T3 bundle) + agent CLIs in staging, verifies it, activates it by atomic directory swap; verified downloads; interrupted-swap recovery | [View Map](app/src/main/java/io/cocode/app/runtime/install/codemap.md) |
+| `…/app/runtime/process/` | Runs, probes and stops the Cox server (or a legacy T3 bundle) inside PRoot: command lines, guest env, `.t3`→`.cox` data move, readiness and process identity | [View Map](app/src/main/java/io/cocode/app/runtime/process/codemap.md) |
 | `…/app/runtime/storage/` | Optional shared storage `/sdcard/CoCode`: three CLI directory mappings, migration, explicit public credential exposure, git config for FUSE repos | [View Map](app/src/main/java/io/cocode/app/runtime/storage/codemap.md) |
 | `…/app/runtime/fs/` | Tree operations that never follow symbolic links (delete, size, copy, replace) | [View Map](app/src/main/java/io/cocode/app/runtime/fs/codemap.md) |
 | `…/app/runtime/network/` | Lifecycle-bound network observation and atomic guest `/etc/resolv.conf` updates from active-network DNS | [View Map](app/src/main/java/io/cocode/app/runtime/network/codemap.md) |
-| `…/app/runtime/manifest/` | Reads and validates `runtime-manifest.json` (rootfs pins, T3 release, agents, port) | [View Map](app/src/main/java/io/cocode/app/runtime/manifest/codemap.md) |
+| `…/app/runtime/manifest/` | Reads and validates `runtime-manifest.json` (rootfs pins, Cox release, agents, port) | [View Map](app/src/main/java/io/cocode/app/runtime/manifest/codemap.md) |
 | `…/app/service/` | `RuntimeService` foreground service: status notification, operation dispatch, wake lock, lifetime policy | [View Map](app/src/main/java/io/cocode/app/service/codemap.md) |
 | `…/app/notify/` | Runtime error notifications (`RuntimeErrorWatch` + `RuntimeAlertNotifier`, one "Errors" channel); no agent-event bridge | [View Map](app/src/main/java/io/cocode/app/notify/codemap.md) |
 | `…/app/data/` | Profile-bound authentication, controlled HTTP downloads and encrypted remote server persistence | [View Map](app/src/main/java/io/cocode/app/data/codemap.md) |

@@ -29,32 +29,40 @@ class T3ReleaseSourceTest {
     private fun source() =
         GithubT3ReleaseSource(
             client = client,
-            repository = "doublepi123/t3code",
+            repository = "doublepi123/cox",
             apiBaseUrl = server.url("/").toString().trimEnd('/'),
             downloadBaseUrl = server.url("/download").toString().trimEnd('/'),
         )
 
     @Test
-    fun `latest resolves a pw tag and its asset urls`() =
+    fun `latest resolves a cox semver tag and its asset urls`() =
         runBlocking {
-            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.6-pw.5","name":"x"}"""))
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.1","name":"x"}"""))
 
             val release = source().latest()!!
 
-            assertEquals("0.1.6-pw.5", release.version)
-            assertEquals("v0.1.6-pw.5", release.tag)
+            assertEquals("0.1.1", release.version)
+            assertEquals("v0.1.1", release.tag)
             assertEquals(
                 server.url("/download").toString().trimEnd('/') +
-                    "/doublepi123/t3code/releases/download/v0.1.6-pw.5/t3-0.1.6-pw.5-android-linux-arm64-musl.tar.gz",
-                release.assetUrl("t3-0.1.6-pw.5-android-linux-arm64-musl.tar.gz"),
+                    "/doublepi123/cox/releases/download/v0.1.1/cox-0.1.1-android-linux-arm64-musl.tar.gz",
+                release.assetUrl("cox-0.1.1-android-linux-arm64-musl.tar.gz"),
             )
-            assertEquals("/repos/doublepi123/t3code/releases/latest", server.takeRequest().path)
+            assertEquals("/repos/doublepi123/cox/releases/latest", server.takeRequest().path)
         }
 
     @Test
-    fun `a tag that is not a pw release is not a release`() =
+    fun `latest also resolves the legacy pw tag shape`() =
         runBlocking {
-            server.enqueue(MockResponse().setBody("""{"tag_name":"v1.0.0"}"""))
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v0.1.6-pw.5"}"""))
+
+            assertEquals("0.1.6-pw.5", source().latest()!!.version)
+        }
+
+    @Test
+    fun `a tag that is not a semver release is not a release`() =
+        runBlocking {
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v1.0"}"""))
 
             assertNull(source().latest())
         }
@@ -73,16 +81,16 @@ class T3ReleaseSourceTest {
             val hash = "a".repeat(64).uppercase()
             server.enqueue(
                 MockResponse().setBody(
-                    "$hash  t3-0.1.6-pw.5-android-linux-arm64-musl.tar.gz\n" +
-                        "${"b".repeat(64)} *t3-0.1.6-pw.5-android-linux-x64-musl.tar.gz\n" +
+                    "$hash  cox-0.1.1-android-linux-arm64-musl.tar.gz\n" +
+                        "${"b".repeat(64)} *cox-0.1.1-android-linux-x64-musl.tar.gz\n" +
                         "not-a-hash  ignored\n",
                 ),
             )
 
-            val sums = source().sha256Sums(T3Release("0.1.6-pw.5", "v0.1.6-pw.5", server.url("/download").toString().trimEnd('/')))
+            val sums = source().sha256Sums(T3Release("0.1.1", "v0.1.1", server.url("/download").toString().trimEnd('/')))
 
-            assertEquals(hash.lowercase(), sums["t3-0.1.6-pw.5-android-linux-arm64-musl.tar.gz"])
-            assertEquals("b".repeat(64), sums["t3-0.1.6-pw.5-android-linux-x64-musl.tar.gz"])
+            assertEquals(hash.lowercase(), sums["cox-0.1.1-android-linux-arm64-musl.tar.gz"])
+            assertEquals("b".repeat(64), sums["cox-0.1.1-android-linux-x64-musl.tar.gz"])
             assertEquals(2, sums.size)
         }
 
@@ -91,14 +99,15 @@ class T3ReleaseSourceTest {
         server.enqueue(MockResponse().setBody(""))
         assert(
             runCatching {
-                runBlocking { source().sha256Sums(T3Release("0.1.6-pw.5", "v0.1.6-pw.5", server.url("/download").toString().trimEnd('/'))) }
+                runBlocking { source().sha256Sums(T3Release("0.1.1", "v0.1.1", server.url("/download").toString().trimEnd('/'))) }
             }.isFailure,
         )
     }
 
     @Test
     fun `tag parsing handles extra json fields`() {
-        assertEquals("0.1.6-pw.5", GithubT3ReleaseSource.parseVersionOrNull("""{"tag_name":"v0.1.6-pw.5","assets":[]}"""))
+        assertEquals("0.1.1", GithubT3ReleaseSource.parseVersionOrNull("""{"tag_name":"v0.1.1","assets":[]}"""))
+        assertEquals("0.1.6-pw.5", GithubT3ReleaseSource.parseVersionOrNull("""{"tag_name":"v0.1.6-pw.5"}"""))
         assertNull(GithubT3ReleaseSource.parseVersionOrNull("""{"tag_name":"nightly"}"""))
         assertNull(GithubT3ReleaseSource.parseVersionOrNull("not json"))
     }

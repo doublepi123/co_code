@@ -286,6 +286,7 @@ class LocalRuntimeControllerTest {
         watchdogPollMillis: Long = 500L,
         versionSource: PackageVersionSource? = null,
         serverFor: ((ServerKind) -> RuntimeServer)? = null,
+        pinnedT3Version: String = "0.1.6-pw.5",
     ): DefaultLocalRuntimeController {
         val job = SupervisorJob()
         val scope = CoroutineScope(job + StandardTestDispatcher(testScheduler))
@@ -300,7 +301,7 @@ class LocalRuntimeControllerTest {
             manifestAgents = agents,
             selectionStore = selection,
             serverSelectionStore = serverSelection,
-            pinnedT3Version = "0.1.6-pw.5",
+            pinnedT3Version = pinnedT3Version,
             listener = RuntimeStateListener { state -> states?.add(state) },
             foregroundStarter = ForegroundStarter { op -> requested?.add(op) },
             killOwned = { killed?.add(1) },
@@ -717,12 +718,57 @@ class LocalRuntimeControllerTest {
         }
 
     @Test
-    fun `an older installed version is never offered a downgrade`() =
+    fun `a legacy t3 bundle is always offered the cox release even though it sorts higher`() =
         controllerTest {
             val controller =
                 controller(
-                    FakeInstaller(folder.root, installed = runtimeWith(folder.root, PackageVersions("0.2.0-pw.1", mapOf("opencode" to "2.2.5")))),
+                    FakeInstaller(
+                        folder.root,
+                        installed = runtimeWith(folder.root, PackageVersions("0.1.6-pw.6", mapOf("opencode" to "2.2.5"))),
+                    ),
                     FakeServer(),
+                    versionSource = FixedSource(PackageVersions("0.1.1", mapOf("opencode" to "2.2.5"))),
+                    pinnedT3Version = "0.1.1",
+                )
+            controller.initialize()
+            step()
+            controller.checkForUpdates()
+            step()
+
+            val update = controller.updates.value.available
+            assertEquals(VersionChange("0.1.6-pw.6", "0.1.1"), update?.t3)
+            assertTrue(update!!.replacesLegacyT3)
+            assertEquals("0.1.1", controller.updates.value.available?.t3?.target)
+        }
+
+    @Test
+    fun `a failed check still offers replacing a legacy bundle with the pinned cox version`() =
+        controllerTest {
+            val controller =
+                controller(
+                    FakeInstaller(
+                        folder.root,
+                        installed = runtimeWith(folder.root, PackageVersions("0.1.6-pw.6", emptyMap())),
+                    ),
+                    FakeServer(),
+                    versionSource = FixedSource(error = java.io.IOException("offline")),
+                    pinnedT3Version = "0.1.1",
+                )
+            controller.initialize()
+            step()
+
+            assertEquals(VersionChange("0.1.6-pw.6", "0.1.1"), controller.updates.value.available?.t3)
+            assertTrue(controller.updates.value.available!!.replacesLegacyT3)
+        }
+
+    @Test
+    fun `a cox bundle newer than the pinned version is never offered a downgrade`() =
+        controllerTest {
+            val controller =
+                controller(
+                    FakeInstaller(folder.root, installed = runtimeWith(folder.root, PackageVersions("0.2.0", mapOf("opencode" to "2.2.5")))),
+                    FakeServer(),
+                    pinnedT3Version = "0.1.1",
                 )
             controller.initialize()
             step()

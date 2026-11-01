@@ -23,7 +23,6 @@ import io.cocode.app.runtime.process.ProotCommands
 import io.cocode.app.runtime.process.terminateProcessTree
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -508,7 +507,7 @@ class RuntimeEnvironmentInstaller(
             } catch (error: Throwable) {
                 throw UserFacingException(
                     MessageKey.ServerInstallFailed,
-                    "Unable to read the T3 Code checksum list: ${error.message}",
+                    "Unable to read the Cox checksum list: ${error.message}",
                 )
             } ?: throw UserFacingException(
                 MessageKey.ServerInstallFailed,
@@ -536,14 +535,16 @@ class RuntimeEnvironmentInstaller(
         arch: String,
         version: String,
     ) {
-        require(File(target, "bin.mjs").isFile) { "T3 Code bundle has no bin.mjs" }
-        require(File(target, "client/index.html").isFile) { "T3 Code bundle has no client/index.html" }
+        require(File(target, "bin.mjs").isFile) { "Cox bundle has no bin.mjs" }
+        require(File(target, "client/index.html").isFile) { "Cox bundle has no client/index.html" }
         val info =
-            runCatching {
-                json.decodeFromString<T3BundleInfo>(File(target, "ANDROID-BUNDLE.json").readText())
-            }.getOrNull() ?: error("T3 Code bundle has no readable ANDROID-BUNDLE.json")
-        require(info.arch == arch) { "T3 Code bundle is for ${info.arch}, expected $arch" }
-        require(info.version == version) { "T3 Code bundle is ${info.version}, expected $version" }
+            InstalledComponents.bundleInDirectory(target)
+                ?: error("Cox bundle has no readable ANDROID-BUNDLE.json")
+        require(info.server == InstalledComponents.COX_SERVER) {
+            "Cox bundle does not identify itself as ${InstalledComponents.COX_SERVER} (found ${info.server})"
+        }
+        require(info.arch == arch) { "Cox bundle is for ${info.arch}, expected $arch" }
+        require(info.version == version) { "Cox bundle is ${info.version}, expected $version" }
     }
 
     private fun verifyPty(
@@ -551,7 +552,7 @@ class RuntimeEnvironmentInstaller(
         rootfs: File,
     ) {
         require(File(rootfs, PTY_MODULE_GUEST.removePrefix("/")).isDirectory) {
-            "T3 Code bundle has no node-pty module"
+            "Cox bundle has no node-pty module"
         }
         File(rootfs, PTY_SMOKE_GUEST_PATH.removePrefix("/")).apply {
             parentFile?.mkdirs()
@@ -662,7 +663,7 @@ class RuntimeEnvironmentInstaller(
     ) {
         if (ServerKind.T3 in kinds) {
             require(InstalledComponents.serverAssetsPresent(rootfs, ServerKind.T3)) {
-                "T3 Code install is incomplete"
+                "Cox install is incomplete"
             }
             verifyPty(runner, rootfs)
         }
@@ -1004,13 +1005,6 @@ class RuntimeEnvironmentInstaller(
                 }
                 .start()
     }
-
-    @Serializable
-    internal data class T3BundleInfo(
-        val version: String? = null,
-        val arch: String? = null,
-        val libc: String? = null,
-    )
 
     companion object {
         /** Alpine packages. node-pty in the T3 bundle is already built for musl, so no toolchain. */

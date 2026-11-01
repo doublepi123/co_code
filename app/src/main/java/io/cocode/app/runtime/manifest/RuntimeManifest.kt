@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * `assets/runtime-manifest.json`: which Alpine rootfs, which T3 Code server release and which agent
- * CLIs the app installs. It also supplies the port and the per-ABI rootfs pins.
+ * `assets/runtime-manifest.json`: which Alpine rootfs, which Cox (T3 Code protocol) server release
+ * and which agent CLIs the app installs. It also supplies the port and the per-ABI rootfs pins.
  */
 @Serializable
 data class RuntimeManifest(
@@ -21,9 +21,9 @@ data class RuntimeManifest(
     fun architecture(abi: String): RuntimeArchitecture =
         requireNotNull(architectures[abi]) { "Linux runtime does not support ABI $abi" }
 
-    /** The T3 bundle architecture name for [abi] (`arm64`, `x64`). */
+    /** The Cox bundle architecture name for [abi] (`arm64`, `x64`). */
     fun t3Arch(abi: String): String =
-        requireNotNull(t3.architectures[abi]) { "T3 Code does not support ABI $abi" }
+        requireNotNull(t3.architectures[abi]) { "Cox does not support ABI $abi" }
 
     fun agent(id: String): AgentSpec? = agents.firstOrNull { it.id == id }
 
@@ -31,13 +31,13 @@ data class RuntimeManifest(
         require(schemaVersion == 1) { "Unsupported runtime manifest schema: $schemaVersion" }
         require(runtimeVersion.isNotBlank()) { "Runtime version is missing" }
         require(alpineVersion.isNotBlank()) { "Alpine version is missing" }
-        require(port in 1024..65535) { "Invalid T3 Code port: $port" }
+        require(port in 1024..65535) { "Invalid Cox port: $port" }
         require(architectures.isNotEmpty()) { "Runtime manifest has no architectures" }
         architectures.forEach { (abi, item) -> item.validate(abi) }
         t3.validate()
         openchamber.validate()
         require(t3.architectures.keys.containsAll(architectures.keys)) {
-            "T3 Code has no bundle for: ${architectures.keys - t3.architectures.keys}"
+            "Cox has no bundle for: ${architectures.keys - t3.architectures.keys}"
         }
         require(agents.isNotEmpty()) { "Runtime manifest has no agents" }
         require(agents.map(AgentSpec::id).distinct().size == agents.size) { "Agent ids must be unique" }
@@ -45,7 +45,10 @@ data class RuntimeManifest(
     }
 }
 
-/** The on-device T3 Code server bundle, published as a GitHub release. */
+/**
+ * The on-device Cox server bundle, published as a GitHub release. Cox speaks the T3 Code protocol,
+ * so remote T3 Code servers stay compatible; only the product and its bundle names differ.
+ */
 @Serializable
 data class T3Spec(
     val repository: String,
@@ -61,21 +64,24 @@ data class T3Spec(
     ): String = assetPattern.replace("{version}", version).replace("{arch}", arch)
 
     fun validate() {
-        require(REPOSITORY.matches(repository)) { "Invalid T3 repository: $repository" }
-        require(VERSION.matches(version)) { "Invalid T3 version: $version" }
+        require(REPOSITORY.matches(repository)) { "Invalid Cox repository: $repository" }
+        require(VERSION.matches(version)) { "Invalid Cox version: $version" }
         require(assetPattern.contains("{version}") && assetPattern.contains("{arch}")) {
-            "Invalid T3 asset pattern: $assetPattern"
+            "Invalid Cox asset pattern: $assetPattern"
         }
-        require(architectures.isNotEmpty()) { "T3 Code has no architectures" }
+        require(architectures.isNotEmpty()) { "Cox has no architectures" }
         architectures.forEach { (abi, arch) ->
-            require(abi.isNotBlank() && arch.isNotBlank()) { "Invalid T3 architecture entry: $abi" }
+            require(abi.isNotBlank() && arch.isNotBlank()) { "Invalid Cox architecture entry: $abi" }
         }
     }
 
     companion object {
-        /** `v0.1.6-pw.5`: pre-release tags, but only this shape counts. */
-        val TAG = Regex("""^v(\d+\.\d+\.\d+-pw\.\d+)$""")
-        val VERSION = Regex("""^\d+\.\d+\.\d+-pw\.\d+$""")
+        /**
+         * `v0.1.1` (Cox) and `v0.1.6-pw.5` (the legacy T3 Code build) both count: Cox tags plain
+         * semver, while the embedded T3 releases used a `-pw.N` suffix.
+         */
+        val TAG = Regex("""^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$""")
+        val VERSION = Regex("""^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$""")
         val REPOSITORY = Regex("""^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$""")
     }
 }

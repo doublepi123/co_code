@@ -13,7 +13,7 @@ Files: `RuntimeService.kt` (Android service), `RuntimeServicePolicy.kt` (pure de
 
 ## Design
 
-- `RuntimeService` is `Service()` with `exported=false`, `specialUse` type (manifest subtype text: keeps the on-device T3 Code web server running in the background).
+- `RuntimeService` is `Service()` with `exported=false`, `specialUse` type (manifest subtype text: keeps the on-device Cox web server running in the background).
 - Dependency: `LocalRuntimeController` via Koin `inject()`. Exposes `busy: Flow<Boolean>` and `state: StateFlow<RuntimeState>`, and `perform(RuntimeOperation)`.
 - Foreground barrier: `onStartCommand` calls `enterForeground(...)` before anything else (`ServiceCompat.startForeground`, type `FOREGROUND_SERVICE_TYPE_SPECIAL_USE`).
 - Actions on the start intent:
@@ -68,4 +68,4 @@ Stop from the notification:
 - Started from `runtime/` (`ForegroundStarter` lambda in `di/AppModule.kt`) only. Not bound.
 - Manifest entry: `app/src/main/AndroidManifest.xml`, `android:name=".service.RuntimeService"`, `exported="false"`, `foregroundServiceType="specialUse"`. Permissions: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`.
 - `WakeHold` is called from this folder only (`RuntimeService`). Its doc says the foreground starter acquires it before commands run; that path is not confirmed here (see `runtime/codemap.md`).
-- No HTTP endpoints. Local T3 Code health is checked by `runtime/process/HealthProbe` (not here).
+- No HTTP endpoints. Local Cox health is checked by `runtime/process/HealthProbe` (not here).

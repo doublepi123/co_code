@@ -1,6 +1,7 @@
 package io.cocode.app.runtime
 
 import io.cocode.app.runtime.install.InstallReporter
+import io.cocode.app.runtime.install.InstalledComponents
 import io.cocode.app.runtime.install.InstalledRuntime
 import io.cocode.app.runtime.install.PackageVersionSource
 import io.cocode.app.runtime.install.PackageVersions
@@ -105,6 +106,9 @@ class DefaultLocalRuntimeController(
 
     private val mutableInfo = MutableStateFlow<RuntimeInfo?>(null)
     override val info: StateFlow<RuntimeInfo?> = mutableInfo.asStateFlow()
+
+    /** Whether the installed T3-kind bundle is the legacy T3 Code build rather than Cox. */
+    private var installedT3IsLegacy = false
 
     private val knownAgentIds = manifestAgents.map { it.id }.toSet()
     private val initialSelection = sanitizeSelection(selectionStore.selected())
@@ -661,9 +665,11 @@ class DefaultLocalRuntimeController(
      */
     private fun recomputeAvailable(runtime: InstalledRuntime) {
         val installedServers = installedServerVersions(runtime.rootfs, runtime.metadata)
+        val t3Current = installedServers[ServerKind.T3] ?: runtime.metadata.t3Version
+        installedT3IsLegacy = InstalledComponents.isLegacyT3Bundle(runtime.rootfs, t3Current)
         val installed =
             PackageVersions(
-                t3 = installedServers[ServerKind.T3] ?: runtime.metadata.t3Version,
+                t3 = t3Current,
                 agents = runtime.metadata.agents,
                 servers = installedServers,
             )
@@ -677,8 +683,14 @@ class DefaultLocalRuntimeController(
     ): RuntimeUpdate? {
         val t3Current = installed.servers[ServerKind.T3] ?: installed.t3
         val t3Installed = ServerKind.T3 in installed.servers
+        val replacesLegacyT3 = t3Installed && installedT3IsLegacy
         val targetT3 =
-            if (t3Installed) {
+            if (replacesLegacyT3) {
+                // Never compare a legacy T3 Code version with a Cox version: the latest Cox release
+                // (or the manifest's pinned Cox version) replaces any legacy bundle, even when the
+                // legacy version string sorts higher.
+                registry?.t3 ?: pinnedT3Version ?: t3Current
+            } else if (t3Installed) {
                 newestOf(registry?.servers?.get(ServerKind.T3), registry?.t3, pinnedT3Version, t3Current)
                     ?: t3Current
             } else {
@@ -698,7 +710,13 @@ class DefaultLocalRuntimeController(
                 .mapValues { (kind, current) ->
                     VersionChange(current, newestOf(registry?.servers?.get(kind), current) ?: current)
                 }
-        val update = RuntimeUpdate(t3 = t3, agents = agents, servers = servers)
+        val update =
+            RuntimeUpdate(
+                t3 = t3,
+                agents = agents,
+                servers = servers,
+                replacesLegacyT3 = replacesLegacyT3,
+            )
         return update.takeIf { it.hasChanges }
     }
 

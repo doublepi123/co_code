@@ -14,8 +14,8 @@ data class RuntimeAlert(
 /**
  * Turns controller state transitions into runtime alerts.
  *
- * - Failed(Install) → "Setup failed", Failed(Start) → "T3 Code didn't start",
- *   Failed(Runtime) → "T3 Code stopped". A user-initiated Stop is never an alert: Stop goes to
+ * - Failed(Install) → "Setup failed", Failed(Start) → "Cox didn't start",
+ *   Failed(Runtime) → "Cox stopped". A user-initiated Stop is never an alert: Stop goes to
  *   Stopped/NotInstalled and never to Failed.
  */
 class RuntimeErrorWatch(
@@ -32,7 +32,7 @@ class RuntimeErrorWatch(
         val stopped: String,
     ) {
         companion object {
-            val English = Titles("Setup failed", "T3 Code didn't start", "T3 Code stopped")
+            val English = Titles("Setup failed", "Cox didn't start", "Cox stopped")
         }
     }
 

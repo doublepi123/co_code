@@ -27,6 +27,13 @@ class InstalledComponentsTest {
         }
     }
 
+    private fun bundle(rootfs: File, json: String) {
+        File(rootfs, InstalledComponents.T3_BUNDLE_INFO).apply {
+            parentFile?.mkdirs()
+            writeText(json)
+        }
+    }
+
     private fun openChamberAssets(rootfs: File, version: String = "2.5.3") {
         File(rootfs, "usr/local/lib/node_modules/@openchamber/web/bin/cli.js").apply {
             parentFile?.mkdirs()
@@ -122,5 +129,51 @@ class InstalledComponentsTest {
         openChamberAssets(rootfs, version = "2.5.4")
 
         assertEquals("2.5.4", InstalledComponents.openChamberVersion(rootfs))
+    }
+
+    @Test
+    fun `a cox bundle is identified by its server field`() {
+        val rootfs = rootfs()
+        bundle(rootfs, """{"version":"0.1.1","arch":"arm64","libc":"musl","server":"cox"}""")
+
+        val identity = InstalledComponents.t3Bundle(rootfs)!!
+        assertEquals("0.1.1", identity.version)
+        assertEquals("arm64", identity.arch)
+        assertEquals("musl", identity.libc)
+        assertEquals("cox", identity.server)
+        assertTrue(InstalledComponents.isCoxServerBundle(rootfs))
+        assertFalse(InstalledComponents.isLegacyT3Bundle(rootfs, "0.1.1"))
+    }
+
+    @Test
+    fun `a bundle without the cox server field is the legacy t3 build`() {
+        val rootfs = rootfs()
+        bundle(rootfs, """{"version":"0.1.6-pw.6","arch":"arm64","libc":"musl"}""")
+
+        assertFalse(InstalledComponents.isCoxServerBundle(rootfs))
+        assertTrue(InstalledComponents.isLegacyT3Bundle(rootfs, "0.1.6-pw.6"))
+    }
+
+    @Test
+    fun `an extracted bundle directory is read directly, not as a rootfs`() {
+        // The installer verifies the freshly extracted `opt/t3` directory itself.
+        val extracted = temporaryFolder.newFolder("extracted-opt-t3")
+        File(extracted, "ANDROID-BUNDLE.json").writeText(
+            """{"version":"0.1.1","arch":"arm64","libc":"musl","server":"cox"}""",
+        )
+
+        val identity = InstalledComponents.bundleInDirectory(extracted)!!
+        assertEquals("cox", identity.server)
+        assertEquals("0.1.1", identity.version)
+        assertEquals(null, InstalledComponents.t3Bundle(extracted))
+    }
+
+    @Test
+    fun `without bundle metadata the legacy version suffix decides`() {
+        val rootfs = rootfs()
+
+        assertTrue(InstalledComponents.isLegacyT3Bundle(rootfs, "0.1.6-pw.6"))
+        assertFalse(InstalledComponents.isLegacyT3Bundle(rootfs, "0.1.1"))
+        assertFalse(InstalledComponents.isLegacyT3Bundle(rootfs, null))
     }
 }

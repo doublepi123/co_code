@@ -86,13 +86,31 @@ class ProotCommandsTest {
         assertEquals("127.0.0.1", env["T3CODE_HOST"])
         assertEquals("3773", env["T3CODE_PORT"])
         assertEquals("true", env["T3CODE_NO_BROWSER"])
-        assertEquals("/root/.t3", env["T3CODE_HOME"])
+        assertEquals("/root/.cox", env["COX_HOME"])
+        assertFalse(env.containsKey("T3CODE_HOME"))
         assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
         assertEquals("true", env["OPENCODE_DISABLE_AUTOUPDATE"])
         assertEquals("1", env["IS_SANDBOX"])
         assertEquals("--require /opt/cocode/android-shim.cjs", env["NODE_OPTIONS"])
         assertFalse(env.containsKey("OPENCODE_CONFIG_CONTENT"))
-        assertFalse("T3 must never receive OpenChamber secrets", env.keys.any { it.startsWith("OPENCHAMBER_") })
+        assertFalse("Cox must never receive OpenChamber secrets", env.keys.any { it.startsWith("OPENCHAMBER_") })
+    }
+
+    @Test
+    fun `a legacy t3 bundle keeps its T3CODE_HOME until it is updated`() {
+        val env =
+            ProotCommands.serverEnvironment(
+                suiteEnvironment = emptyMap(),
+                prootTmp = prootTmp,
+                port = 3773,
+                uiPassword = "secret-password",
+                kind = ServerKind.T3,
+                coxBundle = false,
+            )
+
+        assertEquals("/root/.t3", env["T3CODE_HOME"])
+        assertFalse(env.containsKey("COX_HOME"))
+        assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
     }
 
     @Test

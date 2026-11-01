@@ -8,15 +8,17 @@ package io.cocode.app.runtime
  * UI password and log file; a password or cookie from one kind is never reused for the other.
  *
  * [id] is stable storage/UI identity (also used for `ServerTarget` ids). [displayName] is the English
- * technical name; the UI localises it. [port] is fixed rather than read from the runtime metadata, so
- * an older metadata file can never point a kind at another kind's port.
+ * technical name; the UI localises it. `T3` keeps its historical id for saved targets and
+ * preferences, but its on-device server is Cox (which speaks the T3 Code protocol). [port] is fixed
+ * rather than read from the runtime metadata, so an older metadata file can never point a kind at
+ * another kind's port.
  */
 enum class ServerKind(
     val id: String,
     val displayName: String,
     val port: Int,
 ) {
-    T3("t3", "T3 Code", 3773),
+    T3("t3", "Cox", 3773),
     OpenChamber("openchamber", "OpenChamber", 3000),
     ;
 

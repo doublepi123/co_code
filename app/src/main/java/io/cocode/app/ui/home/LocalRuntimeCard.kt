@@ -1238,7 +1238,7 @@ private fun TitleWithAction(
     }
 }
 
-/** One line per package that changes: "T3 Code 2.4.0 → 2.5.0", versions in mono. */
+/** One line per package that changes: "Cox 2.4.0 → 2.5.0", versions in mono. */
 @Composable
 private fun VersionChanges(
     update: RuntimeUpdate,
@@ -1247,13 +1247,25 @@ private fun VersionChanges(
     modifier: Modifier = Modifier,
 ) {
     val t3Name = stringResource(R.string.detail_t3)
+    val legacyT3Name = stringResource(R.string.server_t3_legacy)
+    val t3Line =
+        update.t3.takeIf { it.changed }?.let { change ->
+            if (update.replacesLegacyT3) {
+                // Across products: name the bundle that is replaced and the one that arrives.
+                versionChangeText(legacyT3Name, change, emphasis, targetName = t3Name)
+            } else {
+                versionChangeText(t3Name, change, emphasis)
+            }
+        }
     val changes =
-        listOfNotNull(update.t3.takeIf { it.changed }?.let { t3Name to it }) +
-            update.agents.filter { it.change.changed }.map { it.displayName to it.change }
+        listOfNotNull(t3Line?.let { t3Name to it }) +
+            update.agents
+                .filter { it.change.changed }
+                .map { it.displayName to versionChangeText(it.displayName, it.change, emphasis) }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(1.dp)) {
-        changes.forEach { (name, change) ->
+        changes.forEach { (_, text) ->
             Text(
-                text = versionChangeText(name, change, emphasis),
+                text = text,
                 style = MaterialTheme.typography.bodySmall,
                 color = color,
             )
@@ -1265,14 +1277,19 @@ private fun versionChangeText(
     name: String,
     change: VersionChange,
     emphasis: Color,
+    targetName: String = name,
 ) = buildAnnotatedString {
     append(name)
     append("  ")
     withStyle(SpanStyle(fontFamily = MonoFamily)) {
-        // An unknown installed version shows only where it goes.
-        change.current?.let {
-            append(it)
+        if (change.current != null) {
+            append(change.current)
             append(" → ")
+            append(targetName)
+            append(" ")
+        } else {
+            append(targetName)
+            append(" ")
         }
         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = emphasis)) { append(change.target) }
     }

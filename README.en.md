@@ -8,7 +8,7 @@
 
 **CoCode runs a coding-agent server locally on an Android phone — no computer, no root.**
 
-CoCode is derived from AndChamber (MIT). Install **T3 Code, OpenChamber, or both** in one Alpine Linux environment under PRoot (no root). One server runs at a time; switching requires confirmation before stopping the current server. They share the guest home, projects and OpenCode configuration, but keep separate passwords, WebView profiles and server data. Both remote server types are supported too.
+CoCode is derived from AndChamber (MIT). Install **Cox, OpenChamber, or both** in one Alpine Linux environment under PRoot (no root). One server runs at a time; switching requires confirmation before stopping the current server. Cox is a local-only fork of T3 Code and speaks the same protocol, so remote T3 Code servers still work. They share the guest home, projects and OpenCode configuration, but keep separate passwords, WebView profiles and server data. Both remote server types are supported too.
 
 - **Pick your agents**: Codex, Claude Code and OpenCode. Adding one preserves the others; removal needs confirmation. OpenCode is marked required when OpenChamber needs it.
 - **App update prompt**: checks this project's GitHub Releases on opening, including 0.x prereleases, and offers the download page. No automatic installation or task interruption.
@@ -23,11 +23,11 @@ Runtime errors are notified natively; agent notifications from the web UI are no
 |---|---|
 | Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
 | Node.js | Alpine 24.x |
-| T3 Code server | GitHub release from `doublepi123/t3code`, default 0.1.6-pw.5 |
+| Cox server | GitHub release from `doublepi123/cox`, default 0.1.1 (T3 Code protocol) |
 | OpenChamber server (optional) | npm `@openchamber/web`, latest at install time |
 | Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode); latest at install time |
 | PRoot | locally built 5.1.107.98 |
-| Ports | T3 Code 3773, OpenChamber 3000 (loopback only) |
+| Ports | Cox 3773, OpenChamber 3000 (loopback only) |
 
 ### Shared folders (optional)
 

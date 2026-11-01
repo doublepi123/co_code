@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The only Koin composition root: `AppModule.kt` declares `val appModule = module { ... }`. It builds every long-lived object (OkHttp, stores, runtime alerts, runtime controller, T3 Code server adapter, web session authenticator) from Android `Context`, filesDir, nativeLibraryDir and assets. No business logic lives here beyond wiring and two small helpers.
+The only Koin composition root: `AppModule.kt` declares `val appModule = module { ... }`. It builds every long-lived object (OkHttp, stores, runtime alerts, runtime controller, Cox server adapter, web session authenticator) from Android `Context`, filesDir, nativeLibraryDir and assets. No business logic lives here beyond wiring and two small helpers.
 
 ## Design
 

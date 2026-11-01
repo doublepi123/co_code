@@ -6,14 +6,14 @@
     <string name="tagline">A coding agent on this phone</string>
 
     <!-- Runtime notification (foreground service) -->
-    <string name="runtime_notification_channel">T3 Code runtime</string>
-    <string name="runtime_notification_channel_description">Keeps the on-device T3 Code server running</string>
-    <string name="runtime_notification_title">T3 Code</string>
+    <string name="runtime_notification_channel">Cox runtime</string>
+    <string name="runtime_notification_channel_description">Keeps the on-device Cox server running</string>
+    <string name="runtime_notification_title">Cox</string>
     <string name="runtime_notification_setup">Setting up the Linux environment</string>
-    <string name="runtime_notification_updating">Updating T3 Code and agents</string>
-    <string name="runtime_notification_starting">Starting T3 Code</string>
+    <string name="runtime_notification_updating">Updating Cox and agents</string>
+    <string name="runtime_notification_starting">Starting Cox</string>
     <string name="runtime_notification_running">Running at %1$s</string>
-    <string name="runtime_notification_stopping">Stopping T3 Code</string>
+    <string name="runtime_notification_stopping">Stopping Cox</string>
     <string name="runtime_notification_stop">Stop</string>
     <string name="runtime_notification_not_installed">Not installed</string>
     <string name="runtime_notification_stopped">Stopped</string>
@@ -25,8 +25,8 @@
 
     <!-- CoCode runtime alerts (notifications) -->
     <string name="alert_setup_failed">Setup failed</string>
-    <string name="alert_start_failed">T3 Code didn\'t start</string>
-    <string name="alert_stopped">T3 Code stopped</string>
+    <string name="alert_start_failed">Cox didn\'t start</string>
+    <string name="alert_stopped">Cox stopped</string>
 
     <!-- Launch -->
     <string name="launch_checking">Checking…</string>
@@ -52,7 +52,7 @@
     <string name="status_problem">Problem</string>
     <string name="status_unsupported">Not supported</string>
 
-    <string name="setup_intro">Installs a small Linux system on this phone and runs T3 Code or OpenChamber with your coding agents inside it. Your projects and sessions stay on the device.</string>
+    <string name="setup_intro">Installs a small Linux system on this phone and runs Cox or OpenChamber with your coding agents inside it. Your projects and sessions stay on the device.</string>
     <string name="setup_fact_contents">Alpine Linux, Node.js, Git, the servers you pick and agent CLIs</string>
     <string name="setup_fact_size">About 1.2 GB to download and store</string>
     <string name="setup_fact_wifi">Wi-Fi recommended</string>
@@ -81,7 +81,7 @@
     <string name="repair">Repair</string>
     <string name="repair_explain">Repair reinstalls the Linux system. Your projects are kept when possible.</string>
     <string name="unsupported_title">Not available on this device</string>
-    <string name="unsupported_body">Running a server on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a T3 Code or OpenChamber server on your computer below.</string>
+    <string name="unsupported_body">Running a server on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a Cox / T3 Code or OpenChamber server on your computer below.</string>
     <string name="show_log">Log</string>
     <string name="details">Details</string>
     <string name="log_title">Log</string>
@@ -114,21 +114,21 @@
     <string name="detail_abi">Processor</string>
     <string name="detail_alpine">Alpine Linux</string>
     <string name="detail_node">Node.js</string>
-    <string name="detail_t3">T3 Code</string>
+    <string name="detail_t3">Cox</string>
     <string name="detail_agents">Agents</string>
     <string name="detail_disk_used">Disk used</string>
     <string name="detail_free_space">Free space</string>
     <string name="unknown_value">—</string>
     <string name="uninstall">Uninstall</string>
 
-    <!-- T3 Code and OpenCode updates -->
+    <!-- Cox and OpenCode updates -->
     <string name="update_available">Update available</string>
     <string name="update">Update</string>
     <string name="updating_title">Updating on-device environment…</string>
-    <string name="update_background_note">T3 Code is unavailable until the update is done. You can leave the app. The update keeps going in the background and shows its progress in a notification.</string>
-    <string name="update_dialog_title">Update T3 Code?</string>
-    <string name="update_dialog_body_running">T3 Code stops during the update and starts again afterwards, so running tasks are interrupted. The update downloads up to a few hundred MB and takes several minutes. Projects and settings are kept, and if anything fails, the current version keeps working.</string>
-    <string name="update_dialog_body">The update downloads up to a few hundred MB and takes several minutes. T3 Code can\'t start until it\'s done. Projects and settings are kept, and if anything fails, the current version keeps working.</string>
+    <string name="update_background_note">Cox is unavailable until the update is done. You can leave the app. The update keeps going in the background and shows its progress in a notification.</string>
+    <string name="update_dialog_title">Update Cox?</string>
+    <string name="update_dialog_body_running">Cox stops during the update and starts again afterwards, so running tasks are interrupted. The update downloads up to a few hundred MB and takes several minutes. Projects and settings are kept, and if anything fails, the current version keeps working.</string>
+    <string name="update_dialog_body">The update downloads up to a few hundred MB and takes several minutes. Cox can\'t start until it\'s done. Projects and settings are kept, and if anything fails, the current version keeps working.</string>
     <string name="update_failed_title">The update didn\'t finish</string>
     <string name="update_failed_kept">The current version is still installed and works as before.</string>
     <string name="dismiss">Dismiss</string>
@@ -218,7 +218,7 @@
     <string name="add">Add</string>
     <string name="edit_server">Edit server</string>
     <string name="empty_servers_title">Connect to your computer</string>
-    <string name="empty_servers_body">Add the address of a T3 Code or OpenChamber server on your computer or network, for example 192.0.2.20:3773.</string>
+    <string name="empty_servers_body">Add the address of a Cox / T3 Code or OpenChamber server on your computer or network, for example 192.0.2.20:3773.</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>
     <string name="more_options">More options</string>
@@ -307,26 +307,26 @@
     <!-- Runtime message headlines (MessageKey) -->
     <string name="msg_mirrors_unreachable">This device can\'t reach the package mirrors (Alpine, npm). Check the network or VPN, then try again.</string>
     <string name="msg_packages_failed">Unable to install Linux packages. Check the network and retry.</string>
-    <string name="msg_server_install_failed">Unable to download or verify the T3 Code server.</string>
+    <string name="msg_server_install_failed">Unable to download or verify the Cox server.</string>
     <string name="msg_agent_install_failed">Unable to install the selected agent CLIs from npm.</string>
     <string name="msg_agents_required">Select at least one agent.</string>
     <string name="msg_pty_smoke_failed">The bundled node-pty does not work in the guest. The install is incomplete.</string>
     <string name="msg_port_in_use">Port %1$s is in use by another app</string>
-    <string name="msg_server_exited_during_start">T3 Code exited during startup</string>
-    <string name="msg_server_not_listening_in_time">T3 Code did not start listening in time</string>
-    <string name="msg_server_not_ready_in_time">T3 Code did not become ready in time</string>
-    <string name="msg_server_kept_stopping">T3 Code kept stopping; tap Start to try again</string>
-    <string name="msg_server_stopped_unexpectedly">T3 Code stopped unexpectedly</string>
-    <string name="msg_server_restart_failed">Restarting T3 Code failed</string>
+    <string name="msg_server_exited_during_start">Cox exited during startup</string>
+    <string name="msg_server_not_listening_in_time">Cox did not start listening in time</string>
+    <string name="msg_server_not_ready_in_time">Cox did not become ready in time</string>
+    <string name="msg_server_kept_stopping">Cox kept stopping; tap Start to try again</string>
+    <string name="msg_server_stopped_unexpectedly">Cox stopped unexpectedly</string>
+    <string name="msg_server_restart_failed">Restarting Cox failed</string>
     <string name="msg_embedded_proot_missing">The embedded Linux launcher is missing from the app</string>
     <string name="msg_generic">Something went wrong</string>
 
     <!-- Install progress sub-steps -->
     <string name="msg_progress_unpacking">Unpacking the Linux userland</string>
     <string name="msg_progress_installing_packages">Installing system packages</string>
-    <string name="msg_progress_installing_server">Installing T3 Code</string>
+    <string name="msg_progress_installing_server">Installing Cox</string>
     <string name="msg_progress_installing_agents">Installing agent CLIs</string>
-    <string name="msg_progress_verifying">Checking Node.js, T3 Code and the agent CLIs</string>
+    <string name="msg_progress_verifying">Checking Node.js, Cox and the agent CLIs</string>
     <string name="msg_progress_activating">Activating the environment</string>
     <string name="msg_progress_done">Done</string>
     <string name="msg_progress_copying_environment">Copying the current Linux system</string>
@@ -343,8 +343,12 @@
     <string name="app_update_later">Later</string>
     <string name="app_update_view">View release</string>
 
-    <!-- Local servers (T3 Code / OpenChamber). Product names are not translated. -->
-    <string name="server_t3" translatable="false">T3 Code</string>
+    <!-- Local servers (Cox / OpenChamber). Product names are not translated. -->
+    <string name="server_t3" translatable="false">Cox</string>
+    <!-- The bundle this app installed before Cox; shown only in the replacement update line. -->
+    <string name="server_t3_legacy" translatable="false">T3 Code</string>
+    <!-- A remote server of the same protocol: Cox or T3 Code both work. -->
+    <string name="server_t3_remote" translatable="false">Cox / T3 Code</string>
     <string name="server_openchamber" translatable="false">OpenChamber</string>
     <string name="servers_title">Servers</string>
     <string name="servers_hint">Pick one or both. Only one runs at a time; both use the same home folder and OpenCode settings.</string>

@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Builds the Alpine + Node + one or both server(s) + agent CLI environment in staging, verifies it, and activates it by an atomic directory swap. Also downloads and verifies the Alpine rootfs, the T3 Code bundle and OpenChamber's npm package, extracts/installs them without a host package manager, and recovers an environment swap that a process death interrupted. Every package mutation (install, update, agent change, server add/remove) is performed on a staging copy and committed by the same atomic swap.
+Builds the Alpine + Node + one or both server(s) + agent CLI environment in staging, verifies it, and activates it by an atomic directory swap. Also downloads and verifies the Alpine rootfs, the Cox bundle (or a legacy T3 Code bundle already installed) and OpenChamber's npm package, extracts/installs them without a host package manager, and recovers an environment swap that a process death interrupted. Every package mutation (install, update, agent change, server add/remove) is performed on a staging copy and committed by the same atomic swap.
 
 ## Design
 
@@ -10,15 +10,15 @@ Builds the Alpine + Node + one or both server(s) + agent CLI environment in stag
 - `RuntimeMetadata` (serialized to `environment/metadata.json`): `schemaVersion=2`, `runtimeVersion`, `alpineVersion`, `abi`, `port`, `t3Version` (legacy/compat), `servers` (`ServerKind.id` to version), `agents` (id to installed version, includes required dependencies), `nodeVersion`, `installedAt`. Legacy v0.1.0 metadata has no `schemaVersion`/`servers`; `recordedServerVersions()` interprets a non-blank `t3Version` as T3, and `installedRuntime()` rewrites the normalized record once.
 - `InstalledComponents`: server assets (`opt/t3/bin.mjs` + `client/index.html`; OpenChamber `bin/cli.js`, `dist/index.html`, `node_modules/node-pty`) and agent package/bin checks. `installedServerVersions(rootfs, metadata)` filters recorded servers to those with usable assets; `installedRuntime()` also filters agents and is not tied to `opt/t3`.
 - `PackageVersions` (`t3`, effective agent map, installed `servers` map) and `PackageVersionSource` (`latest(pinned)`).
-- `T3ReleaseSource` / `GithubT3ReleaseSource`: `latest()` reads `GET https://api.github.com/repos/<repo>/releases/latest`, accepts only tags shaped `v<x.y.z>-pw.<n>` and returns a `T3Release` with the GitHub download base. It returns null on any failure, so the installer and the update check fall back to the manifest's pinned version. `sha256Sums()` fetches `SHA256SUMS` and parses `<sha256>  <file>` lines (an optional `*` marks binary mode).
+- `T3ReleaseSource` / `GithubT3ReleaseSource`: `latest()` reads `GET https://api.github.com/repos/<repo>/releases/latest`, accepts semver tags (`v0.1.1`, and the legacy `v0.1.6-pw.5`) and returns a `T3Release` with the GitHub download base. It returns null on any failure, so the installer and the update check fall back to the manifest's pinned version. `sha256Sums()` fetches `SHA256SUMS` and parses `<sha256>  <file>` lines (an optional `*` marks binary mode).
 - `NpmPackageVersionSource`: latest stable npm version of one package (abbreviated registry metadata, 15 s timeout, injectable base URL). No major-version lock for agents; never below the installed version.
 - `DefaultPackageVersionSource`: combines the GitHub release with npm for the installed agents, and checks OpenChamber only when it is in the pinned installed-server map. A GitHub failure uses the manifest fallback; an npm failure throws so the controller reports `checkFailed`.
 - `RuntimeEnvironmentInstaller`: the pipeline. Its nested `GuestRunner` runs `/bin/sh -lc` inside PRoot with `ProotCommands`, streams output to `InstallReporter.log` and `logs/install.log`, and enforces a timeout. On timeout or interrupt, `awaitExit` kills the PRoot tree and waits for the launcher before returning. The live DNS monitor is not part of install: `configureRootfs` writes resolv.conf once, from the system DNS at that moment.
   - `AgentCommandRunner` (internal): the two guest operations agent selection needs (`mustSucceed`, `output`). `GuestRunner` implements it; `AgentSelectionApplyTest` fakes it to exercise the real apply flow without PRoot.
-  - `install`: Alpine, apk (`nodejs npm bash git curl ripgrep openssh-client ca-certificates libstdc++ python3`, plus `make g++ linux-headers` when OpenChamber is selected), shim, T3 bundle when selected, OpenChamber when selected, effective agents, verify all servers/agents, metadata, swap. Commands run with a disposable `install-home` inside staging.
-  - `installServer`: resolves the asset name from `assetPattern` and the ABI→arch map, downloads `SHA256SUMS` (fail closed when the asset is missing), downloads the tarball through `VerifiedRuntimeDownloader` with that SHA-256, extracts into `rootfs/opt/t3` with `stripComponents = 1`, and checks `bin.mjs`, `client/index.html`, and `ANDROID-BUNDLE.json` (`version`, `arch`).
+  - `install`: Alpine, apk (`nodejs npm bash git curl ripgrep openssh-client ca-certificates libstdc++ python3`, plus `make g++ linux-headers` when OpenChamber is selected), shim, Cox bundle when selected, OpenChamber when selected, effective agents, verify all servers/agents, metadata, swap. Commands run with a disposable `install-home` inside staging.
+  - `installServer`: resolves the asset name from `assetPattern` and the ABI→arch map, downloads `SHA256SUMS` (fail closed when the asset is missing), downloads the tarball through `VerifiedRuntimeDownloader` with that SHA-256, extracts into `rootfs/opt/t3` with `stripComponents = 1`, and checks `bin.mjs`, `client/index.html`, and `ANDROID-BUNDLE.json` (`version`, `arch`, `server == "cox"`).
   - `installOpenChamber`: removes only the OpenChamber program tree, installs `@openchamber/web` at latest (manifest pin fallback), requires Node `24.14.0` or newer, runs `npx --yes node-gyp rebuild` in its own `node_modules/node-pty`, and verifies `bin/cli.js`, `dist/index.html` and the PTY smoke. Build packages are installed with apk first.
-  - `update`: requires an active environment. Checks free space (`treeSize` + 512 MiB, else `UpdateNotEnoughSpace`), copies to staging, updates only installed servers (T3 target from GitHub/manifest, OpenChamber target from npm), updates changed effective agents, verifies every survivor (all installed servers and agents), writes metadata and swaps. Failure deletes staging only.
+  - `update`: requires an active environment. Checks free space (`treeSize` + 512 MiB, else `UpdateNotEnoughSpace`), copies to staging, updates only installed servers (Cox target from GitHub/manifest, OpenChamber target from npm), updates changed effective agents, verifies every survivor (all installed servers and agents), writes metadata and swaps. Failure deletes staging only.
   - `applyAgents`: copies to staging, then installs added/changed agents, removes no-longer-needed ones, restores any surviving selected agent whose files disappeared, verifies all effective agents and installed servers, writes metadata and swaps. It never mutates the active rootfs.
   - `applyServers`: copies to staging, removes deselected server trees, adds missing/changed server trees (with OpenChamber build tools), applies the effective agent set (including OpenChamber's OpenCode dependency), verifies every surviving server/agent, writes metadata and swaps. Home, workspace, the other server and agents are preserved.
   - `removeServerAssets`: deletes only `/opt/t3`, or the OpenChamber npm tree/policy/bin links; never home/config/workspace/agents.
@@ -42,7 +42,7 @@ Builds the Alpine + Node + one or both server(s) + agent CLI environment in stag
 Invariants:
 - The active environment is untouched until the commit rename. Every mutation (install/update/applyAgents/applyServers) is built in staging, and metadata is written inside staging, so the rename commits it too.
 - `installedRuntime()` returns null only when no recorded server has usable assets and the ABI/metadata are unusable; a legacy T3-only record needs `opt/t3/bin.mjs`/`client/index.html`, while an OpenChamber-only record does not require `opt/t3`.
-- A T3 bundle is never extracted without a checksum from `SHA256SUMS`.
+- A Cox bundle is never extracted without a checksum from `SHA256SUMS`; a new install must identify itself as `server:"cox"`.
 - OpenChamber's node-pty is rebuilt in the guest from source; the PTY smoke must pass for every installed server before verify.
 - Required OpenChamber agents (OpenCode) are part of the effective set; they are not written to the user-requested agent selection.
 
@@ -54,7 +54,7 @@ Install (`RuntimeEnvironmentInstaller.install`):
 3. ExtractRootfs: `extractTarGz` into `staging/rootfs`, then `configureRootfs` (resolv.conf from `SystemDnsProvider`, `/etc/hosts`, libapk SONAME symlink) and `seedHome` (persistent home is only seeded when empty).
 4. InstallPackages: `apk add nodejs npm bash git curl ripgrep openssh-client ca-certificates libstdc++ python3` plus `make g++ linux-headers` when OpenChamber is selected (`set -e`, 20 min).
 5. Write `/opt/cocode/android-shim.cjs` (before npm).
-6. Install selected servers: T3 via `installServer` (latest release, manifest fallback); OpenChamber via npm latest (manifest pin fallback) and node-pty rebuild.
+6. Install selected servers: Cox via `installServer` (latest release, manifest fallback); OpenChamber via npm latest (manifest pin fallback) and node-pty rebuild.
 7. InstallAgents: `npm i -g --no-fund --no-audit <effective packages>` (30 min), then `--version` for each.
 8. Verify: `node --version` (>=24.14 for OpenChamber), every installed server's assets/PTY smoke, every effective agent.
 9. Write `metadata.json` with `schemaVersion=2`, explicit `servers` map and effective `agents`. Then `activateRuntimeEnvironment(active, staging, rollback)`.
@@ -63,7 +63,7 @@ Install (`RuntimeEnvironmentInstaller.install`):
 Update (`RuntimeEnvironmentInstaller.update`, no Alpine download):
 1. Read the active metadata and installed server map. `deleteTreeOrThrow(staging)`. Check free space (`treeSize(environment)` + 512 MiB), else `UpdateNotEnoughSpace`.
 2. CopyEnvironment: `copyTreeStrict(environment, staging)`, clear the copied marker, retarget links into staging.
-3. For each installed server whose target version differs or assets are missing: remove its program tree and install the target (T3 GitHub, OpenChamber npm + node-pty build). Never install an unselected server.
+3. For each installed server whose target version differs or assets are missing: remove its program tree and install the target (Cox GitHub, OpenChamber npm + node-pty build). Never install an unselected server.
 4. `applyAgentSelection` removes changed/removed agents, installs target versions, restores surviving selected agents if needed, and verifies every effective agent.
 5. Verify every installed server (assets + PTY), Node version when OpenChamber is present, write metadata with the new server/agent maps, swap.
 6. Any throwable: `deleteTree(staging)`, rethrow. The active environment is untouched.
@@ -76,7 +76,7 @@ ApplyAgents (`RuntimeEnvironmentInstaller.applyAgents`, server stopped):
 
 ApplyServers (`RuntimeEnvironmentInstaller.applyServers`, server stopped):
 1. Copy the active environment to staging (free-space check).
-2. Remove deselected server program trees, install added/changed ones (OpenChamber adds build tools; T3 uses the existing download/verify path), preserving the other server, agents, home and workspace.
+2. Remove deselected server program trees, install added/changed ones (OpenChamber adds build tools; Cox uses the existing download/verify path), preserving the other server, agents, home and workspace.
 3. Apply the effective agent set (OpenChamber implies OpenCode), verify all survivors, write metadata with the new server map, swap.
 4. Failures delete staging; the previous environment and selection record stay active.
 
@@ -99,7 +99,7 @@ Recovery (`recoverInterruptedRuntimeEnvironment`, at every detection):
 - Depends on: `runtime/manifest/RuntimeManifest` (pins), `runtime/process/ProotCommands` and `EmbeddedCommandSuite` (launch), `runtime/process/ProcessTree` (kill on timeout), `runtime/network/ResolvConf`, `runtime/fs/SafeFiles`.
 - External contracts:
   - Alpine tarball: HTTPS URL and SHA-256 from `runtime-manifest.json`.
-  - T3 Code release: GitHub `doublepi123/t3code`, assets `t3-<version>-android-linux-<arch>-musl.tar.gz` and `SHA256SUMS`.
+  - Cox release: GitHub `doublepi123/cox`, assets `cox-<version>-android-linux-<arch>-musl.tar.gz` and `SHA256SUMS`; `ANDROID-BUNDLE.json` states `server:"cox"`. A legacy `-pw.N` T3 bundle is replaced by the latest Cox release, never version-compared with it.
   - OpenChamber: npm `@openchamber/web` (fallback `2.5.3`), Node >=24.14.0, guest `bin/cli.js`, `dist/index.html`, its own nested `node-pty` rebuilt in place.
   - Agent CLIs: `@openai/codex` (`codex`), `@anthropic-ai/claude-code` (`claude`), `@opencode/cli` (`opencode`, `opencode2`).
   - Guest paths: `/opt/t3` (`bin.mjs`, `client/index.html`, `node_modules/node-pty`, `ANDROID-BUNDLE.json`), `/usr/local/lib/node_modules/@openchamber/web`, `/opt/cocode/android-shim.cjs`, `/opt/cocode/pty-smoke.cjs`, `/opt/cocode/openchamber-pty-smoke.cjs`.

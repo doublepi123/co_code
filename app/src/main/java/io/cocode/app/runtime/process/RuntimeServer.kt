@@ -2,6 +2,7 @@ package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.RuntimePaths
 import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.install.InstalledComponents
 import io.cocode.app.runtime.install.InstalledRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -41,10 +42,10 @@ class PortInUseException(
 ) : IllegalStateException("Port $port is in use by another app")
 
 /**
- * Launches one server of [kind] inside PRoot: T3 Code's `/opt/t3/bin.mjs` or OpenChamber's npm CLI.
- * Lifecycle, ownership, logging and readiness are shared; only the command, environment, log file,
- * password file and health document differ per kind. Ported from AndCode's
- * LocalRuntimeProcessLauncher (MIT), generalised to both servers.
+ * Launches one server of [kind] inside PRoot: Cox's `/opt/t3/bin.mjs` (or a legacy T3 Code bundle
+ * still at that path) or OpenChamber's npm CLI. Lifecycle, ownership, logging and readiness are
+ * shared; only the command, environment, log file, password file and health document differ per
+ * kind. Ported from AndCode's LocalRuntimeProcessLauncher (MIT), generalised to both servers.
  */
 class ProotRuntimeServer(
     private val paths: RuntimePaths,
@@ -114,8 +115,10 @@ class ProotRuntimeServer(
     ): Long {
         stop()
         val port = kind.port
-        // T3 Code keeps its data in T3CODE_HOME (/root/.t3, under the bind-mounted home); OpenChamber
-        // shares that same guest home, so its OpenCode config and sessions are shared too.
+        // Cox keeps its data in COX_HOME (/root/.cox, under the bind-mounted home); a legacy T3 Code
+        // bundle still reads T3CODE_HOME (/root/.t3). OpenChamber shares that same guest home, so its
+        // OpenCode config and sessions are shared too.
+        val coxBundle = kind == ServerKind.T3 && InstalledComponents.isCoxServerBundle(runtime.rootfs)
         val prootPath = runCatching { suite().proot.absolutePath }.getOrNull()
             ?: error("Embedded PRoot is unavailable")
         // Port ownership is decided before anything is spawned: a foreign listener that survives our
@@ -123,8 +126,19 @@ class ProotRuntimeServer(
         if (!cleanBeforeStart(port, prootPath)) throw PortInUseException(port)
         runCatching { refreshDns(runtime) }
         if (kind == ServerKind.T3) {
-            // Installed agents whose T3 provider is off until configured become usable. Never fails a start.
-            runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys) }
+            val homeDir =
+                if (coxBundle) {
+                    // One-time move from T3 Code's data directory; never merges or overwrites.
+                    runCatching { CoxHomeMigration.prepare(paths.home, onLog) }
+                        .getOrElse { error ->
+                            onLog("Could not prepare the Cox data directory: ${error.message}")
+                            CoxHomeMigration.COX_DIR
+                        }
+                } else {
+                    T3ProviderDefaults.T3_HOME_DIR
+                }
+            // Installed agents whose provider is off until configured become usable. Never fails a start.
+            runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys, homeDir) }
                 .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
         }
         if (kind == ServerKind.OpenChamber) {
@@ -155,6 +169,7 @@ class ProotRuntimeServer(
                 port,
                 uiPassword,
                 kind,
+                coxBundle = coxBundle,
             )
         val signal = CompletableDeferred<Unit>()
         val started = spawn(command, env, paths.root)

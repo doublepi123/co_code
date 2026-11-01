@@ -13,9 +13,9 @@ class RuntimeManifestTest {
 
     private val t3 =
         T3Spec(
-            repository = "doublepi123/t3code",
-            version = "0.1.6-pw.5",
-            assetPattern = "t3-{version}-android-linux-{arch}-musl.tar.gz",
+            repository = "doublepi123/cox",
+            version = "0.1.1",
+            assetPattern = "cox-{version}-android-linux-{arch}-musl.tar.gz",
             architectures = mapOf("arm64-v8a" to "arm64", "x86_64" to "x64"),
         )
 
@@ -44,8 +44,8 @@ class RuntimeManifestTest {
         assertEquals("arm64", manifest().t3Arch("arm64-v8a"))
         assertEquals("x64", manifest().t3Arch("x86_64"))
         assertEquals(
-            "t3-0.1.6-pw.5-android-linux-arm64-musl.tar.gz",
-            t3.assetName("0.1.6-pw.5", "arm64"),
+            "cox-0.1.1-android-linux-arm64-musl.tar.gz",
+            t3.assetName("0.1.1", "arm64"),
         )
     }
 
@@ -71,15 +71,15 @@ class RuntimeManifestTest {
     }
 
     @Test
-    fun `t3 version and repository are strict`() {
+    fun `t3 version, repository and pattern are strict`() {
         assertThrows(IllegalArgumentException::class.java) {
-            manifest().copy(t3 = t3.copy(version = "0.1.6")).validate()
+            manifest().copy(t3 = t3.copy(version = "0.1")).validate()
         }
         assertThrows(IllegalArgumentException::class.java) {
             manifest().copy(t3 = t3.copy(repository = "not a repo")).validate()
         }
         assertThrows(IllegalArgumentException::class.java) {
-            manifest().copy(t3 = t3.copy(assetPattern = "t3.tar.gz")).validate()
+            manifest().copy(t3 = t3.copy(assetPattern = "cox.tar.gz")).validate()
         }
     }
 
@@ -105,22 +105,25 @@ class RuntimeManifestTest {
         val json =
             """
             {"schemaVersion":1,"runtimeVersion":"r","alpineVersion":"3.24.1","port":3773,
-             "t3":{"repository":"doublepi123/t3code","version":"0.1.6-pw.5",
-                   "assetPattern":"t3-{version}-android-linux-{arch}-musl.tar.gz",
+             "t3":{"repository":"doublepi123/cox","version":"0.1.1",
+                   "assetPattern":"cox-{version}-android-linux-{arch}-musl.tar.gz",
                    "architectures":{"x86_64":"x64"}},
              "agents":[{"id":"opencode","npmPackage":"@opencode/cli","bin":"opencode","displayName":"OpenCode"}],
              "architectures":{"x86_64":{"alpineUrl":"https://e/x.tar.gz","alpineSha256":"${"b".repeat(64)}"}}}
             """.trimIndent()
         val parsed = RuntimeManifestReader { json }.read()
-        assertEquals("0.1.6-pw.5", parsed.t3.version)
+        assertEquals("0.1.1", parsed.t3.version)
         assertEquals(3773, parsed.port)
         assertEquals("OpenCode", parsed.agent("opencode")?.displayName)
     }
 
     @Test
-    fun `release tag parsing accepts only pw releases`() {
+    fun `release tag parsing accepts cox semver and legacy pw suffixes`() {
+        assertEquals("0.1.1", T3Spec.TAG.matchEntire("v0.1.1")?.groupValues?.get(1))
         assertEquals("0.1.6-pw.5", T3Spec.TAG.matchEntire("v0.1.6-pw.5")?.groupValues?.get(1))
-        assertEquals(null, T3Spec.TAG.matchEntire("v0.1.6"))
-        assertEquals(null, T3Spec.TAG.matchEntire("0.1.6-pw.5"))
+        assertEquals("0.2.0-rc.1", T3Spec.TAG.matchEntire("v0.2.0-rc.1")?.groupValues?.get(1))
+        assertEquals(null, T3Spec.TAG.matchEntire("v1.0"))
+        assertEquals(null, T3Spec.TAG.matchEntire("0.1.1"))
+        assertEquals(null, T3Spec.TAG.matchEntire("nightly"))
     }
 }

@@ -186,13 +186,18 @@ data class AgentChange(
     val change: VersionChange,
 )
 
-/** Newer T3 Code and agent CLI versions the installed runtime can move to. */
+/** Newer Cox and agent CLI versions the installed runtime can move to. */
 data class RuntimeUpdate(
-    /** T3 Code's change. [current] equals [target] when T3 is not installed. */
+    /** Cox's change. [current] equals [target] when Cox is not installed. */
     val t3: VersionChange,
     val agents: List<AgentChange> = emptyList(),
     /** Changes for other installed servers, keyed by kind. OpenChamber is the only extra today. */
     val servers: Map<ServerKind, VersionChange> = emptyMap(),
+    /**
+     * True when [t3] replaces the legacy T3 Code bundle with Cox. The versions are from two products,
+     * so the offer is made regardless of how they compare and the UI names both products.
+     */
+    val replacesLegacyT3: Boolean = false,
 ) {
     val hasChanges: Boolean get() = t3.changed || agents.any { it.change.changed } || servers.values.any { it.changed }
 }
@@ -223,7 +228,7 @@ data class RuntimeUpdateState(
 data class RuntimeInfo(
     val abi: String,
     val alpineVersion: String,
-    /** T3 Code's version, kept for the old UI; null when T3 is not installed. */
+    /** Cox's version (legacy field name), kept for the old UI; null when Cox is not installed. */
     val t3Version: String?,
     /** Installed server versions, keyed by kind. */
     val serverVersions: Map<ServerKind, String> = emptyMap(),

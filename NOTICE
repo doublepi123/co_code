@@ -14,7 +14,7 @@ released under the MIT License. This application contains code ported and adapte
 
 Software downloaded and executed at runtime (not bundled in this APK, licensed separately):
 
-  - T3 Code (doublepi123/t3code)     - an optional coding-agent server and web UI
+  - Cox (doublepi123/cox)            - an optional coding-agent server and web UI (T3 Code protocol)
   - OpenChamber (@openchamber/web)   - an optional coding-agent server and web UI
   - OpenCode (@opencode/cli)         - the agent runtime used by OpenChamber
   - Codex (@openai/codex)            - an optional coding-agent CLI
