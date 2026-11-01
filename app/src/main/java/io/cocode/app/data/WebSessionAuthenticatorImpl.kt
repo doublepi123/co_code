@@ -233,6 +233,7 @@ class DefaultWebSessionAuthenticator(
         if (reply.gated && target is ServerTarget.Remote) return WebSessionResult.NeedsGatewayLogin(base)
         return when (reply.code) {
             in 200..299 -> {
+                if (!reply.authenticated) return WebSessionResult.NeedsLogin(base)
                 // Launch may have changed while the POST was in flight: its cookies must not be stored.
                 if (target is ServerTarget.Local && readyLaunchId(kind) != launchId) {
                     WebSessionResult.Unreachable("The local ${kind.displayName} server restarted; try again")

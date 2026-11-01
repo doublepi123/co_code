@@ -229,6 +229,20 @@ class DefaultWebSessionAuthenticatorTest {
         }
 
     @Test
+    fun `successful HTTP login without authenticated body is NeedsLogin and stores nothing`() =
+        runBlocking {
+            for (body in listOf("""{"authenticated":false}""", "{}", "<html>Sign in</html>")) {
+                server.enqueue(health())
+                server.enqueue(MockResponse().setBody(body).addHeader("Set-Cookie", "untrusted=1; Path=/"))
+                val target = local()
+                val cookies = cookiesFor(target)
+
+                assertEquals(WebSessionResult.NeedsLogin(base()), auth().prepare(target, cookies))
+                assertTrue(cookies.stored.isEmpty())
+            }
+        }
+
+    @Test
     fun `wrong password is NeedsLogin and stores nothing`() =
         runBlocking {
             server.enqueue(health())
@@ -497,7 +511,7 @@ class DefaultWebSessionAuthenticatorTest {
     fun `remote with stored password logs in with that password`() =
         runBlocking {
             server.enqueue(health())
-            server.enqueue(MockResponse().setBody("""{"success":true}""").addHeader("Set-Cookie", "s=1; Path=/"))
+            server.enqueue(loginOk("s=1; Path=/"))
             val target = remote("stored")
             val cookies = cookiesFor(target)
 

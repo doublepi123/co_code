@@ -12,6 +12,23 @@ import org.junit.Test
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class GatewayHandoffTest {
     @Test
+    fun `current main frame HTTP failures show status but stale and gated requests do not`() {
+        val guard = MainFrameErrorGuard()
+        val view = Any()
+        val url = "https://example.com/chat"
+        guard.expect(view, 2, url)
+        for (status in listOf(401, 403, 404, 500, 503)) {
+            assertEquals("HTTP $status", guard.httpError(view, 2, url, false, true, status))
+        }
+        assertEquals(null, guard.httpError(view, 2, url, false, false, 500))
+        assertEquals(null, guard.httpError(view, 2, url, true, true, 403))
+        assertEquals(null, guard.httpError(view, 1, url, false, true, 500))
+        assertEquals(null, guard.httpError(Any(), 2, url, false, true, 500))
+        assertEquals(null, guard.httpError(view, 2, "https://example.com/old", false, true, 500))
+        assertEquals(null, guard.httpError(view, 2, url, false, true, 200))
+    }
+
+    @Test
     fun `latest issued navigation failure is accepted while previous committed page is visible`() {
         val guard = MainFrameErrorGuard()
         val view = Any()

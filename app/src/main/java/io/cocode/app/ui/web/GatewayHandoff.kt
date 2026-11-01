@@ -39,6 +39,15 @@ internal class MainFrameErrorGuard {
     fun accepts(owner: Any, generation: Int, url: String, quarantined: Boolean): Boolean =
         !quarantined && !isGatewayHandoffBlank(url) && this.owner === owner && this.generation == generation &&
             url == expectedUrl
+
+    fun httpError(
+        owner: Any,
+        generation: Int,
+        url: String,
+        blocked: Boolean,
+        mainFrame: Boolean,
+        status: Int,
+    ): String? = if (mainFrame && status >= 400 && accepts(owner, generation, url, blocked)) "HTTP $status" else null
 }
 
 /** Main-thread-owned ticket state; no Android APIs or polling. Failed tickets stay quarantined. */

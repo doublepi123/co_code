@@ -580,6 +580,19 @@ internal class ChamberWebView(
             }
         }
 
+        override fun onReceivedHttpError(
+            view: WebView,
+            request: WebResourceRequest,
+            errorResponse: WebResourceResponse,
+        ) {
+            if (isCurrent(view)) {
+                mainFrameErrors.httpError(
+                    view, generation, request.url.toString(), gatewayHandoff.blocksDocuments || gatewayLoginMode,
+                    request.isForMainFrame, errorResponse.statusCode,
+                )?.let { pageError = it }
+            }
+        }
+
         @SuppressLint("WebViewClientOnReceivedSslError")
         override fun onReceivedSslError(
             view: WebView,

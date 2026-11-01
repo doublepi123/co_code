@@ -4,6 +4,8 @@
 
 Full-screen Cox web UI for one server (`Routes.WEB`, `web/{targetId}`). Owns the WebView pool, session preparation and page loading, navigation policy, the JS bridge, downloads, file and microphone requests, and the overlay panels. It hosts Cox's own (T3 Code protocol) web UI; it does not implement it.
 
+Main-frame HTTP 4xx/5xx responses use the same current-navigation guard as network errors and show the page-error panel; stale callbacks and subresource failures do not cover the page. Gateway login documents remain visible so interactive Access challenges are not hidden.
+
 Files:
 - `ChamberWebView.kt`: `ChamberWebView` (one WebView bound to one profile, clients, bridge, helper script), `WebViewPool`, `WebHost`, `originOf()`. Its `Client.shouldInterceptRequest` answers the local server's update check.
 - `WebDependencies.kt`: `rememberWebDependencies()` (app singletons `WebSessionProfiles` and `HttpDownloadStarter` from Koin; preview stand-ins in inspection mode), `bindWeb(profiles, target, obtain)`.
