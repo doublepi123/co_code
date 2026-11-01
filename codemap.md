@@ -27,7 +27,7 @@ Key constraints:
 | `app/src/main/AndroidManifest.xml` | Components, permissions (FGS, notifications, all-files access, microphone), locale config |
 | `app/src/main/assets/runtime-manifest.json` | Pinned runtime: Alpine rootfs per ABI (URL + SHA-256), Cox repository/fallback version/asset pattern/arch map, agent CLI list, port 3773 |
 | `app/build.gradle.kts` | App build; offline Exec task `buildCoCodeRuntimeNative` compiles PRoot JNI libs from prepared sources (NDK 29.0.14206865); Sync task `syncNativeLicenseAssets` packages `third_party/native-runtime/` as `assets/licenses/native/` in every variant; env-driven release signing (`COCODE_*`); debug-only `cocode.testApplicationId` override |
-| `gradle.properties` | Canonical release version as literal `cocode.versionName` / `cocode.versionCode` (currently 0.3.3 / 303); the release workflow checks them against the tag |
+| `gradle.properties` | Canonical release version as literal `cocode.versionName` / `cocode.versionCode` (currently 0.3.4 / 304); the release workflow checks them against the tag |
 | `build.gradle.kts`, `settings.gradle.kts` | AGP 8.5.2, Kotlin 2.0.21; single `:app` module |
 | `.github/workflows/ci.yml` | Push/PR: offline Python tests, JVM unit tests and debug APK |
 | `.github/workflows/release.yml` | Tag `v*`: Python/JVM tests, signed release APK, `apksigner` verify, sha256, GitHub release (versioned notes or generated fallback) |
