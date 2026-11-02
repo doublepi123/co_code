@@ -776,6 +776,38 @@ class LocalRuntimeControllerTest {
         }
 
     @Test
+    fun `a same version Cox bundle is offered npm migration`() = controllerTest {
+        val controller = controller(
+            FakeInstaller(folder.root, installed = runtimeWith(folder.root, PackageVersions("0.1.14", mapOf("opencode" to "2.2.5")))),
+            FakeServer(),
+            pinnedT3Version = "0.1.14",
+        )
+        controller.initialize()
+        step()
+        val offer = controller.updates.value.available!!
+        assertEquals(VersionChange("0.1.14", "0.1.14"), offer.t3)
+        assertTrue(offer.migratesCoxToNpm)
+        assertFalse(offer.replacesLegacyT3)
+        assertTrue(offer.hasChanges)
+    }
+
+    @Test
+    fun `a migrated npm Cox does not offer migration again`() = controllerTest {
+        val runtime = runtimeWith(folder.root, PackageVersions("0.1.14", mapOf("opencode" to "2.2.5")))
+        val rootfs = runtime.rootfs
+        val module = File(rootfs, "usr/local/lib/node_modules/@doublepi123/cox")
+        File(module, "dist/client").mkdirs()
+        File(module, "node_modules/node-pty").mkdirs()
+        File(module, "dist/bin.mjs").writeText("")
+        File(module, "dist/client/index.html").writeText("")
+        File(module, "package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.14"}""")
+        val controller = controller(FakeInstaller(folder.root, installed = runtime), FakeServer(), pinnedT3Version = "0.1.14")
+        controller.initialize()
+        step()
+        assertEquals(null, controller.updates.value.available)
+    }
+
+    @Test
     fun `update restarts the server and passes t3 plus selected agent targets`() =
         controllerTest {
             val installed =

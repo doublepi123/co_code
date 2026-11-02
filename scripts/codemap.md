@@ -52,6 +52,8 @@ Lock refresh (developer only): `prepare_android_runtime_assets.py --refresh-lock
 
 ## Integration
 
+- `verify_cox_npm.sh VERSION`: destructive only inside a disposable Alpine guest; installs Cox from npm, rebuilds node-pty, probes native dependencies and offline Cursor SDK prewarm, then verifies server identity, rejected/accepted password login, `authenticated:true`, session cookie and HTML. Run with this checkout mounted read-only at `/repo`: `docker run --rm -v "$PWD":/repo:ro alpine:3.24 sh /repo/scripts/verify_cox_npm.sh 0.1.14`. No model requests; this is not an Android/PRoot device test.
+
 - **Gradle** (`app/build.gradle.kts`): `buildCoCodeRuntimeNative` (Exec, offline, runs `scripts/build_android_runtime_native.py`), which `preBuild` depends on. Its declared inputs are `runtime_tools/runtime_sources.lock.json`, `scripts/build_android_runtime_native.py`, `scripts/prepare_android_runtime_sources.py`, the three files in `runtime_tools/patches/`, the NDK `source.properties`, the NDK version constant and the prepared source directory. The `runtime_tools/` Python modules and `termux_assets.lock.json` are not inputs of this task. The jniLibs srcDir is wired to `runtime-jni`. Source preparation is a separate network step that Gradle does not run.
 - **Legacy Termux tasks are deleted**: `prepareCoCodeRuntimeAssets` and `prepareCoCodeRuntimeNativeLibs` no longer exist in `app/build.gradle.kts`. Only the manual scripts listed above remain, and they rely on `runtime_tools/termux_assets.py` and its lock.
 - **Shared module**: the legacy scripts import `runtime_tools/termux_assets.py` through `REPO_ROOT`. The source-build scripts import nothing from `runtime_tools/` beyond their own files.

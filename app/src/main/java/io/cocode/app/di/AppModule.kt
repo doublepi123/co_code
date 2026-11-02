@@ -37,7 +37,6 @@ import io.cocode.app.runtime.RuntimePaths
 import io.cocode.app.runtime.RuntimeSecrets
 import io.cocode.app.runtime.WebSessionAuthenticator
 import io.cocode.app.runtime.install.DefaultPackageVersionSource
-import io.cocode.app.runtime.install.GithubT3ReleaseSource
 import io.cocode.app.runtime.install.NpmPackageVersionSource
 import io.cocode.app.runtime.install.RuntimeInstallerImpl
 import io.cocode.app.runtime.network.AndroidNetworkEvents
@@ -192,13 +191,6 @@ val appModule =
                     context.assets.open(RuntimeManifestReader.ASSET_NAME).bufferedReader().use { it.readText() }
                 }.read()
             val dnsProvider = AndroidSystemDnsProvider(context)
-            // Only a release whose Android bundle for this ABI is already published counts as latest.
-            val coxReleases =
-                GithubT3ReleaseSource(
-                    client = get<OkHttpClient>(),
-                    repository = manifest.t3.repository,
-                    bundleAssetName = { version -> manifest.t3.assetName(version, manifest.t3Arch(abi)) },
-                )
             val installer =
                 RuntimeInstallerImpl(
                     paths = paths,
@@ -206,7 +198,6 @@ val appModule =
                     manifest = manifest,
                     suite = suite,
                     downloader = VerifiedRuntimeDownloader(get<OkHttpClient>()),
-                    releaseSource = coxReleases,
                     shimAsset = {
                         context.assets.open("android-shim.cjs").bufferedReader().use { it.readText() }
                     },
@@ -240,9 +231,9 @@ val appModule =
                 versionSource =
                     DefaultPackageVersionSource(
                         npm = NpmPackageVersionSource(get<OkHttpClient>()),
-                        t3 = coxReleases,
                         agents = manifest.agents,
                         fallbackT3Version = manifest.t3.version,
+                        coxPackage = manifest.t3.npmPackage,
                         openChamberPackage = manifest.openchamber.npmPackage,
                     ),
             ).also { it.initialize() }

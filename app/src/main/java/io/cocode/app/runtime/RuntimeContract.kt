@@ -198,8 +198,9 @@ data class RuntimeUpdate(
      * so the offer is made regardless of how they compare and the UI names both products.
      */
     val replacesLegacyT3: Boolean = false,
+    val migratesCoxToNpm: Boolean = false,
 ) {
-    val hasChanges: Boolean get() = t3.changed || agents.any { it.change.changed } || servers.values.any { it.changed }
+    val hasChanges: Boolean get() = migratesCoxToNpm || t3.changed || agents.any { it.change.changed } || servers.values.any { it.changed }
 }
 
 /** Why the last update attempt failed. The previous environment is kept and still usable. */

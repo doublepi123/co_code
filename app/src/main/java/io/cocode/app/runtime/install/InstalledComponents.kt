@@ -2,6 +2,7 @@ package io.cocode.app.runtime.install
 
 import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.manifest.AgentSpec
+import io.cocode.app.runtime.manifest.T3Spec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -10,6 +11,9 @@ import java.io.File
 
 /** Guest paths that make a server usable; a metadata claim without them is not served. */
 object InstalledComponents {
+    const val COX_MODULE = "/usr/local/lib/node_modules/@doublepi123/cox"
+    const val COX_CLI = "$COX_MODULE/dist/bin.mjs"
+    const val COX_UI = "$COX_MODULE/dist/client/index.html"
     const val T3_CLI = "opt/t3/bin.mjs"
     const val T3_UI = "opt/t3/client/index.html"
     const val T3_BUNDLE_INFO = "opt/t3/ANDROID-BUNDLE.json"
@@ -26,7 +30,7 @@ object InstalledComponents {
         kind: ServerKind,
     ): Boolean =
         when (kind) {
-            ServerKind.T3 -> File(rootfs, T3_CLI).isFile && File(rootfs, T3_UI).isFile
+            ServerKind.T3 -> isCoxNpmInstall(rootfs) || (File(rootfs, T3_CLI).isFile && File(rootfs, T3_UI).isFile)
             ServerKind.OpenChamber ->
                 File(rootfs, OPENCHAMBER_CLI).isFile &&
                     File(rootfs, OPENCHAMBER_UI).isFile &&
@@ -61,7 +65,22 @@ object InstalledComponents {
         }.getOrNull()
 
     /** True only for a bundle that identifies itself as Cox. */
-    fun isCoxServerBundle(rootfs: File): Boolean = t3Bundle(rootfs)?.server == COX_SERVER
+    fun isCoxServerBundle(rootfs: File): Boolean = isCoxNpmInstall(rootfs) || t3Bundle(rootfs)?.server == COX_SERVER
+
+    fun coxNpmVersion(rootfs: File): String? =
+        runCatching {
+            val manifest = json.parseToJsonElement(File(rootfs, "$COX_MODULE/package.json".removePrefix("/")).readText()).jsonObject
+            require(manifest.text("name") == "@doublepi123/cox")
+            manifest.text("version")?.takeIf { T3Spec.VERSION.matches(it) }
+        }.getOrNull()
+
+    fun isCoxNpmInstall(rootfs: File): Boolean =
+        coxNpmVersion(rootfs) != null &&
+            File(rootfs, COX_CLI.removePrefix("/")).isFile &&
+            File(rootfs, COX_UI.removePrefix("/")).isFile &&
+            File(rootfs, "$COX_MODULE/node_modules/node-pty".removePrefix("/")).isDirectory
+
+    fun coxModuleGuest(rootfs: File): String = if (isCoxNpmInstall(rootfs)) COX_MODULE else "/opt/t3"
 
     /**
      * True for the T3 Code bundle this app used to install. A `-pw.N` version suffix alone is enough;

@@ -1,13 +1,31 @@
 package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.install.InstalledComponents
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import java.io.File
 
 class ProotCommandsTest {
+    @get:Rule
+    val folder = TemporaryFolder()
+
+    @Test
+    fun `npm Cox launches its dist entry instead of the legacy bundle`() {
+        val npmRootfs = folder.newFolder()
+        for (path in listOf(InstalledComponents.COX_CLI, InstalledComponents.COX_UI)) {
+            File(npmRootfs, path.removePrefix("/")).apply { parentFile?.mkdirs(); writeText("") }
+        }
+        val module = File(npmRootfs, InstalledComponents.COX_MODULE.removePrefix("/"))
+        File(module, "node_modules/node-pty").mkdirs()
+        File(module, "package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.14"}""")
+        val command = ProotCommands.serverCommand(proot, npmRootfs, home, workspace, emptyList())
+        assertEquals(listOf("/usr/bin/node", InstalledComponents.COX_CLI), command.takeLast(2))
+    }
     private val proot = File("/native/libcocode_proot.so")
     private val rootfs = File("/data/runtime/environment/rootfs")
     private val workspace = File("/data/runtime/workspace")
@@ -61,7 +79,7 @@ class ProotCommandsTest {
     }
 
     @Test
-    fun `server environment is exactly the guest contract and carries the t3 password`() {
+    fun `cox environment carries the canonical password and matching legacy alias`() {
         val env =
             ProotCommands.serverEnvironment(
                 suiteEnvironment = mapOf("LD_LIBRARY_PATH" to "/native", "PROOT_LOADER" to "/native/loader"),
@@ -88,6 +106,7 @@ class ProotCommandsTest {
         assertEquals("true", env["T3CODE_NO_BROWSER"])
         assertEquals("/root/.cox", env["COX_HOME"])
         assertFalse(env.containsKey("T3CODE_HOME"))
+        assertEquals("secret-password", env["COX_AUTH_PASSWORD"])
         assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
         assertEquals("true", env["OPENCODE_DISABLE_AUTOUPDATE"])
         assertEquals("1", env["IS_SANDBOX"])
@@ -110,6 +129,7 @@ class ProotCommandsTest {
 
         assertEquals("/root/.t3", env["T3CODE_HOME"])
         assertFalse(env.containsKey("COX_HOME"))
+        assertFalse(env.containsKey("COX_AUTH_PASSWORD"))
         assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
     }
 
@@ -162,6 +182,7 @@ class ProotCommandsTest {
         assertEquals(prootTmp.absolutePath, env["PROOT_TMP_DIR"])
         assertEquals("/root", env["HOME"])
         assertFalse("OpenChamber must never receive the T3 password", env.containsKey("T3CODE_AUTH_PASSWORD"))
+        assertFalse("OpenChamber must never receive the Cox password", env.containsKey("COX_AUTH_PASSWORD"))
         assertFalse(env.keys.any { it.startsWith("T3CODE_") })
         assertFalse(env.containsKey("IS_SANDBOX"))
         assertFalse(env.containsKey("OPENCHAMBER_DESKTOP_NOTIFY"))
@@ -174,6 +195,8 @@ class ProotCommandsTest {
 
         assertTrue(t3.keys.intersect(oc.keys).none { it.startsWith("T3CODE_") || it.startsWith("OPENCHAMBER_") })
         assertEquals("t3-secret", t3["T3CODE_AUTH_PASSWORD"])
+        assertEquals("t3-secret", t3["COX_AUTH_PASSWORD"])
+        assertFalse(oc.containsKey("COX_AUTH_PASSWORD"))
         assertFalse(t3.containsValue("oc-secret"))
         assertEquals("oc-secret", oc["OPENCHAMBER_UI_PASSWORD"])
         assertFalse(oc.containsValue("t3-secret"))
@@ -184,6 +207,7 @@ class ProotCommandsTest {
         val env = ProotCommands.installEnvironment(emptyMap(), prootTmp)
 
         assertFalse(env.containsKey("T3CODE_AUTH_PASSWORD"))
+        assertFalse(env.containsKey("COX_AUTH_PASSWORD"))
         assertFalse(env.containsKey("NODE_OPTIONS"))
         assertEquals("/root", env["HOME"])
     }

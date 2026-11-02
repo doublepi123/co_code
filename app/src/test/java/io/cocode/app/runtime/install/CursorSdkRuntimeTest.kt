@@ -10,6 +10,39 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 class CursorSdkRuntimeTest {
+    private fun npmRoot(): File {
+        val rootfs = temporaryFolder.newFolder()
+        for (path in listOf(InstalledComponents.COX_CLI, InstalledComponents.COX_UI)) {
+            File(rootfs, path.removePrefix("/")).apply { parentFile?.mkdirs(); writeText("") }
+        }
+        val module = File(rootfs, InstalledComponents.COX_MODULE.removePrefix("/"))
+        File(module, "node_modules/node-pty").mkdirs()
+        File(module, "node_modules/@cursor/sdk").mkdirs()
+        File(module, "package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.14"}""")
+        return rootfs
+    }
+
+    @Test
+    fun `npm Cox retains the full offline SDK smoke without a bundle supplied script`() {
+        val root = npmRoot()
+        val runner = Runner()
+        RuntimeEnvironmentInstaller.verifyCursorSdkRuntime(runner, root)
+        val smoke = "${InstalledComponents.COX_MODULE}/cursor-sdk-smoke.cjs"
+        assertEquals("set -e; node $smoke", runner.scripts[1])
+        val script = File(root, smoke.removePrefix("/")).readText()
+        assertTrue(script.contains("prewarmLocalWorkspace"))
+        assertTrue(script.contains("[true, false, true]"))
+        assertTrue(script.contains("process.env.HOME = directory"))
+    }
+
+    @Test
+    fun `npm native dependency failure prevents activation`() {
+        val runner = Runner(failAt = 1)
+        assertThrows(IllegalStateException::class.java) {
+            RuntimeEnvironmentInstaller.verifyCoxNativeModules(runner, npmRoot())
+        }
+        assertTrue(runner.scripts.single().contains("load('@napi-rs/keyring'); load('@ff-labs/fff-node')"))
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 

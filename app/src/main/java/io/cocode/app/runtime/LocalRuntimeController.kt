@@ -109,6 +109,7 @@ class DefaultLocalRuntimeController(
 
     /** Whether the installed T3-kind bundle is the legacy T3 Code build rather than Cox. */
     private var installedT3IsLegacy = false
+    private var installedCoxNeedsNpmMigration = false
 
     private val knownAgentIds = manifestAgents.map { it.id }.toSet()
     private val initialSelection = sanitizeSelection(selectionStore.selected())
@@ -667,6 +668,8 @@ class DefaultLocalRuntimeController(
         val installedServers = installedServerVersions(runtime.rootfs, runtime.metadata)
         val t3Current = installedServers[ServerKind.T3] ?: runtime.metadata.t3Version
         installedT3IsLegacy = InstalledComponents.isLegacyT3Bundle(runtime.rootfs, t3Current)
+        installedCoxNeedsNpmMigration = ServerKind.T3 in installedServers &&
+            !installedT3IsLegacy && !InstalledComponents.isCoxNpmInstall(runtime.rootfs)
         val installed =
             PackageVersions(
                 t3 = t3Current,
@@ -716,6 +719,10 @@ class DefaultLocalRuntimeController(
                 agents = agents,
                 servers = servers,
                 replacesLegacyT3 = replacesLegacyT3,
+                migratesCoxToNpm = t3Installed && installedCoxNeedsNpmMigration &&
+                    newestOf(registry?.t3, pinnedT3Version)?.let {
+                        RuntimeEnvironmentInstaller.compareVersions(it, t3Current) >= 0
+                    } == true,
             )
         return update.takeIf { it.hasChanges }
     }

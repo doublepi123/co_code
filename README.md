@@ -23,7 +23,7 @@ CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot�
 |---|---|
 | Alpine Linux | 3.24.1（每个 ABI 固定 URL 与 SHA-256） |
 | Node.js | Alpine 24.x |
-| Cox 服务器 | GitHub `doublepi123/cox` 发布包，默认 0.1.1（兼容 T3 Code 协议） |
+| Cox 服务器 | npm `@doublepi123/cox`，安装时解析 latest，内置回退版本 0.1.15（兼容 T3 Code 协议）；在 Alpine 内重编译 node-pty |
 | OpenChamber 服务器（可选） | npm `@openchamber/web`，安装时取最新版 |
 | 编码代理 CLI | `@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode），安装时取最新版 |
 | PRoot | 本地编译的 5.1.107.98 |

@@ -42,8 +42,8 @@ class PortInUseException(
 ) : IllegalStateException("Port $port is in use by another app")
 
 /**
- * Launches one server of [kind] inside PRoot: Cox's `/opt/t3/bin.mjs` (or a legacy T3 Code bundle
- * still at that path) or OpenChamber's npm CLI. Lifecycle, ownership, logging and readiness are
+ * Launches one server of [kind] inside PRoot: Cox's npm CLI (or an existing bundle at
+ * `/opt/t3/bin.mjs`) or OpenChamber's npm CLI. Lifecycle, ownership, logging and readiness are
  * shared; only the command, environment, log file, password file and health document differ per
  * kind. Ported from AndCode's LocalRuntimeProcessLauncher (MIT), generalised to both servers.
  */

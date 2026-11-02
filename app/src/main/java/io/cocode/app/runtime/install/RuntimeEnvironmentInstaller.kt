@@ -62,7 +62,6 @@ class RuntimeEnvironmentInstaller(
     private val abi: String,
     private val manifest: RuntimeManifest,
     private val downloader: VerifiedRuntimeDownloader,
-    private val releaseSource: T3ReleaseSource,
     private val shimAsset: () -> String,
     private val dnsProvider: SystemDnsProvider = SystemDnsProvider { emptyList() },
     private val nowMillis: () -> Long = System::currentTimeMillis,
@@ -111,7 +110,7 @@ class RuntimeEnvironmentInstaller(
                 // set -e: any failing command fails the step, even inside a chain.
                 runner.mustSucceed(
                     "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
-                        "apk --cache-dir /var/cache/apk add ${apkPackages(ServerKind.OpenChamber in wantedServers)}; " +
+                        "apk --cache-dir /var/cache/apk add $APK_PACKAGES; " +
                         "update-ca-certificates",
                     MessageKey.PackagesFailed,
                     "Unable to install Linux packages. Check the network and retry.",
@@ -122,9 +121,7 @@ class RuntimeEnvironmentInstaller(
                 writeShim(rootfs)
                 val versions = mutableMapOf<ServerKind, String>()
                 if (ServerKind.T3 in wantedServers) {
-                    val release = resolveRelease()
-                    installServer(report, rootfs, release)
-                    versions[ServerKind.T3] = release.version
+                    versions[ServerKind.T3] = installCox(report, runner, rootfs, version = null)
                 }
                 if (ServerKind.OpenChamber in wantedServers) {
                     installOpenChamber(report, runner, rootfs, version = null)
@@ -222,11 +219,12 @@ class RuntimeEnvironmentInstaller(
                     }
                 for ((kind, target) in serverTargets) {
                     val currentVersion = installedServers[kind]
-                    if (currentVersion != target || !InstalledComponents.serverAssetsPresent(rootfs, kind)) {
+                    if (currentVersion != target || !InstalledComponents.serverAssetsPresent(rootfs, kind) ||
+                        (kind == ServerKind.T3 && !InstalledComponents.isCoxNpmInstall(rootfs))
+                    ) {
                         when (kind) {
                             ServerKind.T3 -> {
-                                removeServerAssets(rootfs, ServerKind.T3)
-                                installServer(report, rootfs, releaseFor(target))
+                                installCox(report, runner, rootfs, version = target)
                             }
                             ServerKind.OpenChamber -> {
                                 ensureBuildTools(report, runner)
@@ -235,7 +233,9 @@ class RuntimeEnvironmentInstaller(
                         }
                     }
                     serverVersions[kind] =
-                        if (kind == ServerKind.OpenChamber) {
+                        if (kind == ServerKind.T3) {
+                            InstalledComponents.coxNpmVersion(rootfs) ?: target
+                        } else if (kind == ServerKind.OpenChamber) {
                             InstalledComponents.openChamberVersion(rootfs) ?: target
                         } else {
                             target
@@ -345,9 +345,7 @@ class RuntimeEnvironmentInstaller(
                         removeServerAssets(rootfs, kind)
                         when (kind) {
                             ServerKind.T3 -> {
-                                val release = resolveRelease()
-                                installServer(report, rootfs, release)
-                                versions[kind] = release.version
+                                versions[kind] = installCox(report, runner, rootfs, version = null)
                             }
                             ServerKind.OpenChamber -> {
                                 ensureBuildTools(report, runner)
@@ -491,77 +489,58 @@ class RuntimeEnvironmentInstaller(
 
     // --- Steps -----------------------------------------------------------------------------------
 
-    private suspend fun installServer(
+    internal fun installCox(
         report: InstallReporter,
+        runner: AgentCommandRunner,
         rootfs: File,
-        release: T3Release,
-    ) {
-        val arch = manifest.t3Arch(abi)
-        val assetName = manifest.t3.assetName(release.version, arch)
-        report.step(InstallStep.InstallServer, null, assetName, MessageKey.ProgressInstallingServer)
-
-        // Fail closed: without the checksum list the bundle is never unpacked.
-        val expected =
-            try {
-                releaseSource.sha256Sums(release)[assetName]
-            } catch (error: Throwable) {
-                throw UserFacingException(
-                    MessageKey.ServerInstallFailed,
-                    "Unable to read the Cox checksum list: ${error.message}",
-                )
-            } ?: throw UserFacingException(
-                MessageKey.ServerInstallFailed,
-                "SHA256SUMS does not list $assetName",
-            )
-
-        val archive = File(paths.cache, assetName)
-        downloader.download(
-            url = release.assetUrl(assetName),
-            destination = archive,
-            expectedSha256 = expected,
-        ) { fraction ->
-            report.step(InstallStep.InstallServer, fraction, assetName, MessageKey.ProgressInstallingServer)
+        version: String?,
+    ): String {
+        ensureBuildTools(report, runner)
+        val target = version ?: try {
+            runner.output("npm view ${manifest.t3.npmPackage} dist-tags.latest").trim()
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            manifest.t3.version
         }
-
-        val target = File(rootfs, T3_GUEST.removePrefix("/"))
-        deleteTreeOrThrow(target)
-        target.mkdirs()
-        archive.inputStream().use { RuntimeArchive.extractTarGz(it, target, stripComponents = 1) }
-        verifyServerBundle(target, arch, release.version)
-    }
-
-    private fun verifyServerBundle(
-        target: File,
-        arch: String,
-        version: String,
-    ) {
-        require(File(target, "bin.mjs").isFile) { "Cox bundle has no bin.mjs" }
-        require(File(target, "client/index.html").isFile) { "Cox bundle has no client/index.html" }
-        val info =
-            InstalledComponents.bundleInDirectory(target)
-                ?: error("Cox bundle has no readable ANDROID-BUNDLE.json")
-        require(info.server == InstalledComponents.COX_SERVER) {
-            "Cox bundle does not identify itself as ${InstalledComponents.COX_SERVER} (found ${info.server})"
-        }
-        require(info.arch == arch) { "Cox bundle is for ${info.arch}, expected $arch" }
-        require(info.version == version) { "Cox bundle is ${info.version}, expected $version" }
+        require(io.cocode.app.runtime.manifest.T3Spec.VERSION.matches(target)) { "Invalid Cox npm version: $target" }
+        val spec = "${manifest.t3.npmPackage}@$target"
+        report.step(InstallStep.InstallServer, null, spec, MessageKey.ProgressInstallingServer)
+        removeServerAssets(rootfs, ServerKind.T3)
+        runner.mustSucceed(
+            coxInstallScript(target),
+            MessageKey.ServerInstallFailed,
+            "Unable to install Cox from npm.",
+            timeoutMinutes = NPM_TIMEOUT_MINUTES,
+        )
+        runner.mustSucceed(
+            coxPtyBuildScript(),
+            MessageKey.ServerInstallFailed,
+            "Cox's terminal module could not be built.",
+            timeoutMinutes = NPM_TIMEOUT_MINUTES,
+        )
+        require(InstalledComponents.isCoxNpmInstall(rootfs)) { "Cox npm install is incomplete" }
+        val installed = checkNotNull(InstalledComponents.coxNpmVersion(rootfs))
+        require(installed == target) { "Cox npm installed $installed, expected $target" }
+        return installed
     }
 
     private fun verifyPty(
         runner: GuestRunner,
         rootfs: File,
     ) {
-        require(File(rootfs, PTY_MODULE_GUEST.removePrefix("/")).isDirectory) {
-            "Cox bundle has no node-pty module"
+        val module = "${InstalledComponents.coxModuleGuest(rootfs)}/node_modules/node-pty"
+        require(File(rootfs, module.removePrefix("/")).isDirectory) {
+            "Cox install has no node-pty module"
         }
         File(rootfs, PTY_SMOKE_GUEST_PATH.removePrefix("/")).apply {
             parentFile?.mkdirs()
-            writeText(PTY_SMOKE_SCRIPT)
+            writeText(PTY_SMOKE_SCRIPT.replace(PTY_MODULE_GUEST, module))
         }
         runner.mustSucceed(
             "set -e; node $PTY_SMOKE_GUEST_PATH",
             MessageKey.PtySmokeFailed,
-            "The bundled node-pty does not work in the guest. The install is incomplete.",
+            "Cox's node-pty does not work in the guest. The install is incomplete.",
             timeoutMinutes = PTY_SMOKE_TIMEOUT_MINUTES,
         )
     }
@@ -612,17 +591,17 @@ class RuntimeEnvironmentInstaller(
         verifyOpenChamber(rootfs)
     }
 
-    /** Adds the native build toolchain OpenChamber's node-pty needs; idempotent. */
+    /** Adds the native build toolchain for the npm servers; idempotent. */
     private fun ensureBuildTools(
         report: InstallReporter,
-        runner: GuestRunner,
+        runner: AgentCommandRunner,
     ) {
         report.step(InstallStep.InstallPackages, null, "apk add make g++ ...", MessageKey.ProgressInstallingPackages)
         runner.mustSucceed(
             "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
                 "apk --cache-dir /var/cache/apk add python3 make g++ linux-headers",
             MessageKey.PackagesFailed,
-            "Unable to install the build tools OpenChamber needs.",
+            "Unable to install native server build tools.",
             timeoutMinutes = APK_TIMEOUT_MINUTES,
         )
     }
@@ -665,6 +644,7 @@ class RuntimeEnvironmentInstaller(
             require(InstalledComponents.serverAssetsPresent(rootfs, ServerKind.T3)) {
                 "Cox install is incomplete"
             }
+            verifyCoxNativeModules(runner, rootfs)
             verifyCursorSdkRuntime(runner, rootfs)
             verifyPty(runner, rootfs)
         }
@@ -680,7 +660,11 @@ class RuntimeEnvironmentInstaller(
         kind: ServerKind,
     ) {
         when (kind) {
-            ServerKind.T3 -> deleteTreeOrThrow(File(rootfs, T3_GUEST.removePrefix("/")))
+            ServerKind.T3 -> {
+                deleteTreeOrThrow(File(rootfs, T3_GUEST.removePrefix("/")))
+                deleteTreeOrThrow(File(rootfs, InstalledComponents.COX_MODULE.removePrefix("/")))
+                deleteTreeOrThrow(File(rootfs, "usr/local/bin/cox"))
+            }
             ServerKind.OpenChamber -> {
                 deleteTreeOrThrow(File(rootfs, OPENCHAMBER_MODULE_GUEST.removePrefix("/")))
                 deleteTreeOrThrow(File(rootfs, "etc/openchamber"))
@@ -770,22 +754,6 @@ class RuntimeEnvironmentInstaller(
             for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
         }
     }
-
-    private suspend fun resolveRelease(): T3Release =
-        try {
-            releaseSource.latest() ?: releaseFor(manifest.t3.version)
-        } catch (error: kotlinx.coroutines.CancellationException) {
-            throw error
-        } catch (_: Throwable) {
-            releaseFor(manifest.t3.version)
-        }
-
-    private fun releaseFor(version: String): T3Release =
-        T3Release(
-            version = version,
-            tag = "v$version",
-            downloadBaseUrl = "https://github.com/${manifest.t3.repository}/releases/download/v$version",
-        )
 
     private fun installedMetadataOrNull(): RuntimeMetadata? {
         val file = paths.metadataFile
@@ -1008,28 +976,41 @@ class RuntimeEnvironmentInstaller(
     }
 
     companion object {
-        /** Alpine packages. node-pty in the T3 bundle is already built for musl, so no toolchain. */
+        internal fun verifyCoxNativeModules(runner: AgentCommandRunner, rootfs: File) {
+            if (!InstalledComponents.isCoxNpmInstall(rootfs)) return
+            runner.mustSucceed(
+                "set -e; node -e \"const load = require('node:module').createRequire('${InstalledComponents.COX_MODULE}/package.json'); " +
+                    "load('@napi-rs/keyring'); load('@ff-labs/fff-node');\"",
+                MessageKey.ServerInstallFailed,
+                "Cox's native dependencies do not work in the guest.",
+                timeoutMinutes = VERIFY_TIMEOUT_MINUTES,
+            )
+        }
+
+        internal fun coxInstallScript(version: String): String {
+            require(io.cocode.app.runtime.manifest.T3Spec.VERSION.matches(version))
+            return "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
+                "npm i -g --no-fund --no-audit @doublepi123/cox@$version"
+        }
+
+        internal fun coxPtyBuildScript(): String =
+            "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
+                "cd $PTY_MODULE_GUEST; npx --yes node-gyp rebuild; " +
+                "test -f build/Release/pty.node; rm -rf prebuilds"
+
+        /** Alpine runtime and native build packages for both npm servers. */
         val APK_PACKAGES =
             listOf(
                 "nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client",
-                "ca-certificates", "libstdc++", "python3", "gcompat",
+                "ca-certificates", "libstdc++", "python3", "gcompat", "make", "g++", "linux-headers",
             ).joinToString(" ")
-
-        /** Extra packages needed to rebuild OpenChamber's node-pty in the guest. */
-        val NATIVE_BUILD_PACKAGES = listOf("make", "g++", "linux-headers")
-
-        fun apkPackages(needsNativeBuild: Boolean): String =
-            if (!needsNativeBuild) {
-                APK_PACKAGES
-            } else {
-                (APK_PACKAGES.split(" ") + NATIVE_BUILD_PACKAGES).distinct().joinToString(" ")
-            }
 
         internal fun verifyCursorSdkRuntime(
             runner: AgentCommandRunner,
             rootfs: File,
         ) {
-            if (!File(rootfs, "opt/t3/node_modules/@cursor/sdk").isDirectory) return
+            val module = InstalledComponents.coxModuleGuest(rootfs)
+            if (!File(rootfs, "$module/node_modules/@cursor/sdk".removePrefix("/")).isDirectory) return
             runner.mustSucceed(
                 "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
                     "apk info -e gcompat >/dev/null 2>&1 || " +
@@ -1038,12 +1019,18 @@ class RuntimeEnvironmentInstaller(
                 "Unable to install the compatibility libraries Cursor SDK needs.",
                 timeoutMinutes = APK_TIMEOUT_MINUTES,
             )
-            val smoke = "$T3_GUEST/cursor-sdk-smoke.cjs"
+            val smoke = if (InstalledComponents.isCoxNpmInstall(rootfs)) {
+                "$module/cursor-sdk-smoke.cjs".also { path ->
+                    File(rootfs, path.removePrefix("/")).writeText(CURSOR_SDK_SMOKE_SCRIPT)
+                }
+            } else {
+                "$module/cursor-sdk-smoke.cjs"
+            }
             val script =
                 if (File(rootfs, smoke.removePrefix("/")).isFile) {
                     "node $smoke"
                 } else {
-                    "node -e \"const base = '$T3_GUEST/node_modules/@cursor/sdk-linux-' + process.arch + '/vendor/'; " +
+                    "node -e \"const base = '$module/node_modules/@cursor/sdk-linux-' + process.arch + '/vendor/'; " +
                         "require(base + 'tree-sitter'); require(base + 'tree-sitter-bash');\""
                 }
             runner.mustSucceed(
@@ -1058,9 +1045,7 @@ class RuntimeEnvironmentInstaller(
         const val MAX_DETAIL_LINES = 40
 
         const val T3_GUEST = "/opt/t3"
-        const val T3_CLI_GUEST = "/opt/t3/bin.mjs"
-        const val T3_BUNDLE_INFO_GUEST = "/opt/t3/ANDROID-BUNDLE.json"
-        const val PTY_MODULE_GUEST = "/opt/t3/node_modules/node-pty"
+        const val PTY_MODULE_GUEST = "${InstalledComponents.COX_MODULE}/node_modules/node-pty"
         const val OPENCHAMBER_MODULE_GUEST = "/usr/local/lib/node_modules/@openchamber/web"
         const val SHIM_GUEST_PATH = "/opt/cocode/android-shim.cjs"
         const val PTY_SMOKE_GUEST_PATH = "/opt/cocode/pty-smoke.cjs"
@@ -1077,6 +1062,38 @@ class RuntimeEnvironmentInstaller(
 
         /** Free space an update needs beyond the copy: extracted bundles and agent packages grow the tree. */
         const val UPDATE_FREE_SPACE_MARGIN_BYTES = 512L * 1024 * 1024
+
+        internal val CURSOR_SDK_SMOKE_SCRIPT =
+            """
+            const { mkdtempSync, rmSync } = require('node:fs');
+            const { tmpdir } = require('node:os');
+            const { join } = require('node:path');
+            const directory = mkdtempSync(join(tmpdir(), 'cox-cursor-smoke-'));
+            const previousDirectory = process.cwd();
+            const deadline = setTimeout(() => { console.error('Cursor SDK smoke timed out'); process.exit(1); }, 60000);
+            process.env.HOME = directory;
+            process.env.XDG_CONFIG_HOME = join(directory, 'config');
+            process.env.XDG_DATA_HOME = join(directory, 'data');
+            process.env.XDG_CACHE_HOME = join(directory, 'cache');
+            process.env.XDG_STATE_HOME = join(directory, 'state');
+            process.chdir(directory);
+            async function main() {
+              const { createAgentPlatform } = require('@cursor/sdk');
+              for (const enabled of [true, false, true]) {
+                const platform = await createAgentPlatform({ workspaceRef: directory });
+                const release = await platform.prewarmLocalWorkspace({
+                  local: { cwd: directory, settingSources: [], sandboxOptions: { enabled } },
+                });
+                await release();
+                console.log('Cursor SDK prewarm ok (sandbox=' + enabled + ')');
+              }
+            }
+            main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
+              clearTimeout(deadline);
+              process.chdir(previousDirectory);
+              rmSync(directory, { recursive: true, force: true });
+            });
+            """.trimIndent() + "\n"
 
         /**
          * Spawns `/bin/sh -c 'echo PTYOK'` through the bundled node-pty and requires the output and

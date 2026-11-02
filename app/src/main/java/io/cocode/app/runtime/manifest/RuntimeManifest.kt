@@ -21,10 +21,6 @@ data class RuntimeManifest(
     fun architecture(abi: String): RuntimeArchitecture =
         requireNotNull(architectures[abi]) { "Linux runtime does not support ABI $abi" }
 
-    /** The Cox bundle architecture name for [abi] (`arm64`, `x64`). */
-    fun t3Arch(abi: String): String =
-        requireNotNull(t3.architectures[abi]) { "Cox does not support ABI $abi" }
-
     fun agent(id: String): AgentSpec? = agents.firstOrNull { it.id == id }
 
     fun validate() {
@@ -36,53 +32,24 @@ data class RuntimeManifest(
         architectures.forEach { (abi, item) -> item.validate(abi) }
         t3.validate()
         openchamber.validate()
-        require(t3.architectures.keys.containsAll(architectures.keys)) {
-            "Cox has no bundle for: ${architectures.keys - t3.architectures.keys}"
-        }
         require(agents.isNotEmpty()) { "Runtime manifest has no agents" }
         require(agents.map(AgentSpec::id).distinct().size == agents.size) { "Agent ids must be unique" }
         agents.forEach(AgentSpec::validate)
     }
 }
 
-/**
- * The on-device Cox server bundle, published as a GitHub release. Cox speaks the T3 Code protocol,
- * so remote T3 Code servers stay compatible; only the product and its bundle names differ.
- */
 @Serializable
 data class T3Spec(
-    val repository: String,
-    /** Fallback when the GitHub API is unreachable. */
+    val npmPackage: String = "@doublepi123/cox",
     val version: String,
-    val assetPattern: String,
-    /** ABI (`arm64-v8a`) to bundle arch (`arm64`). */
-    val architectures: Map<String, String>,
 ) {
-    fun assetName(
-        version: String,
-        arch: String,
-    ): String = assetPattern.replace("{version}", version).replace("{arch}", arch)
-
     fun validate() {
-        require(REPOSITORY.matches(repository)) { "Invalid Cox repository: $repository" }
+        require(npmPackage == "@doublepi123/cox") { "Unsupported Cox npm package: $npmPackage" }
         require(VERSION.matches(version)) { "Invalid Cox version: $version" }
-        require(assetPattern.contains("{version}") && assetPattern.contains("{arch}")) {
-            "Invalid Cox asset pattern: $assetPattern"
-        }
-        require(architectures.isNotEmpty()) { "Cox has no architectures" }
-        architectures.forEach { (abi, arch) ->
-            require(abi.isNotBlank() && arch.isNotBlank()) { "Invalid Cox architecture entry: $abi" }
-        }
     }
 
     companion object {
-        /**
-         * `v0.1.1` (Cox) and `v0.1.6-pw.5` (the legacy T3 Code build) both count: Cox tags plain
-         * semver, while the embedded T3 releases used a `-pw.N` suffix.
-         */
-        val TAG = Regex("""^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$""")
-        val VERSION = Regex("""^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$""")
-        val REPOSITORY = Regex("""^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$""")
+        val VERSION = Regex("""^\d+\.\d+\.\d+$""")
     }
 }
 

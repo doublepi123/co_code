@@ -23,7 +23,7 @@ Runtime errors are notified natively; agent notifications from the web UI are no
 |---|---|
 | Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
 | Node.js | Alpine 24.x |
-| Cox server | GitHub release from `doublepi123/cox`, default 0.1.1 (T3 Code protocol) |
+| Cox server | npm `@doublepi123/cox`, resolves latest on install, bundled fallback 0.1.15 (T3 Code protocol); node-pty rebuilt inside Alpine |
 | OpenChamber server (optional) | npm `@openchamber/web`, latest at install time |
 | Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode); latest at install time |
 | PRoot | locally built 5.1.107.98 |

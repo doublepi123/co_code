@@ -1310,10 +1310,12 @@ private fun VersionChanges(
     val t3Name = stringResource(R.string.detail_t3)
     val legacyT3Name = stringResource(R.string.server_t3_legacy)
     val t3Line =
-        update.t3.takeIf { it.changed }?.let { change ->
+        update.t3.takeIf { it.changed || update.migratesCoxToNpm }?.let { change ->
             if (update.replacesLegacyT3) {
                 // Across products: name the bundle that is replaced and the one that arrives.
                 versionChangeText(legacyT3Name, change, emphasis, targetName = t3Name)
+            } else if (update.migratesCoxToNpm) {
+                versionChangeText(t3Name, change, emphasis, targetName = "$t3Name (npm)")
             } else {
                 versionChangeText(t3Name, change, emphasis)
             }

@@ -4,10 +4,10 @@ import io.cocode.app.runtime.manifest.AgentSpec
 import io.cocode.app.runtime.install.RuntimeEnvironmentInstaller.Companion.APK_PACKAGES
 import io.cocode.app.runtime.install.RuntimeEnvironmentInstaller.Companion.PTY_MODULE_GUEST
 import io.cocode.app.runtime.install.RuntimeEnvironmentInstaller.Companion.SHIM_GUEST_PATH
-import io.cocode.app.runtime.install.RuntimeEnvironmentInstaller.Companion.T3_CLI_GUEST
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /**
@@ -15,29 +15,34 @@ import org.junit.Test
  * on a device; these pin the parts a regression would silently break.
  */
 class RuntimeEnvironmentInstallerTest {
+    @Test
+    fun `Cox install pins npm and retains dependency lifecycle scripts`() {
+        val script = RuntimeEnvironmentInstaller.coxInstallScript("0.1.14")
+        assertTrue(script.contains("npm i -g --no-fund --no-audit @doublepi123/cox@0.1.14"))
+        assertFalse(script.contains("--ignore-scripts"))
+        assertThrows(IllegalArgumentException::class.java) {
+            RuntimeEnvironmentInstaller.coxInstallScript("0.1.14; exit 0")
+        }
+    }
+
+    @Test
+    fun `Cox rebuild checks the musl addon before removing incompatible prebuilds`() {
+        val script = RuntimeEnvironmentInstaller.coxPtyBuildScript()
+        assertTrue(script.startsWith("set -e;"))
+        assertTrue(script.contains("cd $PTY_MODULE_GUEST; npx --yes node-gyp rebuild"))
+        assertTrue(script.contains("test -f build/Release/pty.node; rm -rf prebuilds"))
+    }
     private val codex = AgentSpec("codex", "@openai/codex", "codex", "Codex")
     private val opencode = AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode")
 
     @Test
-    fun `apk installs the runtime packages and no native build toolchain`() {
+    fun `apk installs the runtime packages and native build toolchain for both npm servers`() {
         val packages = APK_PACKAGES.split(" ")
         listOf("nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client", "ca-certificates", "libstdc++", "python3", "gcompat").forEach {
             assertTrue("$it missing from apk packages", it in packages)
         }
         listOf("make", "g++", "linux-headers").forEach {
-            assertFalse("$it must not be installed: node-pty ships prebuilt for musl", it in packages)
-        }
-    }
-
-    @Test
-    fun `OpenChamber adds the native build toolchain for node-pty`() {
-        val packages = RuntimeEnvironmentInstaller.apkPackages(needsNativeBuild = true).split(" ")
-        listOf("make", "g++", "linux-headers").forEach {
-            assertTrue("$it missing from the OpenChamber build packages", it in packages)
-        }
-        val t3Only = RuntimeEnvironmentInstaller.apkPackages(needsNativeBuild = false).split(" ")
-        listOf("make", "g++", "linux-headers").forEach {
-            assertFalse("$it must not be needed for a T3-only install", it in t3Only)
+            assertTrue("$it missing from the native build packages", it in packages)
         }
     }
 
@@ -74,7 +79,7 @@ class RuntimeEnvironmentInstallerTest {
     fun `pty smoke test uses the node-pty bundled with t3`() {
         val script = RuntimeEnvironmentInstaller.PTY_SMOKE_SCRIPT
         assertTrue(script.contains("require('$PTY_MODULE_GUEST')"))
-        assertEquals("/opt/t3/node_modules/node-pty", PTY_MODULE_GUEST)
+        assertEquals("/usr/local/lib/node_modules/@doublepi123/cox/node_modules/node-pty", PTY_MODULE_GUEST)
         assertTrue(script.contains("pty.spawn('/bin/sh', ['-c', 'echo PTYOK']"))
         assertTrue(script.contains("exitCode === 0 && out.includes('PTYOK')"))
         assertTrue(script.contains("process.exit(1)"))
@@ -83,7 +88,7 @@ class RuntimeEnvironmentInstallerTest {
 
     @Test
     fun `t3 runs from its own directory and the shim path is unchanged`() {
-        assertEquals("/opt/t3/bin.mjs", T3_CLI_GUEST)
+        assertEquals("/usr/local/lib/node_modules/@doublepi123/cox/dist/bin.mjs", InstalledComponents.COX_CLI)
         assertEquals("/opt/cocode/android-shim.cjs", SHIM_GUEST_PATH)
     }
 

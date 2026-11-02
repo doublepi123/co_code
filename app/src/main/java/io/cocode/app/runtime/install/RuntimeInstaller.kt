@@ -36,7 +36,7 @@ data class PackageVersions(
 )
 
 /**
- * Where newer versions come from (GitHub releases and the npm registry in the app). Implementations
+ * Where newer versions come from (the npm registry in the app). Implementations
  * do network I/O and must be called off the main thread. Throws when a source cannot be read.
  */
 fun interface PackageVersionSource {

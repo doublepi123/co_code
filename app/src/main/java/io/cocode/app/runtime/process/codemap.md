@@ -20,7 +20,7 @@ Both kinds use the same `RuntimePaths.home` and therefore the same guest `/root`
 - `terminateProcessTree(process, scanner, roots, signal)`: `destroy()`, wait 750 ms, kill owned tree, then `destroyForcibly()` if still alive.
 - `StaleServerCleanup.kt`: `ProotStaleServerCleaner` kills owned runtime processes, then waits up to 5 s for the port to be free. Neither server uses a pid file this app can trust, so cleanup is owned-process-only; a foreign listener is never touched and the start refuses with `PortInUseException`. `killOwnedRuntime` is shared with Stop, Repair and Uninstall.
 - `ProotCommands` (pure builders): `prootArguments`, `guestShellCommand` (installer, `/bin/sh -lc`), `serverCommand(kind)`, `serverEnvironment(kind, coxBundle)`, `installEnvironment`.
-  - Cox: `node /opt/t3/bin.mjs`, `T3CODE_*` env, `COX_HOME=/root/.cox`, `T3CODE_AUTH_PASSWORD`, `IS_SANDBOX=1`. A legacy T3 bundle instead gets `T3CODE_HOME=/root/.t3` and no `COX_HOME`.
+  - Cox: `node /usr/local/lib/node_modules/@doublepi123/cox/dist/bin.mjs`, `T3CODE_*` host/port env, `COX_HOME=/root/.cox`, `COX_AUTH_PASSWORD`, `IS_SANDBOX=1`. The identical password is also passed as `T3CODE_AUTH_PASSWORD` for older Cox versions. Existing bundles still launch `/opt/t3/bin.mjs`; a legacy T3 bundle gets only `T3CODE_AUTH_PASSWORD` and `T3CODE_HOME=/root/.t3`, with no Cox-specific variables. OpenChamber and installer/login environments receive neither Cox nor T3 passwords.
   - OpenChamber: `node /usr/local/lib/node_modules/@openchamber/web/bin/cli.js serve --foreground --port 3000`, `OPENCHAMBER_*` env, `OPENCHAMBER_UI_PASSWORD`, `OPENCHAMBER_RELAY_HOST=off`, pinned `OPENCHAMBER_OPENCODE_BIN`, OpenCode health timeout 15 s. No T3 variable and no desktop-notification flag is present.
   - Both: guest base env, `OPENCODE_DISABLE_AUTOUPDATE`, `NODE_OPTIONS=--require /opt/cocode/android-shim.cjs`.
 - `EmbeddedCommandSuite`: resolves the PRoot binaries from `nativeLibraryDirectory`. Names: `libcocode_android_proot.so`, `libcocode_android_proot_loader.so`, `libcocode_android_proot_loader32.so`. Also creates `command-suite/{home,tmp}`.
@@ -56,7 +56,7 @@ Stop (`stop`):
 4. `onStopped()` (clears shared-storage `startedBinds`).
 
 Command (argv, from `ProotCommands`):
-- Cox (or legacy T3): `proot --kill-on-exit --link2symlink -0 -r <rootfs> -b /dev -b /proc -b /sys -b /system -b <binds...> -w /root /usr/bin/node /opt/t3/bin.mjs`
+- Cox: `proot --kill-on-exit --link2symlink -0 -r <rootfs> -b /dev -b /proc -b /sys -b /system -b <binds...> -w /root /usr/bin/node /usr/local/lib/node_modules/@doublepi123/cox/dist/bin.mjs`. Existing bundles use `/opt/t3/bin.mjs` until migrated.
 - OpenChamber: `proot ... -w /root /usr/bin/node /usr/local/lib/node_modules/@openchamber/web/bin/cli.js serve --foreground --port 3000`
 
 ## Integration

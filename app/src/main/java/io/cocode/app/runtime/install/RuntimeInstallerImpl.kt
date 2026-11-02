@@ -18,7 +18,6 @@ class RuntimeInstallerImpl(
     private val manifest: RuntimeManifest,
     private val suite: () -> EmbeddedCommandSuite.Paths,
     private val downloader: VerifiedRuntimeDownloader,
-    private val releaseSource: T3ReleaseSource,
     private val shimAsset: () -> String,
     private val dnsProvider: io.cocode.app.runtime.network.SystemDnsProvider =
         io.cocode.app.runtime.network.SystemDnsProvider { emptyList() },
@@ -32,7 +31,6 @@ class RuntimeInstallerImpl(
             abi,
             manifest,
             downloader,
-            releaseSource,
             shimAsset,
             dnsProvider,
             nowMillis,

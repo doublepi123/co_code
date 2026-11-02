@@ -6,6 +6,9 @@ either a repository file or produced by `scripts/provision_x86_probe.py`.
 Nothing generated here is committed. Rootfs tarballs, ELF binaries and logs stay under `build/` or a
 local scratch directory.
 
+For the real Cox npm installer, legacy-layout migration, failed-update rollback and server
+authentication probe, see [testing-cox-npm.md](testing-cox-npm.md).
+
 ## What is tested, and why each probe exists
 
 The on-device runtime runs PRoot (a ptrace-based user-space `chroot`) around an Alpine (musl) guest. On

@@ -1,6 +1,7 @@
 package io.cocode.app.runtime.process
 
 import io.cocode.app.runtime.ServerKind
+import io.cocode.app.runtime.install.InstalledComponents
 import io.cocode.app.runtime.storage.GuestBinds
 import io.cocode.app.runtime.storage.SharedStorageLayout
 import java.io.File
@@ -98,12 +99,19 @@ object ProotCommands {
             proot,
             rootfs,
             bindArguments(binds.specs() + extraBinds) + listOf("-w", SharedStorageLayout.GUEST_HOME),
-        ) + serverGuestCommand(kind)
+        ) + serverGuestCommand(kind, rootfs)
 
     /** The guest argv of the server, after proot and its binds. */
-    private fun serverGuestCommand(kind: ServerKind): List<String> =
+    private fun serverGuestCommand(kind: ServerKind, rootfs: File): List<String> =
         when (kind) {
-            ServerKind.T3 -> listOf(GUEST_NODE, T3_CLI)
+            ServerKind.T3 -> listOf(
+                GUEST_NODE,
+                if (InstalledComponents.isCoxNpmInstall(rootfs)) {
+                    InstalledComponents.COX_CLI
+                } else {
+                    T3_CLI
+                },
+            )
             ServerKind.OpenChamber ->
                 listOf(
                     GUEST_NODE,
@@ -140,7 +148,12 @@ object ProotCommands {
                     put("T3CODE_NO_BROWSER", "true")
                     // Cox reads COX_HOME; the legacy T3 bundle (still runnable until updated) reads
                     // T3CODE_HOME. Both point at the same userdata layout.
-                    if (coxBundle) put("COX_HOME", COX_HOME) else put("T3CODE_HOME", T3_HOME)
+                    if (coxBundle) {
+                        put("COX_HOME", COX_HOME)
+                        put("COX_AUTH_PASSWORD", uiPassword)
+                    } else {
+                        put("T3CODE_HOME", T3_HOME)
+                    }
                     put("T3CODE_AUTH_PASSWORD", uiPassword)
                     // PRoot's -0 fakes uid 0 inside an unprivileged Android app sandbox. Claude Code
                     // refuses T3's bypassPermissions mode for root unless the process says it is

@@ -27,10 +27,7 @@ class RuntimeInstallerImplMigrationTest {
             port = 3773,
             t3 =
                 T3Spec(
-                    repository = "doublepi123/t3code",
-                    version = "0.1.6-pw.5",
-                    assetPattern = "t3-{version}-android-linux-{arch}-musl.tar.gz",
-                    architectures = mapOf("arm64-v8a" to "arm64"),
+                    version = "0.1.14",
                 ),
             openchamber = OpenChamberSpec(),
             agents = listOf(AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode")),
@@ -51,12 +48,6 @@ class RuntimeInstallerImplMigrationTest {
             manifest = manifest,
             suite = { error("not used by installedRuntime") },
             downloader = VerifiedRuntimeDownloader(),
-            releaseSource =
-                object : T3ReleaseSource {
-                    override suspend fun latest(): T3Release? = null
-
-                    override suspend fun sha256Sums(release: T3Release): Map<String, String> = emptyMap()
-                },
             shimAsset = { "" },
         )
 

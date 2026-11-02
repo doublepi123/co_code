@@ -86,22 +86,21 @@ class NpmPackageVersionSource(
     }
 }
 
-/**
- * Combines the T3 Code release channel with npm for the agent CLIs. `latest()` throws when npm is
- * unreachable (the controller reports the check as failed and keeps the installed versions); a
- * GitHub failure falls back to the manifest's pinned T3 version.
- */
 class DefaultPackageVersionSource(
     private val npm: NpmPackageVersionSource,
-    private val t3: T3ReleaseSource,
     private val agents: List<AgentSpec>,
     private val fallbackT3Version: String,
+    private val coxPackage: String = "@doublepi123/cox",
     private val openChamberPackage: String = "@openchamber/web",
 ) : PackageVersionSource {
     override suspend fun latest(pinned: PackageVersions): PackageVersions {
         val t3Version =
             if (pinned.servers.isEmpty() || ServerKind.T3 in pinned.servers) {
-                t3.latest()?.version ?: fallbackT3Version
+                val current = pinned.servers[ServerKind.T3] ?: pinned.t3
+                val minimum = current.takeUnless { it.contains("-pw.") }
+                    ?.let { NpmPackageVersionSource.selectLatest(listOf(it, fallbackT3Version), null) }
+                    ?: fallbackT3Version
+                npm.latest(coxPackage, minimum) ?: minimum
             } else {
                 pinned.t3
             }

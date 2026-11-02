@@ -69,6 +69,8 @@ Storage card:
 
 ## Integration
 
+- Same-version Cox bundle migration remains an actionable update (`migratesCoxToNpm`); its target is labelled `Cox (npm)` rather than displaying an unexplained identical-version update.
+
 - Used by `ui/CoCodeApp.kt`, which builds `HomeActions` and passes state. The `HomeActions` doc says previews share this surface (`ui/preview/`).
 - Runtime types: `RuntimeState`, `FailurePhase`, `RuntimeInfo`, `InstallStep` (`setupSteps`, `updateSteps`), `AgentsState`, `RuntimeUpdateState`, `RuntimeUpdate`, `VersionChange`, `AgentChange`, `UpdateFailure`, `ServerTarget.Remote`, `ServerTarget.LOCAL_ID`, `SharedStorageState`, `SharedStorageStatus`.
 - From `ui/`: `hasStorageAccess`, `rememberStorageAccessRequest`, `checkServerAddress`, `AddressCheck`, `displayAddress`, `isLoopbackHost`, `rememberCopyAction`, `rememberLastNonNull`, `revealOnEnter`, `formatBytes`, `uptimeLabel`.

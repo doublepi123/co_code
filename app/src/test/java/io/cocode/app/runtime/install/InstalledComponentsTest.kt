@@ -11,6 +11,24 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 class InstalledComponentsTest {
+    @Test
+    fun `npm Cox identity replaces bundle identity without opt t3`() {
+        val rootfs = rootfs()
+        for (path in listOf(InstalledComponents.COX_CLI, InstalledComponents.COX_UI)) {
+            File(rootfs, path.removePrefix("/")).apply { parentFile?.mkdirs(); writeText("") }
+        }
+        val module = File(rootfs, InstalledComponents.COX_MODULE.removePrefix("/"))
+        File(module, "node_modules/node-pty").mkdirs()
+        File(module, "package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.14"}""")
+        assertTrue(InstalledComponents.isCoxNpmInstall(rootfs))
+        assertTrue(InstalledComponents.isCoxServerBundle(rootfs))
+        assertFalse(InstalledComponents.isLegacyT3Bundle(rootfs, "0.1.14"))
+        assertEquals(InstalledComponents.COX_MODULE, InstalledComponents.coxModuleGuest(rootfs))
+        assertEquals(mapOf(ServerKind.T3 to "0.1.14"), installedServerVersions(rootfs, metadata(t3Version = "0.1.14")))
+        File(module, "package.json").writeText("""{"name":"other","version":"0.1.14"}""")
+        assertFalse(InstalledComponents.isCoxNpmInstall(rootfs))
+        assertFalse(InstalledComponents.serverAssetsPresent(rootfs, ServerKind.T3))
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 

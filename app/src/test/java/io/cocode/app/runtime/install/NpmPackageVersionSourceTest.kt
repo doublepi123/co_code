@@ -14,6 +14,22 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 class NpmPackageVersionSourceTest {
+    @Test
+    fun `Cox updates never downgrade a newer installed Cox version`() = runBlocking {
+        server.enqueue(MockResponse().setBody(metadata("0.1.14")))
+        val combined = DefaultPackageVersionSource(source(), emptyList(), "0.1.14")
+        val latest = combined.latest(PackageVersions("0.2.0", servers = mapOf(ServerKind.T3 to "0.2.0")))
+        assertEquals("0.2.0", latest.t3)
+    }
+
+    @Test
+    fun `Cox registry failure fails the update check instead of guessing a release`() {
+        server.enqueue(MockResponse().setResponseCode(503))
+        val combined = DefaultPackageVersionSource(source(), emptyList(), "0.1.14")
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { combined.latest(PackageVersions("0.1.14")) }
+        }
+    }
     private lateinit var server: MockWebServer
     private val client = OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build()
 
@@ -103,49 +119,34 @@ class NpmPackageVersionSourceTest {
     }
 
     @Test
-    fun `default source combines github t3 with npm agents and falls back when github is down`() =
+    fun `default source combines Cox and agent npm versions without comparing legacy product versions`() =
         runBlocking {
+            server.enqueue(MockResponse().setBody(metadata("0.1.14", "0.1.15")))
             server.enqueue(MockResponse().setBody(metadata("0.166.0", "0.167.0")))
-            val t3 =
-                object : T3ReleaseSource {
-                    override suspend fun latest(): T3Release? = null
-
-                    override suspend fun sha256Sums(release: T3Release): Map<String, String> = emptyMap()
-                }
             val combined =
                 DefaultPackageVersionSource(
                     npm = source(),
-                    t3 = t3,
                     agents = listOf(codex),
-                    fallbackT3Version = "0.1.6-pw.5",
+                    fallbackT3Version = "0.1.14",
                 )
 
             val latest = combined.latest(PackageVersions(t3 = "0.1.6-pw.5", agents = mapOf("codex" to "0.166.0")))
 
-            assertEquals("0.1.6-pw.5", latest.t3)
+            assertEquals("0.1.15", latest.t3)
             assertEquals(mapOf("codex" to "0.167.0"), latest.agents)
+            assertEquals("/@doublepi123%2fcox", server.takeRequest().path)
+            assertEquals("/@openai%2fcodex", server.takeRequest().path)
         }
 
     @Test
-    fun `an OpenChamber-only pinned set never asks the T3 release source`() =
+    fun `an OpenChamber-only pinned set never asks for Cox`() =
         runBlocking {
-            var t3Calls = 0
-            val t3 =
-                object : T3ReleaseSource {
-                    override suspend fun latest(): T3Release? {
-                        t3Calls++
-                        error("T3 must not be fetched for an OC-only update")
-                    }
-
-                    override suspend fun sha256Sums(release: T3Release): Map<String, String> = emptyMap()
-                }
             server.enqueue(MockResponse().setBody(metadata("2.5.3", "2.5.4")))
             val combined =
                 DefaultPackageVersionSource(
                     npm = source(),
-                    t3 = t3,
                     agents = emptyList(),
-                    fallbackT3Version = "0.1.6-pw.5",
+                    fallbackT3Version = "0.1.14",
                     openChamberPackage = "@openchamber/web",
                 )
 
@@ -158,7 +159,8 @@ class NpmPackageVersionSourceTest {
                     ),
                 )
 
-            assertEquals(0, t3Calls)
+            assertEquals(1, server.requestCount)
+            assertEquals("/@openchamber%2fweb", server.takeRequest().path)
             assertEquals("0.1.6-pw.5", latest.t3)
             assertEquals(mapOf(ServerKind.OpenChamber to "2.5.4"), latest.servers)
         }
