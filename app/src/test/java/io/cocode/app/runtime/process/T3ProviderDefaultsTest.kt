@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -19,7 +20,7 @@ class T3ProviderDefaultsTest {
         val opencode = instances(out)["opencode"]!!.jsonObject
         assertEquals("opencode", opencode["driver"]!!.jsonPrimitive.content)
         assertEquals("true", opencode["enabled"]!!.jsonPrimitive.content)
-        assertNull(instances(out)["codex"])
+        assertEquals("true", instances(out)["codex"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -31,12 +32,14 @@ class T3ProviderDefaultsTest {
     @Test
     fun `never overrides a configured instance, even one turned off`() {
         val current = """{"providerInstances":{"opencode":{"driver":"opencode","enabled":false}}}"""
-        assertNull(T3ProviderDefaults.merge(current, setOf("opencode")))
+        val result = T3ProviderDefaults.merge(current, setOf("opencode"))!!
+        assertEquals("false", instances(result)["opencode"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+        assertNull(T3ProviderDefaults.merge(result, setOf("opencode")))
     }
 
     @Test
-    fun `nothing to do without off-by-default agents`() {
-        assertNull(T3ProviderDefaults.merge("{}", setOf("codex", "claude")))
+    fun `nothing to do without known installed agents`() {
+        assertNull(T3ProviderDefaults.merge("{}", setOf("unknown")))
     }
 
     @Test
@@ -58,8 +61,38 @@ class T3ProviderDefaultsTest {
             T3ProviderDefaults.settingsFile(home, T3ProviderDefaults.T3_HOME_DIR),
         )
         assertEquals(
-            File("runtime/home/.t3/userdata/settings.json"),
+            File("runtime/home/.cox/userdata/settings.json"),
             T3ProviderDefaults.settingsFile(home),
         )
+    }
+
+    @Test
+    fun `installed agents use modern provider envelopes and managed entries stay opt in`() {
+        val installed = setOf("codex", "claude", "opencode", "grok", "pi", "cursor")
+        val result = instances(T3ProviderDefaults.merge(null, installed)!!)
+        for (id in setOf("codex", "claudeAgent", "opencode", "grok", "pi", "cursor")) {
+            val instance = result[id]!!.jsonObject
+            assertEquals(id, instance["driver"]!!.jsonPrimitive.content)
+            assertEquals("true", instance["enabled"]!!.jsonPrimitive.content)
+            assertTrue(instance["config"]!!.jsonObject.isEmpty())
+        }
+        assertNull(result["claude"])
+        for (id in setOf("antigravity", "acpRegistry", "fx", "muse")) {
+            assertEquals("false", result[id]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test
+    fun `a renamed provider instance is preserved without adding a duplicate`() {
+        val current = """{"providerInstances":{"custom-pi":{"driver":"pi","enabled":false,"config":{"model":"custom"}}}}"""
+        val result = instances(T3ProviderDefaults.merge(current, setOf("pi"))!!)
+        assertNull(result["pi"])
+        assertEquals("custom", result["custom-pi"]!!.jsonObject["config"]!!.jsonObject["model"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `legacy T3 defaults do not introduce unsupported Cox drivers`() {
+        val result = instances(T3ProviderDefaults.merge(null, setOf("codex", "opencode", "grok"), cox = false)!!)
+        assertEquals(setOf("opencode"), result.keys)
     }
 }

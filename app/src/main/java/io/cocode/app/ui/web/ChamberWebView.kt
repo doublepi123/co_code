@@ -1012,7 +1012,7 @@ private fun webThemeRes(dark: Boolean): Int =
  * destroyed by opening a remote server; all remote servers share [Remote], so switching between them
  * replaces only the previous remote page.
  *
- * Both on-device servers (`local-t3`, `local-openchamber`) use [Local]: only one of them runs at a
+ * The on-device Cox server (`local-t3`) uses [Local]: only one local page runs at a
  * time. Each keeps its own target id, so its own profile; switching servers is a new identity, which
  * destroys the old page and binds a new WebView to the other server's profile (no shared cookies).
  */

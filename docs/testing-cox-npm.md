@@ -25,7 +25,7 @@ rebuilds node-pty for musl, and requires all five markers:
 
 Cox 0.1.15 and later prefer `COX_AUTH_PASSWORD`. The app and this probe also set
 `T3CODE_AUTH_PASSWORD` to the same value for older Cox versions. Legacy T3 Code receives only its
-original variable; OpenChamber and installer/login processes receive neither password variable.
+original variable; installer processes receive neither password variable.
 
 Use an ARM64 Docker host for native ARM64 coverage; inspect the image architecture rather than
 assuming it from the host. This Linux container test does **not** prove Android/PRoot compatibility.

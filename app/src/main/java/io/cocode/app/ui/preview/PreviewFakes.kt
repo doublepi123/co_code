@@ -183,8 +183,8 @@ internal object PreviewData {
     /** Both servers installed, T3 Code in use. */
     val localServers =
         ServersState(
-            selected = setOf(ServerKind.T3, ServerKind.OpenChamber),
-            installed = mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "1.4.0"),
+            selected = setOf(ServerKind.T3),
+            installed = mapOf(ServerKind.T3 to "0.1.6-pw.5"),
             active = ServerKind.T3,
         )
 

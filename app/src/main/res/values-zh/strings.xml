@@ -9,8 +9,7 @@
     <string name="guest_claude" translatable="false">~/.claude</string>
     <string name="server_t3" translatable="false">Cox</string>
     <string name="server_t3_legacy" translatable="false">T3 Code</string>
-    <string name="server_t3_remote" translatable="false">Cox / T3 Code</string>
-    <string name="server_openchamber" translatable="false">OpenChamber</string>
+    <string name="server_t3_remote" translatable="false">Cox</string>
     <string name="gateway_handoff_failed">无法安全完成登录。请重试或返回首页。</string>
     <string name="app_name">CoCode</string>
     <string name="tagline">在你的手机上运行编码代理</string>
@@ -62,7 +61,7 @@
     <string name="status_problem">出错</string>
     <string name="status_unsupported">不支持</string>
 
-    <string name="setup_intro">在手机上安装一个小型 Linux 系统，并在其中运行 Cox 或 OpenChamber 以及你的编码代理。你的项目和会话都保存在本机。</string>
+    <string name="setup_intro">在手机上安装一个小型 Linux 系统，并在其中运行 Cox 以及你的编码代理。你的项目和会话都保存在本机。</string>
     <string name="setup_fact_contents">Alpine Linux、Node.js、Git、你选的服务器和代理 CLI</string>
     <string name="setup_fact_size">下载并占用约 1.2 GB</string>
     <string name="setup_fact_wifi">建议使用 Wi-Fi</string>
@@ -91,7 +90,7 @@
     <string name="repair">修复</string>
     <string name="repair_explain">修复会重新安装 Linux 系统。可能的情况下会保留你的项目。</string>
     <string name="unsupported_title">此设备不支持</string>
-    <string name="unsupported_body">要在设备上运行服务器，需要 ARM64（arm64-v8a）或 x86_64 的手机或平板。你仍然可以在下方连接到电脑上的 Cox / T3 Code 或 OpenChamber 服务器。</string>
+    <string name="unsupported_body">要在设备上运行服务器，需要 ARM64（arm64-v8a）或 x86_64 的手机或平板。你仍然可以在下方连接到电脑上的 Cox 服务器。</string>
     <string name="show_log">日志</string>
     <string name="details">详细信息</string>
     <string name="log_title">日志</string>
@@ -103,7 +102,7 @@
 
     <!-- 代理选择 -->
     <string name="agents_title">编码代理</string>
-    <string name="agents_hint">至少选择一个要安装的代理 CLI。服务器会从 PATH 中找到它们。</string>
+    <string name="agents_hint">至少选择一个 Agent。CLI 会安装到 PATH；Cursor 使用 Cox 内置 SDK。</string>
     <string name="agents_apply">应用</string>
     <string name="agents_none_selected">请至少选择一个编码代理。</string>
     <string name="agents_hint_installed">勾选代理会在现有代理旁边再安装它；取消勾选已安装的代理并点“应用”，才会卸载它。</string>
@@ -218,7 +217,7 @@
     <string name="add">添加</string>
     <string name="edit_server">编辑服务器</string>
     <string name="empty_servers_title">连接到你的电脑</string>
-    <string name="empty_servers_body">添加电脑或网络上 Cox / T3 Code 或 OpenChamber 服务器的地址，例如 192.0.2.20:3773。</string>
+    <string name="empty_servers_body">添加电脑或网络上 Cox 服务器的地址，例如 192.0.2.20:3773。</string>
     <string name="edit">编辑</string>
     <string name="remove">移除</string>
     <string name="more_options">更多选项</string>
@@ -347,54 +346,17 @@
     <string name="app_update_later">以后再说</string>
     <string name="app_update_view">查看发布页</string>
 
-    <!-- 本机服务器（Cox / OpenChamber）。产品名不翻译。 -->
-    <string name="servers_title">服务器</string>
-    <string name="servers_hint">可以选一个，也可以两个都装。同一时间只运行一个；两个共用同一个主目录和 OpenCode 设置。</string>
-    <string name="servers_hint_installed">勾选服务器会在另一个旁边再安装它；取消勾选已安装的服务器并点“应用”，只会卸载这一个服务器。</string>
-    <string name="servers_none_selected">请至少选择一个服务器。</string>
-    <string name="servers_needs_opencode">需要 OpenCode</string>
-    <string name="servers_active_label">在本机使用</string>
-    <string name="servers_switch_title">切换到 %1$s？</string>
-    <string name="servers_switch_body_running">%1$s 会停止，改为启动 %2$s，所以 %1$s 里正在进行的任务会被中断。项目、主目录和 OpenCode 设置是共用的，保持不变。</string>
-    <string name="servers_switch_body">之后改用 %2$s。%1$s 仍保持安装，项目、主目录和 OpenCode 设置是共用的。</string>
-    <string name="servers_switch_confirm">切换</string>
-    <plurals name="servers_remove_title">
-        <item quantity="other">卸载 %1$s？</item>
-    </plurals>
-    <string name="servers_remove_body">只会卸载取消勾选的服务器。另一个服务器、你的项目、主目录以及 OpenCode、Codex、Claude Code 的设置都会保留。如果本地服务器正在运行，会自动重启。</string>
-    <string name="agents_required_by_openchamber">OpenChamber 需要它</string>
+    <!-- 本机 Cox 服务器。产品名不翻译。 -->
 
     <!-- 远程服务器类型 -->
-    <string name="field_server_kind">服务器类型</string>
-    <string name="server_kind_hint">选择这个地址上运行的是什么，CoCode 才能用正确的方式登录。</string>
 
     <!-- 在应用内登录 Codex（设备码）。 -->
-    <string name="codex_sign_in">登录</string>
-    <string name="codex_signed_in">已登录</string>
-    <string name="codex_sign_in_again">重新登录</string>
-    <string name="codex_sign_in_options">Codex 登录选项</string>
-    <string name="codex_continue_sign_in">继续登录</string>
-    <string name="codex_sign_in_title">登录 Codex</string>
-    <string name="codex_signed_in_title">Codex 已登录</string>
-    <string name="codex_failed_title">Codex 登录没有完成</string>
-    <string name="codex_starting">正在启动 Codex 登录…</string>
-    <string name="codex_verifying">正在检查登录状态…</string>
-    <string name="codex_step_open">打开登录页面</string>
-    <string name="codex_open_page">打开登录页面</string>
-    <string name="codex_step_code">输入这个代码</string>
-    <string name="codex_code_label">一次性代码 %1$s</string>
-    <string name="codex_copy_code">复制代码</string>
-    <string name="codex_expires_in">%1$s 后过期</string>
-    <string name="codex_waiting_note">用 ChatGPT 账号登录，输入这个代码，然后回到这里——CoCode 会自动完成。</string>
-    <string name="codex_use_api_key">改用 API 密钥</string>
-    <string name="codex_api_key_hint">适用于 OpenAI API 密钥，而不是 ChatGPT 账号。密钥会交给 Codex，应用本身不会保存。</string>
-    <string name="codex_api_key_label">OpenAI API 密钥</string>
-    <string name="codex_api_key_submit">用密钥登录</string>
-    <string name="codex_show_key">显示 API 密钥</string>
-    <string name="codex_hide_key">隐藏 API 密钥</string>
-    <string name="codex_signed_in_body">本地服务器现在可以使用 Codex 了。</string>
-    <string name="codex_technical_details">技术详情</string>
-    <string name="codex_done">完成</string>
-    <string name="codex_close">关闭</string>
-    <string name="codex_hide">隐藏</string>
+    <string name="cox_settings_title">Cox 设置</string>
+    <string name="cox_settings_hint">在 Cox 中配置模型服务地址、API 密钥、协议和模型，再将模型服务绑定到 Agent。Agent 安装与认证统一在 Cox 中管理。</string>
+    <string name="cox_model_center">模型中心</string>
+    <string name="cox_agent_settings">Agent 设置与安装</string>
+    <string name="cox_settings_start_hint">需要时会自动启动 Cox。Cursor 使用内置 SDK；Antigravity 和 ACP Agent 使用 Cox 安装器；Fx、Muse 需要在 Cox 中配置可执行文件。</string>
+    <string name="cox_settings_setup_hint">请先安装 Cox。安装或维护完成后即可打开设置。</string>
+    <string name="agent_bundled">Cox 内置</string>
+    <string name="cox_settings_update_hint">请在“详情”中检查更新，将 Cox 更新至 0.1.21 或更新版本以使用模型中心。Agent 设置仍可打开。</string>
 </resources>

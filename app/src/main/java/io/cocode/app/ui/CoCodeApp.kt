@@ -61,7 +61,6 @@ import io.cocode.app.runtime.SharedStorageController
 import io.cocode.app.runtime.WebSessionAuthenticator
 import io.cocode.app.ui.home.HomeActions
 import io.cocode.app.ui.home.HomeScreen
-import io.cocode.app.ui.home.rememberCodexSignInUi
 import io.cocode.app.ui.theme.CoCodeTheme
 import io.cocode.app.ui.web.WebScreen
 import io.cocode.app.ui.web.WebViewPool
@@ -401,7 +400,6 @@ internal fun CoCodeApp(
                         val updates by runtime.updates.collectAsStateWithLifecycle()
                         val agents by runtime.agents.collectAsStateWithLifecycle()
                         val localServers by runtime.servers.collectAsStateWithLifecycle()
-                        val codexLogin = rememberCodexSignInUi()
                         val actions =
                             remember(local, remotes, pool, nav, entry, storage, refreshStorage, requestStorageAccess, uiPrefs, webDeps) {
                                 HomeActions(
@@ -475,8 +473,20 @@ internal fun CoCodeApp(
                                     onCheckForUpdates = local::checkForUpdates,
                                     onDismissUpdateFailure = local::dismissUpdateFailure,
                                     onAgentsChange = runtime::setAgents,
-                                    onServersChange = local::setServers,
-                                    onSelectServer = local::selectServer,
+                                    onOpenCoxSettings = { page ->
+                                        if (entry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                                            val kind = ServerKind.T3
+                                            val id = kind.localTargetId
+                                            val origin = canonicalWebOrigin("http://127.0.0.1:${kind.port}")!!
+                                            uiPrefs.setPage(id, page.path, origin)
+                                            // A shortcut must replace a pooled chat page too.
+                                            pool.discard(id)
+                                            if (runtime.state.value !is RuntimeState.Running && runtime.state.value !is RuntimeState.Starting) {
+                                                local.start()
+                                            }
+                                            nav.openIfResumed(entry, Routes.web(id))
+                                        }
+                                    },
                                 )
                             }
                         HomeScreen(
@@ -491,7 +501,6 @@ internal fun CoCodeApp(
                             updates = updates,
                             agents = agents,
                             localServers = localServers,
-                            codexLogin = codexLogin,
                         )
                     }
 

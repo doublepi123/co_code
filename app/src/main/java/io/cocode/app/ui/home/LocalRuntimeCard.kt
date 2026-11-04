@@ -57,9 +57,6 @@ import androidx.compose.material.icons.rounded.Upgrade
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -102,7 +99,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import io.cocode.app.agentlogin.CodexLoginState
 import io.cocode.app.runtime.AgentsState
 import io.cocode.app.runtime.InstallStep
 import io.cocode.app.runtime.RuntimeInfo
@@ -176,7 +172,7 @@ private fun RuntimePhase.tone(): StatusTone =
         else -> StatusTone.Idle
     }
 
-private enum class PendingConfirm { Repair, Uninstall, Update, RemoveAgents, RemoveServers }
+private enum class PendingConfirm { Repair, Uninstall, Update, RemoveAgents }
 
 /** Recommended free space before setup, with headroom over the ~1.2 GB footprint. */
 private const val LOW_SPACE_BYTES = 3L * 1024 * 1024 * 1024
@@ -241,17 +237,10 @@ internal fun LocalRuntimeCard(
     onUpdate: () -> Unit = {},
     onCheckForUpdates: () -> Unit = {},
     onDismissUpdateFailure: () -> Unit = {},
-    /**
-     * T3 Code / OpenChamber: what the user picked, what is installed and which one is active. The
-     * card's status, actions and log are the active server's.
-     */
+    /** Cox keeps its historical runtime identity. */
     servers: ServersState = ServersState(),
-    /** Persists a new server selection; with an installed runtime this also applies it. Never empty. */
-    onServersChange: (Set<ServerKind>) -> Unit = {},
-    /** Makes another installed server the active one (stops the current one, starts that one). */
-    onSelectServer: (ServerKind) -> Unit = {},
-    /** In-app Codex sign-in; null hides it (previews, or no sign-in support). */
-    codexLogin: CodexSignInUi? = null,
+    /** Opens Cox's own model center or agent settings. */
+    onOpenCoxSettings: (CoxSettingsPage) -> Unit = {},
 ) {
     val phase = if (checking || state == RuntimeState.Detecting) RuntimePhase.Checking else state.phase
     val activeName = servers.active.label()
@@ -294,20 +283,7 @@ internal fun LocalRuntimeCard(
     val agentsBeforeInstall =
         phase == RuntimePhase.NotInstalled || (phase == RuntimePhase.Failed && info == null)
     val installedAgentIds = agents.installed.keys
-    // Server picker: the same rules as the agent picker (see SelectionDraft).
-    val installedServers = servers.installed.keys
-    var serverDraft by remember(agentsBeforeInstall, if (agentsBeforeInstall) servers.selected else installedServers) {
-        mutableStateOf(ServerDraft.of(servers.selected, installedServers, agentsBeforeInstall))
-    }
-    // OpenChamber runs on OpenCode: while it is installed or about to be, OpenCode stays checked.
-    // That is a dependency, not the user's choice; the controller reports it in AgentsState.required.
-    val requiredAgents =
-        agents.required +
-            if (ServerKind.OpenChamber in serverDraft.checked && agents.available.any { it.id == OPENCODE_ID }) {
-                setOf(OPENCODE_ID)
-            } else {
-                emptySet()
-            }
+    val requiredAgents = agents.required
     var agentDraft by remember(
         agentsBeforeInstall,
         if (agentsBeforeInstall) agents.selected else installedAgentIds,
@@ -317,10 +293,7 @@ internal fun LocalRuntimeCard(
     }
     // Never sends an empty or unchanged set to the controller.
     val applyAgents: () -> Unit = { agentDraft.applySelection()?.let { onAgentsChange(it) } }
-    val applyServers: () -> Unit = { serverDraft.applySelection()?.let { onServersChange(it) } }
-    var switchTo by remember { mutableStateOf<ServerKind?>(null) }
-    // Set up needs a server and an agent.
-    val canSetUp = serverDraft.canSetUp && agentDraft.canSetUp
+    val canSetUp = agentDraft.canSetUp
     val showAgents =
         agents.available.isNotEmpty() &&
             phase in setOf(
@@ -335,17 +308,6 @@ internal fun LocalRuntimeCard(
         accent = if (phase == RuntimePhase.Running) ChamberTheme.colors.success else null,
     ) {
         CardHeader(phase = phase, updating = updatingNow, title = activeName)
-
-        // Both servers installed: which one this phone uses. Status and actions below follow it.
-        if (installedServers.size > 1 && phase != RuntimePhase.Checking && phase != RuntimePhase.Unsupported) {
-            ActiveServerSelector(
-                installed = ServerKind.entries.filter { it in installedServers },
-                active = servers.active,
-                enabled = !phase.isBusy,
-                onSelect = { kind -> if (kind != servers.active) switchTo = kind },
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-            )
-        }
 
         AnimatedContent(
             targetState = phase,
@@ -398,90 +360,7 @@ internal fun LocalRuntimeCard(
             }
         }
 
-        // Codex sign-in: only for an installed Codex in an installed runtime.
-        val codexInstalled = info != null && CODEX_AGENT_ID in agents.installed
-        var codexHidden by rememberSaveable { mutableStateOf(false) }
-        // Results (signed in / failed) only for a flow the user started here: the background status
-        // check also reports "signed in", and that must not pop a dialog.
-        var codexRequested by rememberSaveable { mutableStateOf(false) }
-        val codexState = codexLogin?.state ?: CodexLoginState.Idle
-        val codexRunning = codexState.isRunning
-        // A flow the user stepped away from comes back once it ends (success or failure).
-        LaunchedEffect(codexRunning) { if (!codexRunning) codexHidden = false }
-        // Unknown status: ask when the card shows with Codex installed, and again once the server is
-        // up (a check that overlapped the server start may have stayed unknown).
-        LaunchedEffect(codexLogin != null, codexInstalled, state is RuntimeState.Running) {
-            if (codexLogin != null && codexInstalled && codexLogin.signedIn == null) codexLogin.refreshStatus()
-        }
-        val codexActions =
-            codexLogin?.actions?.let { base ->
-                remember(base) {
-                    CodexSignInActions(
-                        start = {
-                            codexRequested = true
-                            codexHidden = false
-                            base.start()
-                        },
-                        signInWithApiKey = base.signInWithApiKey,
-                        cancel = base.cancel,
-                        dismiss = {
-                            codexRequested = false
-                            base.dismiss()
-                        },
-                        openUrl = base.openUrl,
-                        copyCode = base.copyCode,
-                    )
-                }
-            }
-        val codexStatus: (@Composable () -> Unit)? =
-            codexLogin?.takeIf { codexInstalled }?.let { login ->
-                {
-                    CodexSignInStatus(
-                        signedIn = login.signedIn,
-                        inProgress = codexRunning && codexHidden,
-                        enabled = !phase.isBusy && !codexRunning,
-                        onSignIn = { codexActions?.start?.invoke() },
-                        onContinue = { codexHidden = false },
-                    )
-                }
-            }
-        val showCodexDialog =
-            when {
-                codexState == CodexLoginState.Cancelled -> true
-                codexRunning -> !codexHidden
-                else -> codexRequested && codexState.isActive
-            }
-        if (codexActions != null && showCodexDialog) {
-            CodexSignInDialog(state = codexState, actions = codexActions, onHide = { codexHidden = true })
-        }
-
         if (showAgents) {
-            SelectionSection(
-                title = stringResource(R.string.servers_title),
-                hint = stringResource(if (agentsBeforeInstall) R.string.servers_hint else R.string.servers_hint_installed),
-                emptyHint = stringResource(R.string.servers_none_selected),
-                rows =
-                    ServerKind.entries.map { kind ->
-                        SelectionRow(
-                            id = kind,
-                            name = kind.label(),
-                            version = servers.installed[kind],
-                            note = if (kind == ServerKind.OpenChamber) stringResource(R.string.servers_needs_opencode) else null,
-                        )
-                    },
-                draft = serverDraft,
-                enabled = !phase.isBusy,
-                onToggle = { kind ->
-                    val (next, save) = serverDraft.toggle(kind)
-                    serverDraft = next
-                    // Before setup only; never an empty set.
-                    save?.let(onServersChange)
-                },
-                onApply = {
-                    if (serverDraft.needsRemovalConfirm) confirm = PendingConfirm.RemoveServers else applyServers()
-                },
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-            )
             AgentSelectionSection(
                 available = agents.available,
                 selected = agentDraft.checked,
@@ -492,7 +371,6 @@ internal fun LocalRuntimeCard(
                 additions = agentDraft.additions,
                 removals = agentDraft.removals,
                 locked = agentDraft.locked,
-                codexStatus = codexStatus,
                 onToggle = { id ->
                     val (next, save) = agentDraft.toggle(id)
                     agentDraft = next
@@ -507,6 +385,15 @@ internal fun LocalRuntimeCard(
                     }
                 },
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
+
+        if (showAgents) {
+            CoxSettingsSection(
+                enabled = info != null && !phase.isBusy,
+                modelCenterAvailable = supportsCoxModelCenter(info?.serverVersions?.get(ServerKind.T3) ?: info?.t3Version),
+                onOpen = onOpenCoxSettings,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             )
         }
 
@@ -635,21 +522,6 @@ internal fun LocalRuntimeCard(
                     onDismiss = { confirm = null },
                 )
             }
-        PendingConfirm.RemoveServers -> {
-            if (!serverDraft.needsRemovalConfirm) {
-                LaunchedEffect(Unit) { confirm = null }
-            } else {
-                val removing = ServerKind.entries.filter { it in serverDraft.removals }.map { it.label() }
-                ConfirmDialog(
-                    title = pluralStringResource(R.plurals.servers_remove_title, removing.size, removing.joinToString(", ")),
-                    body = stringResource(R.string.servers_remove_body),
-                    confirmLabel = stringResource(R.string.agents_remove_confirm),
-                    onConfirm = applyServers,
-                    onDismiss = { confirm = null },
-                    destructive = true,
-                )
-            }
-        }
         PendingConfirm.RemoveAgents -> {
             if (!agentDraft.needsRemovalConfirm) {
                 // The draft changed underneath (the install finished, or the picker was reset).
@@ -684,32 +556,7 @@ internal fun LocalRuntimeCard(
         null -> Unit
     }
 
-    switchTo?.let { target ->
-        if (target !in installedServers || target == servers.active) {
-            LaunchedEffect(target) { switchTo = null }
-        } else {
-            val serverUp = state is RuntimeState.Running || state is RuntimeState.Starting
-            val from = activeName
-            val to = target.label()
-            ConfirmDialog(
-                title = stringResource(R.string.servers_switch_title, to),
-                body =
-                    stringResource(
-                        if (serverUp) R.string.servers_switch_body_running else R.string.servers_switch_body,
-                        from,
-                        to,
-                    ),
-                confirmLabel = stringResource(R.string.servers_switch_confirm),
-                onConfirm = { onSelectServer(target) },
-                // Cancel: nothing is sent, the current server keeps running.
-                onDismiss = { switchTo = null },
-            )
-        }
-    }
 }
-
-/** OpenChamber's own agent: needed while OpenChamber is installed or picked. */
-private const val OPENCODE_ID = "opencode"
 
 @Composable
 private fun CardHeader(
@@ -1718,7 +1565,7 @@ private fun SettingSwitchRow(
 }
 
 /**
- * Three (or however many the manifest offers) agent checkboxes with their installed versions. With
+ * The manifest's agent checkboxes with their installed versions. With
  * nothing checked a warning line asks for one agent; Set up and Apply stay disabled meanwhile.
  */
 @Composable
@@ -1738,8 +1585,6 @@ private fun AgentSelectionSection(
     removals: Set<String> = emptySet(),
     /** Needed by an installed or picked server: checked and can't be unchecked. */
     locked: Set<String> = emptySet(),
-    /** Sign-in status and action at the end of the Codex row; null hides it. */
-    codexStatus: (@Composable () -> Unit)? = null,
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -1781,13 +1626,6 @@ private fun AgentSelectionSection(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
-                        if (spec.id in locked) {
-                            Text(
-                                text = stringResource(R.string.agents_required_by_openchamber),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
                     when (spec.id) {
                         in removals -> AgentChangeTag(stringResource(R.string.agents_will_remove), MaterialTheme.colorScheme.error)
@@ -1795,15 +1633,11 @@ private fun AgentSelectionSection(
                         else -> {
                             installed[spec.id]?.let {
                                 Text(
-                                    text = it,
+                                    text = if (it == "bundled") stringResource(R.string.agent_bundled) else it,
                                     style = MaterialTheme.typography.bodySmall,
                                     fontFamily = MonoFamily,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                            }
-                            if (spec.id == CODEX_AGENT_ID && codexStatus != null) {
-                                Spacer(Modifier.width(4.dp))
-                                codexStatus()
                             }
                         }
                     }
@@ -1839,134 +1673,6 @@ private fun AgentSelectionSection(
                     TextButton(onClick = onApply, enabled = enabled && canApply) {
                         Text(stringResource(R.string.agents_apply))
                     }
-                }
-            }
-        }
-    }
-}
-
-/** One row of [SelectionSection]. */
-internal data class SelectionRow<T>(
-    val id: T,
-    val name: String,
-    /** Installed version, shown when nothing is staged for the row. */
-    val version: String?,
-    /** Small secondary line under the name. */
-    val note: String? = null,
-)
-
-/**
- * A titled checkbox list over a [SelectionDraft]: staged changes are tagged per row, an empty draft
- * shows [emptyHint], and after setup Apply sends the draft (disabled while empty or unchanged).
- */
-@Composable
-private fun <T> SelectionSection(
-    title: String,
-    hint: String,
-    emptyHint: String,
-    rows: List<SelectionRow<T>>,
-    draft: SelectionDraft<T>,
-    enabled: Boolean,
-    onToggle: (T) -> Unit,
-    onApply: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.height(2.dp))
-            Text(text = hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            rows.forEach { row ->
-                val checked = row.id in draft.checked
-                val rowEnabled = enabled && row.id !in draft.locked
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .toggleable(value = checked, enabled = rowEnabled, role = Role.Checkbox, onValueChange = { onToggle(row.id) })
-                            .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = checked, onCheckedChange = null, enabled = rowEnabled)
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = row.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                        row.note?.let {
-                            Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    when (row.id) {
-                        in draft.removals -> AgentChangeTag(stringResource(R.string.agents_will_remove), MaterialTheme.colorScheme.error)
-                        in draft.additions -> AgentChangeTag(stringResource(R.string.agents_will_install), MaterialTheme.colorScheme.primary)
-                        else ->
-                            row.version?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = MonoFamily,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                    }
-                }
-            }
-            AnimatedVisibility(
-                visible = draft.isEmpty,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = ChamberTheme.colors.warning, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(text = emptyHint, style = MaterialTheme.typography.bodySmall, color = ChamberTheme.colors.warning)
-                }
-            }
-            if (!draft.beforeInstall && (draft.canApply || draft.isEmpty)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onApply, enabled = enabled && draft.canApply) {
-                        Text(stringResource(R.string.agents_apply))
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Which installed server this phone uses, as a two-way segmented control. Choosing the other one
- * asks first (see the switch dialog); the selection itself only moves once the runtime reports it.
- */
-@Composable
-private fun ActiveServerSelector(
-    installed: List<ServerKind>,
-    active: ServerKind,
-    enabled: Boolean,
-    onSelect: (ServerKind) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.servers_active_label),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            installed.forEachIndexed { index, kind ->
-                SegmentedButton(
-                    selected = kind == active,
-                    onClick = { onSelect(kind) },
-                    enabled = enabled,
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = installed.size),
-                ) {
-                    Text(kind.label(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -2106,13 +1812,3 @@ private fun DetailsSection(
         }
     }
 }
-
-
-/** What the card shows of the Codex sign-in: the flow's state, the known status and the actions. */
-internal class CodexSignInUi(
-    val state: CodexLoginState,
-    /** null = not checked yet. */
-    val signedIn: Boolean?,
-    val actions: CodexSignInActions,
-    val refreshStatus: () -> Unit,
-)

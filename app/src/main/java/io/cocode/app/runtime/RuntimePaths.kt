@@ -46,7 +46,6 @@ class RuntimePaths(
         get() =
             when (this) {
                 ServerKind.T3 -> T3_LOG_FILE_NAME
-                ServerKind.OpenChamber -> OPENCHAMBER_LOG_FILE_NAME
             }
 
     private val ServerKind.uiPasswordFileName: String
@@ -54,15 +53,12 @@ class RuntimePaths(
             when (this) {
                 // Preserved verbatim: existing installations already store their T3 password here.
                 ServerKind.T3 -> UI_PASSWORD_FILE_NAME
-                ServerKind.OpenChamber -> OPENCHAMBER_UI_PASSWORD_FILE_NAME
             }
 
     companion object {
         const val METADATA_FILE_NAME = "metadata.json"
         const val UI_PASSWORD_FILE_NAME = "ui-password"
-        const val OPENCHAMBER_UI_PASSWORD_FILE_NAME = "openchamber-ui-password"
         const val T3_LOG_FILE_NAME = "t3.log"
-        const val OPENCHAMBER_LOG_FILE_NAME = "openchamber.log"
 
         fun under(filesDir: File): RuntimePaths = RuntimePaths(File(filesDir, "runtime"))
     }

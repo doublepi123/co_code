@@ -3,7 +3,7 @@ package io.cocode.app.runtime
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Contract between the runtime layer (PRoot + Alpine + T3 Code + agent CLIs) and the UI layer.
+ * Contract between the runtime layer (PRoot + Alpine + Cox + agents) and the UI layer.
  * The UI only depends on this file; implementations live in io.cocode.app.runtime.*.
  */
 
@@ -16,10 +16,10 @@ enum class InstallStep {
     /** Update only: copy the active environment into staging. */
     CopyEnvironment,
 
-    /** Download, verify and extract the T3 Code server bundle. */
+    /** Install and verify the Cox npm server. */
     InstallServer,
 
-    /** Install the selected agent CLIs from npm. */
+    /** Install selected npm CLIs and select SDKs bundled with Cox. */
     InstallAgents,
     Verify,
     ;
@@ -191,7 +191,7 @@ data class RuntimeUpdate(
     /** Cox's change. [current] equals [target] when Cox is not installed. */
     val t3: VersionChange,
     val agents: List<AgentChange> = emptyList(),
-    /** Changes for other installed servers, keyed by kind. OpenChamber is the only extra today. */
+    /** Server-keyed changes retained for callers using the historical selection API. */
     val servers: Map<ServerKind, VersionChange> = emptyMap(),
     /**
      * True when [t3] replaces the legacy T3 Code bundle with Cox. The versions are from two products,

@@ -42,10 +42,9 @@ class PortInUseException(
 ) : IllegalStateException("Port $port is in use by another app")
 
 /**
- * Launches one server of [kind] inside PRoot: Cox's npm CLI (or an existing bundle at
- * `/opt/t3/bin.mjs`) or OpenChamber's npm CLI. Lifecycle, ownership, logging and readiness are
- * shared; only the command, environment, log file, password file and health document differ per
- * kind. Ported from AndCode's LocalRuntimeProcessLauncher (MIT), generalised to both servers.
+ * Launches Cox's npm CLI or an existing legacy bundle at `/opt/t3/bin.mjs` inside PRoot.
+ * The historical [kind] argument preserves saved target and launcher API compatibility.
+ * Ported from AndCode's LocalRuntimeProcessLauncher (MIT).
  */
 class ProotRuntimeServer(
     private val paths: RuntimePaths,
@@ -116,8 +115,7 @@ class ProotRuntimeServer(
         stop()
         val port = kind.port
         // Cox keeps its data in COX_HOME (/root/.cox, under the bind-mounted home); a legacy T3 Code
-        // bundle still reads T3CODE_HOME (/root/.t3). OpenChamber shares that same guest home, so its
-        // OpenCode config and sessions are shared too.
+        // bundle still reads T3CODE_HOME (/root/.t3).
         val coxBundle = kind == ServerKind.T3 && InstalledComponents.isCoxServerBundle(runtime.rootfs)
         val prootPath = runCatching { suite().proot.absolutePath }.getOrNull()
             ?: error("Embedded PRoot is unavailable")
@@ -140,10 +138,6 @@ class ProotRuntimeServer(
             // Installed agents whose provider is off until configured become usable. Never fails a start.
             runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys, homeDir) }
                 .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
-        }
-        if (kind == ServerKind.OpenChamber) {
-            // Pin the guest OpenCode path and disable OpenChamber's own upgrade before it starts.
-            OpenChamberPolicy.write(runtime.rootfs)
         }
         val resolved = suite()
 
@@ -260,12 +254,7 @@ class ProotRuntimeServer(
             }
         }, "${kind.id}-output").apply { isDaemon = true; start() }
 
-    /**
-     * Readiness in trust order: the child printed the listen line (signal), the child is alive, then
-     * the health document is believed while its identity stays stable. A child that exits before
-     * listening because the port was taken fails as port in use. OpenChamber additionally requires
-     * its OpenCode backend to be ready, and a reported OpenCode failure fails immediately.
-     */
+    /** Requires the child's listen marker before trusting a stable environment identity. */
     private fun waitUntilReady(
         started: Process,
         port: Int,

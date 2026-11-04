@@ -54,3 +54,5 @@ Note the lambda-based wiring: the controller and the runtime-alert observer reac
 - Android: `nativeLibraryDir` (the bundled `proot` binary), `filesDir`, `Os.getuid/getpid`, `Process.killProcess`.
 - Consumers: `CoCodeApplication.kt` (`startKoin`, `get<NotificationObserver>`), `MainActivity.kt` (`get<LocalRuntimeController>`, `RemoteServerStore`, `WebSessionAuthenticator`, `SharedStorageController`), `ui/` via Koin `get()`.
 - No HTTP endpoints are defined here; the endpoints are used by the classes it constructs (see `data/codemap.md`).
+
+Native dependency injection contains no Codex login controller or authentication probes. Cox owns provider authentication.

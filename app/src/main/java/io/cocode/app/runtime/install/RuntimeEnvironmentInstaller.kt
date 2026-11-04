@@ -48,7 +48,7 @@ internal interface AgentCommandRunner {
 }
 
 /**
- * Builds the Alpine + Node + selected server(s) + agent CLI environment in staging and activates it.
+ * Builds the Alpine + Node + Cox + selected agent environment in staging and activates it.
  * Each guest command's output is streamed to [InstallReporter.log] and to `logs/install.log`.
  *
  * The active environment is never touched until the staged one is complete and verified: the swap in
@@ -123,20 +123,14 @@ class RuntimeEnvironmentInstaller(
                 if (ServerKind.T3 in wantedServers) {
                     versions[ServerKind.T3] = installCox(report, runner, rootfs, version = null)
                 }
-                if (ServerKind.OpenChamber in wantedServers) {
-                    installOpenChamber(report, runner, rootfs, version = null)
-                    versions[ServerKind.OpenChamber] =
-                        InstalledComponents.openChamberVersion(rootfs) ?: manifest.openchamber.version
-                }
 
                 report.step(InstallStep.InstallAgents, null, wantedAgents.joinToString(" "), MessageKey.ProgressInstallingAgents)
                 installAgentPackages(runner, wantedAgents)
-                val agentVersions = verifyAgents(runner, wantedAgents)
+                val agentVersions = verifyAgents(runner, wantedAgents, rootfs)
 
                 report.step(InstallStep.Verify, null, "node, servers, agents", MessageKey.ProgressVerifying)
                 verifyServers(runner, rootfs, versions.keys)
                 val nodeVersion = nodeVersion(runner)
-                requireNodeForServers(nodeVersion, versions.keys)
 
                 val metadata =
                     RuntimeMetadata(
@@ -211,10 +205,9 @@ class RuntimeEnvironmentInstaller(
 
                 val serverVersions = mutableMapOf<ServerKind, String>()
                 val serverTargets =
-                    installedServers.mapValues { (kind, currentVersion) ->
+                    installedServers.mapValues { (kind, _) ->
                         when (kind) {
                             ServerKind.T3 -> versions.t3
-                            ServerKind.OpenChamber -> versions.servers[kind] ?: currentVersion
                         }
                     }
                 for ((kind, target) in serverTargets) {
@@ -226,17 +219,11 @@ class RuntimeEnvironmentInstaller(
                             ServerKind.T3 -> {
                                 installCox(report, runner, rootfs, version = target)
                             }
-                            ServerKind.OpenChamber -> {
-                                ensureBuildTools(report, runner)
-                                installOpenChamber(report, runner, rootfs, version = target)
-                            }
                         }
                     }
                     serverVersions[kind] =
                         if (kind == ServerKind.T3) {
                             InstalledComponents.coxNpmVersion(rootfs) ?: target
-                        } else if (kind == ServerKind.OpenChamber) {
-                            InstalledComponents.openChamberVersion(rootfs) ?: target
                         } else {
                             target
                         }
@@ -258,7 +245,6 @@ class RuntimeEnvironmentInstaller(
                 report.step(InstallStep.Verify, null, "node, servers, agents", MessageKey.ProgressVerifying)
                 verifyServers(runner, rootfs, serverVersions.keys)
                 val nodeVersion = nodeVersion(runner)
-                requireNodeForServers(nodeVersion, serverVersions.keys)
                 val metadata =
                     metadataAfterAgents.copy(
                         schemaVersion = 2,
@@ -347,12 +333,6 @@ class RuntimeEnvironmentInstaller(
                             ServerKind.T3 -> {
                                 versions[kind] = installCox(report, runner, rootfs, version = null)
                             }
-                            ServerKind.OpenChamber -> {
-                                ensureBuildTools(report, runner)
-                                installOpenChamber(report, runner, rootfs, version = null)
-                                versions[kind] =
-                                    InstalledComponents.openChamberVersion(rootfs) ?: manifest.openchamber.version
-                            }
                         }
                     }
                 }
@@ -372,7 +352,6 @@ class RuntimeEnvironmentInstaller(
                 report.step(InstallStep.Verify, null, "servers, agents", MessageKey.ProgressVerifying)
                 verifyServers(runner, rootfs, versions.keys)
                 val nodeVersion = nodeVersion(runner)
-                requireNodeForServers(nodeVersion, versions.keys)
                 val metadata =
                     metadataAfterAgents.copy(
                         schemaVersion = 2,
@@ -460,7 +439,7 @@ class RuntimeEnvironmentInstaller(
         }
 
         report.step(InstallStep.Verify, null, null, MessageKey.ProgressVerifying)
-        val versions = verifyAgents(runner, wanted)
+        val versions = verifyAgents(runner, wanted, rootfs)
 
         // The expected server set is captured before any package work. Never narrow metadata to
         // whatever happens to survive an npm run: a missing expected server fails the whole staging
@@ -545,52 +524,6 @@ class RuntimeEnvironmentInstaller(
         )
     }
 
-    /** Installs OpenChamber from npm at [version], or latest when null, then rebuilds its node-pty. */
-    private fun installOpenChamber(
-        report: InstallReporter,
-        runner: GuestRunner,
-        rootfs: File,
-        version: String?,
-    ) {
-        val packageSpecs =
-            if (version != null && version.isNotBlank()) {
-                listOf("${manifest.openchamber.npmPackage}@$version")
-            } else {
-                listOf(
-                    manifest.openchamber.npmPackage,
-                    "${manifest.openchamber.npmPackage}@${manifest.openchamber.version}",
-                )
-            }
-        report.step(InstallStep.InstallServer, null, packageSpecs.first(), MessageKey.ProgressInstallingServer)
-        var failure: Throwable? = null
-        for (spec in packageSpecs) {
-            removeServerAssets(rootfs, ServerKind.OpenChamber)
-            try {
-                runner.mustSucceed(
-                    "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
-                        "npm i -g --no-fund --no-audit $spec",
-                    MessageKey.ServerInstallFailed,
-                    "Unable to install OpenChamber from npm.",
-                    timeoutMinutes = NPM_TIMEOUT_MINUTES,
-                )
-                failure = null
-                break
-            } catch (error: Exception) {
-                failure = error
-                report.log("OpenChamber npm install failed for $spec: ${error.message}")
-            }
-        }
-        failure?.let { throw it }
-        runner.mustSucceed(
-            "set -e; export PATH=${ProotCommands.GUEST_PATH}; " +
-                "cd $OPENCHAMBER_MODULE_GUEST/node_modules/node-pty && npx --yes node-gyp rebuild",
-            MessageKey.ServerInstallFailed,
-            "OpenChamber's terminal module could not be built.",
-            timeoutMinutes = NPM_TIMEOUT_MINUTES,
-        )
-        verifyOpenChamber(rootfs)
-    }
-
     /** Adds the native build toolchain for the npm servers; idempotent. */
     private fun ensureBuildTools(
         report: InstallReporter,
@@ -606,40 +539,19 @@ class RuntimeEnvironmentInstaller(
         )
     }
 
-    private fun verifyOpenChamber(rootfs: File) {
-        require(File(rootfs, InstalledComponents.OPENCHAMBER_CLI).isFile) {
-            "OpenChamber install has no bin/cli.js"
-        }
-        require(File(rootfs, InstalledComponents.OPENCHAMBER_UI).isFile) {
-            "OpenChamber install has no dist/index.html"
-        }
-        require(File(rootfs, "$OPENCHAMBER_MODULE_GUEST/node_modules/node-pty").isDirectory) {
-            "OpenChamber install has no node-pty module"
-        }
-    }
-
-    private fun verifyOpenChamberPty(
-        runner: GuestRunner,
-        rootfs: File,
-    ) {
-        File(rootfs, OPENCHAMBER_PTY_SMOKE_GUEST_PATH.removePrefix("/")).apply {
-            parentFile?.mkdirs()
-            writeText(openChamberPtySmokeScript())
-        }
-        runner.mustSucceed(
-            "set -e; node $OPENCHAMBER_PTY_SMOKE_GUEST_PATH",
-            MessageKey.PtySmokeFailed,
-            "OpenChamber's bundled node-pty does not work in the guest.",
-            timeoutMinutes = PTY_SMOKE_TIMEOUT_MINUTES,
-        )
-    }
-
     /** Verifies every installed server's assets and terminal module; no server is left half-built. */
     private fun verifyServers(
         runner: GuestRunner,
         rootfs: File,
         kinds: Set<ServerKind>,
     ) {
+        runner.mustSucceed(
+            "set -e; apk info -e $MANAGED_PROVIDER_PACKAGES >/dev/null 2>&1 || " +
+                "apk --cache-dir /var/cache/apk add $MANAGED_PROVIDER_PACKAGES",
+            MessageKey.PackagesFailed,
+            "Unable to install the package and archive tools used by Cox's ACP Registry.",
+            timeoutMinutes = APK_TIMEOUT_MINUTES,
+        )
         if (ServerKind.T3 in kinds) {
             require(InstalledComponents.serverAssetsPresent(rootfs, ServerKind.T3)) {
                 "Cox install is incomplete"
@@ -648,13 +560,9 @@ class RuntimeEnvironmentInstaller(
             verifyCursorSdkRuntime(runner, rootfs)
             verifyPty(runner, rootfs)
         }
-        if (ServerKind.OpenChamber in kinds) {
-            verifyOpenChamber(rootfs)
-            verifyOpenChamberPty(runner, rootfs)
-        }
     }
 
-    /** Removes one server's program tree only; home, workspace, agents and the other server stay. */
+    /** Removes Cox's program tree only; home, workspace and agents stay untouched. */
     private fun removeServerAssets(
         rootfs: File,
         kind: ServerKind,
@@ -665,12 +573,6 @@ class RuntimeEnvironmentInstaller(
                 deleteTreeOrThrow(File(rootfs, InstalledComponents.COX_MODULE.removePrefix("/")))
                 deleteTreeOrThrow(File(rootfs, "usr/local/bin/cox"))
             }
-            ServerKind.OpenChamber -> {
-                deleteTreeOrThrow(File(rootfs, OPENCHAMBER_MODULE_GUEST.removePrefix("/")))
-                deleteTreeOrThrow(File(rootfs, "etc/openchamber"))
-                deleteTreeOrThrow(File(rootfs, "usr/local/bin/openchamber"))
-                deleteTreeOrThrow(File(rootfs, "usr/local/bin/openchamber2"))
-            }
         }
     }
 
@@ -679,9 +581,6 @@ class RuntimeEnvironmentInstaller(
         return selected
     }
 
-    private fun openChamberPtySmokeScript(): String =
-        PTY_SMOKE_SCRIPT.replace(PTY_MODULE_GUEST, "$OPENCHAMBER_MODULE_GUEST/node_modules/node-pty")
-
     /** Installs [ids] from npm at their latest versions, or at [versions] when a version is known. */
     private fun installAgentPackages(
         runner: AgentCommandRunner,
@@ -689,7 +588,8 @@ class RuntimeEnvironmentInstaller(
         versions: Map<String, String> = emptyMap(),
     ) {
         if (ids.isEmpty()) return
-        val specs = ids.map(::spec)
+        val specs = ids.map(::spec).filter { it.installation == "npm" }
+        if (specs.isEmpty()) return
         val script = agentInstallScript(specs, versions)
         runner.mustSucceed(
             script,
@@ -702,9 +602,14 @@ class RuntimeEnvironmentInstaller(
     private fun verifyAgents(
         runner: AgentCommandRunner,
         ids: Set<String>,
+        rootfs: File,
     ): Map<String, String> =
         ids.associate { id ->
             val spec = spec(id)
+            if (spec.installation == "bundled") {
+                require(InstalledComponents.agentFilesPresent(rootfs, spec)) { "${spec.displayName} is missing from Cox" }
+                return@associate id to BUNDLED_AGENT_VERSION
+            }
             // e.g. `codex-cli 0.166.0`, `opencode v2.2.5`; parse the number, never the raw line.
             val output = runner.output("${spec.bin} --version")
             val version = extractVersion(output)
@@ -714,19 +619,6 @@ class RuntimeEnvironmentInstaller(
 
     private fun nodeVersion(runner: GuestRunner): String =
         extractVersion(runner.output("node --version")).removePrefix("v")
-
-    /** OpenChamber's current npm package requires Node 24.14 or newer. */
-    private fun requireNodeForServers(
-        nodeVersion: String,
-        kinds: Set<ServerKind>,
-    ) {
-        if (ServerKind.OpenChamber !in kinds) return
-        if (compareVersions(nodeVersion, OPENCHAMBER_MIN_NODE) >= 0) return
-        throw UserFacingException(
-            MessageKey.ServerInstallFailed,
-            "OpenChamber needs Node $OPENCHAMBER_MIN_NODE or newer (found $nodeVersion)",
-        )
-    }
 
     private fun spec(id: String): AgentSpec =
         requireNotNull(manifest.agent(id)) { "Unknown agent: $id" }
@@ -748,12 +640,7 @@ class RuntimeEnvironmentInstaller(
     private fun removeAgentPackages(
         rootfs: File,
         specs: List<AgentSpec>,
-    ) {
-        for (spec in specs) {
-            deleteTreeOrThrow(File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}"))
-            for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
-        }
-    }
+    ) = Companion.removeAgentPackages(rootfs, specs)
 
     private fun installedMetadataOrNull(): RuntimeMetadata? {
         val file = paths.metadataFile
@@ -796,6 +683,7 @@ class RuntimeEnvironmentInstaller(
     private fun installHome(staging: File): File = File(staging, "install-home").apply { mkdirs() }
 
     private fun writeShim(rootfs: File) {
+        removeRetiredServerAssets(rootfs)
         File(rootfs, SHIM_GUEST_PATH.removePrefix("/")).apply {
             parentFile?.mkdirs()
             writeText(shimAsset())
@@ -976,6 +864,16 @@ class RuntimeEnvironmentInstaller(
     }
 
     companion object {
+        internal fun removeRetiredServerAssets(rootfs: File) {
+            listOf(
+                "usr/local/lib/node_modules/@openchamber/web",
+                "usr/local/bin/openchamber",
+                "usr/local/bin/openchamber2",
+                "etc/openchamber",
+                "opt/cocode/openchamber-pty-smoke.cjs",
+            ).forEach { deleteTreeOrThrow(File(rootfs, it)) }
+        }
+
         internal fun verifyCoxNativeModules(runner: AgentCommandRunner, rootfs: File) {
             if (!InstalledComponents.isCoxNpmInstall(rootfs)) return
             runner.mustSucceed(
@@ -998,10 +896,12 @@ class RuntimeEnvironmentInstaller(
                 "cd $PTY_MODULE_GUEST; npx --yes node-gyp rebuild; " +
                 "test -f build/Release/pty.node; rm -rf prebuilds"
 
-        /** Alpine runtime and native build packages for both npm servers. */
+        const val MANAGED_PROVIDER_PACKAGES = "uv tar gzip bzip2 unzip"
+
+        /** Alpine runtime, managed-provider tools and native build packages for Cox. */
         val APK_PACKAGES =
             listOf(
-                "nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client",
+                "nodejs", "npm", "bash", "git", "curl", "ripgrep", "openssh-client", MANAGED_PROVIDER_PACKAGES,
                 "ca-certificates", "libstdc++", "python3", "gcompat", "make", "g++", "linux-headers",
             ).joinToString(" ")
 
@@ -1046,10 +946,8 @@ class RuntimeEnvironmentInstaller(
 
         const val T3_GUEST = "/opt/t3"
         const val PTY_MODULE_GUEST = "${InstalledComponents.COX_MODULE}/node_modules/node-pty"
-        const val OPENCHAMBER_MODULE_GUEST = "/usr/local/lib/node_modules/@openchamber/web"
         const val SHIM_GUEST_PATH = "/opt/cocode/android-shim.cjs"
         const val PTY_SMOKE_GUEST_PATH = "/opt/cocode/pty-smoke.cjs"
-        const val OPENCHAMBER_PTY_SMOKE_GUEST_PATH = "/opt/cocode/openchamber-pty-smoke.cjs"
 
         const val DEFAULT_TIMEOUT_MINUTES = 20L
         const val APK_TIMEOUT_MINUTES = 20L
@@ -1057,8 +955,7 @@ class RuntimeEnvironmentInstaller(
         const val PTY_SMOKE_TIMEOUT_MINUTES = 2L
         const val VERIFY_TIMEOUT_MINUTES = 2L
 
-        /** OpenChamber's npm package requires at least this Node version. */
-        const val OPENCHAMBER_MIN_NODE = "24.14.0"
+        const val BUNDLED_AGENT_VERSION = "bundled"
 
         /** Free space an update needs beyond the copy: extracted bundles and agent packages grow the tree. */
         const val UPDATE_FREE_SPACE_MARGIN_BYTES = 512L * 1024 * 1024
@@ -1142,15 +1039,21 @@ class RuntimeEnvironmentInstaller(
             versions: Map<String, String> = emptyMap(),
         ): String {
             val packages =
-                specs.map { spec ->
-                    versions[spec.id]?.takeIf(String::isNotBlank)?.let { "${spec.npmPackage}@$it" } ?: spec.npmPackage
+                specs.filter { it.installation == "npm" }.map { spec ->
+                    spec.validate()
+                    versions[spec.id]?.takeIf(String::isNotBlank)?.let {
+                        require(Regex("""^\d+(?:\.\d+)+(?:-[a-zA-Z0-9.-]+)?$""").matches(it)) { "Invalid agent version: $it" }
+                        "${spec.npmPackage}@$it"
+                    } ?: spec.npmPackage
                 }
+            if (packages.isEmpty()) return "true"
             return "set -e; npm i -g --no-fund --no-audit ${packages.joinToString(" ")}"
         }
 
         /** Bin link names an agent package owns. OpenCode ships a second compatibility binary. */
         fun agentBinNames(spec: AgentSpec): List<String> =
             buildList {
+                if (spec.installation != "npm") return@buildList
                 add(spec.bin)
                 if (spec.id == "opencode") add("opencode2")
             }
@@ -1161,6 +1064,8 @@ class RuntimeEnvironmentInstaller(
             specs: List<AgentSpec>,
         ) {
             for (spec in specs) {
+                if (spec.installation != "npm") continue
+                spec.validate()
                 deleteTreeOrThrow(File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}"))
                 for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
             }

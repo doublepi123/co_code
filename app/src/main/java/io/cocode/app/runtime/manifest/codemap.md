@@ -2,30 +2,17 @@
 
 ## Responsibility
 
-Reads and validates `assets/runtime-manifest.json`, the single source of truth for which Alpine rootfs, which Cox release (T3 Code protocol), which OpenChamber npm package and which agent CLIs the app installs. It also supplies the ports and the per-ABI rootfs pins.
+Parse and validate `assets/runtime-manifest.json`, the source of truth for Alpine rootfs pins, Cox's npm fallback version, supported ABI downloads and selectable agent installation methods.
 
 ## Design
 
-- `RuntimeManifest` (`@Serializable data class`): `schemaVersion`, `runtimeVersion`, `alpineVersion`, `port` (Cox/T3 protocol), `t3: T3Spec`, `openchamber: OpenChamberSpec`, `agents: List<AgentSpec>`, `architectures: Map<abi, RuntimeArchitecture>`.
-- `T3Spec`: `npmPackage` (`@doublepi123/cox`) and stable `version` (fallback when npm metadata lookup fails). Program paths use npm's global prefix and `dist/bin.mjs` / `dist/client/index.html`.
-- `OpenChamberSpec`: `npmPackage` (`@openchamber/web`), fallback `version` (`2.5.3`), fixed `port` (3000), guest `cliPath` and `uiPath`. The installer tries npm latest and falls back to this version.
-- `AgentSpec`: `id` (`codex`, `claude`, `opencode`), `npmPackage`, `bin`, `displayName`.
-- `RuntimeArchitecture`: `alpineUrl`, `alpineSha256`.
-- `validate()` is strict: schema must be 1, versions non-blank, port in 1024..65535, at least one architecture. Each architecture URL must start with `https://`, and its SHA-256 must match `^[a-f0-9]{64}$`. Cox must use the supported npm package and a stable three-part version. OpenChamber needs a stable npm package, a dotted fallback version and `/usr/local/lib/node_modules/` paths. Agents must be non-empty, uniquely identified and fully described.
-- `architecture(abi)` throws when the ABI is missing; `agent(id)` looks up an agent.
-- `RuntimeManifestReader(readAsset)`: takes a lambda so tests can supply the JSON string. Decodes with `ignoreUnknownKeys = true`, then validates.
-- `ASSET_NAME = "runtime-manifest.json"`.
-
-Pure data; no Android APIs.
-
-## Flow
-
-1. The DI graph supplies `readAsset` from `assets/` (`AppModule`).
-2. `RuntimeManifestReader.read()` decodes and calls `validate()`. Any failure throws, which fails construction.
-3. `RuntimeInstallerImpl` and `RuntimeEnvironmentInstaller` use the result. `architecture(abi)` selects the rootfs URL and SHA-256 pin; `t3` and `openchamber` supply npm packages and fallback versions. The fallback Cox/OC versions and the agent list feed the update check; the legacy port is written into `metadata.json`.
+- `RuntimeManifest`: schema 1, runtime/Alpine versions, Cox port, `T3Spec`, agent specs and architecture map. Unknown fields are ignored for older asset compatibility.
+- `T3Spec`: only the supported Cox npm package is accepted, with a stable three-part fallback version.
+- `AgentSpec`: `id`, `npmPackage`, `bin`, `displayName`, `installation` (default `npm`). Npm package and binary names are validated before building shell commands.
+- `installation=bundled` is supported only for `cursor`, with empty package and binary fields. The SDK comes from Cox, not a fictitious Cursor CLI npm package.
+- `RuntimeArchitecture`: HTTPS archive URL and lowercase SHA-256. Missing ABIs, invalid ports, duplicate agent ids and unknown installation methods fail validation.
+- `RuntimeManifestReader`: injected asset reader and pure serialization/validation; no Android APIs.
 
 ## Integration
 
-- Consumers: `runtime/install/RuntimeEnvironmentInstaller.kt`, `runtime/install/RuntimeInstallerImpl.kt`, `runtime/install/NpmPackageVersionSource.kt` (`DefaultPackageVersionSource`), and `runtime/LocalRuntimeController.kt` (agents, pinned Cox version, port through metadata).
-- External contract: the asset file at `app/src/main/assets/runtime-manifest.json`. Current values: `runtimeVersion` 2026.11.02.1, `alpineVersion` 3.24.1, Cox `0.1.15`, OpenChamber `2.5.3` on port 3000, Cox port 3773, agents `codex` / `claude` / `opencode`. Schema version 1. Unknown keys are ignored.
-- Changing a pin changes what the installer downloads and pins. An existing environment is not reinstalled until the user runs Repair, Install or Update.
+The current agent list contains npm Codex, Claude Code, OpenCode, Grok and Pi, plus bundled Cursor SDK. Pi uses the package declared by Cox's current installer, `@earendil-works/pi-coding-agent`. Antigravity, ACP Registry, Fx and Muse are provider-instance entries managed/configured through Cox, not npm agent specs. Runtime installers and version discovery branch on the installation method; bundled agents never trigger npm version requests or package-tree deletion.

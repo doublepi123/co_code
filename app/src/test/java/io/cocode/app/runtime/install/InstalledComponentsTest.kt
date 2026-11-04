@@ -52,22 +52,6 @@ class InstalledComponentsTest {
         }
     }
 
-    private fun openChamberAssets(rootfs: File, version: String = "2.5.3") {
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/bin/cli.js").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/dist/index.html").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/node_modules/node-pty").mkdirs()
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/package.json").apply {
-            parentFile?.mkdirs()
-            writeText("""{"name":"@openchamber/web","version":"$version"}""")
-        }
-    }
-
     private fun metadata(
         t3Version: String = "0.1.6-pw.5",
         servers: Map<String, String> = emptyMap(),
@@ -101,32 +85,6 @@ class InstalledComponentsTest {
     }
 
     @Test
-    fun `an OpenChamber-only map is reported without requiring opt t3`() {
-        val rootfs = rootfs()
-        openChamberAssets(rootfs)
-        val onlyOpenChamber = metadata(servers = mapOf("openchamber" to "2.5.3"))
-
-        assertEquals(
-            mapOf(ServerKind.OpenChamber to "2.5.3"),
-            installedServerVersions(rootfs, onlyOpenChamber),
-        )
-        assertFalse(ServerKind.T3 in installedServerVersions(rootfs, onlyOpenChamber))
-    }
-
-    @Test
-    fun `both servers round-trip through the explicit map`() {
-        val rootfs = rootfs()
-        t3Assets(rootfs)
-        openChamberAssets(rootfs)
-        val both = metadata(servers = mapOf("t3" to "0.1.6-pw.5", "openchamber" to "2.5.3"))
-
-        assertEquals(
-            mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
-            installedServerVersions(rootfs, both),
-        )
-    }
-
-    @Test
     fun `an agent counts only when its package and bin link exist`() {
         val rootfs = rootfs()
         val codex = AgentSpec("codex", "@openai/codex", "codex", "Codex")
@@ -139,14 +97,6 @@ class InstalledComponentsTest {
             writeText("")
         }
         assertTrue(InstalledComponents.agentFilesPresent(rootfs, codex))
-    }
-
-    @Test
-    fun `the OpenChamber version is read from its package manifest`() {
-        val rootfs = rootfs()
-        openChamberAssets(rootfs, version = "2.5.4")
-
-        assertEquals("2.5.4", InstalledComponents.openChamberVersion(rootfs))
     }
 
     @Test

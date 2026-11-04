@@ -517,7 +517,6 @@ class DefaultLocalRuntimeController(
             installedServers.associateWith { kind ->
                 when (kind) {
                     ServerKind.T3 -> target.t3.target
-                    ServerKind.OpenChamber -> target.servers[kind]?.target ?: runtime.metadata.servers[kind.id] ?: ""
                 }
             }
         val versions =

@@ -6,22 +6,12 @@ import io.cocode.app.runtime.manifest.AgentSpec
 /** Default agent set on a fresh install. */
 val DEFAULT_AGENTS: Set<String> = setOf("opencode")
 
-/**
- * What the UI shows for agent selection: the agents the manifest offers, the saved selection and
- * the versions that are actually installed ([AgentsState.installed] is empty before an install).
- *
- * This state is about agent CLIs only. A server choice (T3 Code, OpenChamber, both) is a separate
- * axis and must never be stored in [selected] or [installed].
- */
+/** User-selected npm CLIs or bundled SDKs, separately from the Cox server's lifecycle. */
 data class AgentsState(
     val available: List<AgentSpec> = emptyList(),
     val selected: Set<String> = emptySet(),
     val installed: Map<String, String> = emptyMap(),
-    /**
-     * Agents installed because a selected/installed server requires them, not because the user
-     * asked. OpenChamber requires `opencode`. Kept separate so the UI can show it without turning
-     * it into a user selection.
-     */
+    /** Compatibility field for server dependencies; Cox requires no implicit agent CLI. */
     val required: Set<String> = emptySet(),
 )
 

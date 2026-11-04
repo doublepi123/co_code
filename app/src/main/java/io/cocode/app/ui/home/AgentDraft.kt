@@ -1,6 +1,5 @@
 package io.cocode.app.ui.home
 
-import io.cocode.app.runtime.ServerKind
 
 /**
  * A picker's local draft (coding agents or servers) and the decisions that follow from it. Pure, so
@@ -12,7 +11,7 @@ import io.cocode.app.runtime.ServerKind
  * - Afterwards toggles are staged; Apply sends the whole draft. The baseline is what is actually
  *   installed (not the saved selection, which can be ahead of it after a failed change), so adding
  *   keeps every installed item checked, and only an item the user unchecks is removed.
- * - [locked] items are needed by something else (OpenCode while OpenChamber is installed or chosen).
+ * - [locked] items are needed by something else.
  *   They show checked, can't be unchecked and are never a removal. They are sent to the controller
  *   only when the user asked for them too ([requested]), so a dependency doesn't turn into a choice
  *   of the user's; the one exception is a selection that would otherwise be empty.
@@ -91,6 +90,3 @@ internal data class SelectionDraft<T>(
 
 /** The coding-agent picker's draft, keyed by agent id. */
 internal typealias AgentDraft = SelectionDraft<String>
-
-/** The server picker's draft (T3 Code / OpenChamber). */
-internal typealias ServerDraft = SelectionDraft<ServerKind>

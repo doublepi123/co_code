@@ -52,7 +52,7 @@
     <string name="status_problem">Problem</string>
     <string name="status_unsupported">Not supported</string>
 
-    <string name="setup_intro">Installs a small Linux system on this phone and runs Cox or OpenChamber with your coding agents inside it. Your projects and sessions stay on the device.</string>
+    <string name="setup_intro">Installs a small Linux system on this phone and runs Cox with your coding agents inside it. Your projects and sessions stay on the device.</string>
     <string name="setup_fact_contents">Alpine Linux, Node.js, Git, the servers you pick and agent CLIs</string>
     <string name="setup_fact_size">About 1.2 GB to download and store</string>
     <string name="setup_fact_wifi">Wi-Fi recommended</string>
@@ -81,7 +81,7 @@
     <string name="repair">Repair</string>
     <string name="repair_explain">Repair reinstalls the Linux system. Your projects are kept when possible.</string>
     <string name="unsupported_title">Not available on this device</string>
-    <string name="unsupported_body">Running a server on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a Cox / T3 Code or OpenChamber server on your computer below.</string>
+    <string name="unsupported_body">Running a server on the device needs an ARM64 (arm64-v8a) or x86_64 phone or tablet. You can still connect to a Cox server on your computer below.</string>
     <string name="show_log">Log</string>
     <string name="details">Details</string>
     <string name="log_title">Log</string>
@@ -94,7 +94,7 @@
 
     <!-- Agent selection -->
     <string name="agents_title">Coding agents</string>
-    <string name="agents_hint">Choose at least one agent CLI to install. The servers find them on PATH.</string>
+    <string name="agents_hint">Choose at least one agent. CLIs are installed on PATH; Cursor uses the SDK included with Cox.</string>
     <string name="agents_apply">Apply</string>
     <string name="agents_none_selected">Select at least one coding agent.</string>
     <string name="agents_hint_installed">Checking an agent installs it next to the ones you have. Unchecking an installed agent and tapping Apply uninstalls it.</string>
@@ -219,7 +219,7 @@
     <string name="add">Add</string>
     <string name="edit_server">Edit server</string>
     <string name="empty_servers_title">Connect to your computer</string>
-    <string name="empty_servers_body">Add the address of a Cox / T3 Code or OpenChamber server on your computer or network, for example 192.0.2.20:3773.</string>
+    <string name="empty_servers_body">Add the address of a Cox server on your computer or network, for example 192.0.2.20:3773.</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>
     <string name="more_options">More options</string>
@@ -346,61 +346,21 @@
     <string name="app_update_later">Later</string>
     <string name="app_update_view">View release</string>
 
-    <!-- Local servers (Cox / OpenChamber). Product names are not translated. -->
+    <!-- Local Cox server. Product names are not translated. -->
     <string name="server_t3" translatable="false">Cox</string>
     <!-- The bundle this app installed before Cox; shown only in the replacement update line. -->
     <string name="server_t3_legacy" translatable="false">T3 Code</string>
     <!-- A remote server of the same protocol: Cox or T3 Code both work. -->
-    <string name="server_t3_remote" translatable="false">Cox / T3 Code</string>
-    <string name="server_openchamber" translatable="false">OpenChamber</string>
-    <string name="servers_title">Servers</string>
-    <string name="servers_hint">Pick one or both. Only one runs at a time; both use the same home folder and OpenCode settings.</string>
-    <string name="servers_hint_installed">Checking a server installs it next to the other one. Unchecking an installed server and tapping Apply uninstalls only that server.</string>
-    <string name="servers_none_selected">Select at least one server.</string>
-    <string name="servers_needs_opencode">Needs OpenCode</string>
-    <string name="servers_active_label">Use on this phone</string>
-    <string name="servers_switch_title">Switch to %1$s?</string>
-    <string name="servers_switch_body_running">%1$s stops and %2$s starts in its place, so tasks running in %1$s are interrupted. Projects, the home folder and OpenCode settings are shared and stay as they are.</string>
-    <string name="servers_switch_body">%2$s is used from now on. %1$s stays installed, and projects, the home folder and OpenCode settings are shared.</string>
-    <string name="servers_switch_confirm">Switch</string>
-    <plurals name="servers_remove_title">
-        <item quantity="one">Uninstall %1$s?</item>
-        <item quantity="other">Uninstall %1$s?</item>
-    </plurals>
-    <string name="servers_remove_body">Only the unchecked server is uninstalled. The other server, your projects, the home folder and the OpenCode, Codex and Claude Code settings are kept. The local server restarts if it is running.</string>
-    <string name="agents_required_by_openchamber">Required by OpenChamber</string>
+    <string name="server_t3_remote" translatable="false">Cox</string>
 
     <!-- Remote server protocol -->
-    <string name="field_server_kind">Server type</string>
-    <string name="server_kind_hint">Pick what runs at this address, so CoCode signs in the right way.</string>
 
-    <!-- Codex sign-in from the app (device code). -->
-    <string name="codex_sign_in">Sign in</string>
-    <string name="codex_signed_in">Signed in</string>
-    <string name="codex_sign_in_again">Sign in again</string>
-    <string name="codex_sign_in_options">Codex sign-in options</string>
-    <string name="codex_continue_sign_in">Continue</string>
-    <string name="codex_sign_in_title">Sign in to Codex</string>
-    <string name="codex_signed_in_title">Codex is signed in</string>
-    <string name="codex_failed_title">Codex sign-in didn\'t finish</string>
-    <string name="codex_starting">Starting Codex sign-in…</string>
-    <string name="codex_verifying">Checking sign-in…</string>
-    <string name="codex_step_open">Open the sign-in page</string>
-    <string name="codex_open_page">Open sign-in page</string>
-    <string name="codex_step_code">Enter this code</string>
-    <string name="codex_code_label">One-time code %1$s</string>
-    <string name="codex_copy_code">Copy code</string>
-    <string name="codex_expires_in">Expires in %1$s</string>
-    <string name="codex_waiting_note">Sign in with ChatGPT, enter this code, then come back — CoCode finishes automatically.</string>
-    <string name="codex_use_api_key">Use an API key instead</string>
-    <string name="codex_api_key_hint">For an OpenAI API key instead of a ChatGPT account. The key is passed to Codex and not kept by the app.</string>
-    <string name="codex_api_key_label">OpenAI API key</string>
-    <string name="codex_api_key_submit">Sign in with key</string>
-    <string name="codex_show_key">Show API key</string>
-    <string name="codex_hide_key">Hide API key</string>
-    <string name="codex_signed_in_body">Codex can now be used by the local server.</string>
-    <string name="codex_technical_details">Technical details</string>
-    <string name="codex_done">Done</string>
-    <string name="codex_close">Close</string>
-    <string name="codex_hide">Hide</string>
+    <string name="cox_settings_title">Cox settings</string>
+    <string name="cox_settings_hint">Configure model service URLs, API keys, protocols and models in Cox, then bind them to your agents. Agent installation and authentication are managed in Cox.</string>
+    <string name="cox_model_center">Model center</string>
+    <string name="cox_agent_settings">Agent settings and installation</string>
+    <string name="cox_settings_start_hint">Cox starts automatically when needed. Cursor uses the bundled SDK. Antigravity and ACP agents use Cox installers; Fx and Muse require an executable configured in Cox.</string>
+    <string name="cox_settings_setup_hint">Set up Cox first. Settings are available when setup or maintenance finishes.</string>
+    <string name="agent_bundled">Included with Cox</string>
+    <string name="cox_settings_update_hint">Update Cox to 0.1.21 or newer using Check for updates in Details to use the model center. Agent settings are still available.</string>
 </resources>

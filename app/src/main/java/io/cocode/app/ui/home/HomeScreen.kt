@@ -31,12 +31,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,10 +94,7 @@ internal class HomeActions(
     val onCheckForUpdates: () -> Unit = {},
     val onDismissUpdateFailure: () -> Unit = {},
     val onAgentsChange: (Set<String>) -> Unit = {},
-    /** Saves or applies the T3 Code / OpenChamber selection (never called with an empty set). */
-    val onServersChange: (Set<ServerKind>) -> Unit = {},
-    /** Makes another installed server the active one, after the card has asked. */
-    val onSelectServer: (ServerKind) -> Unit = {},
+    val onOpenCoxSettings: (CoxSettingsPage) -> Unit = {},
 )
 
 /** The storage card only makes sense where the local server can exist at all. */
@@ -130,8 +125,6 @@ internal fun HomeScreen(
     agents: AgentsState = AgentsState(),
     /** Local servers: picked, installed and active. */
     localServers: ServersState = ServersState(),
-    /** In-app Codex sign-in on the Codex agent row; null hides it. */
-    codexLogin: CodexSignInUi? = null,
     /**
      * "Keep screen on while the local server runs"; null hides the setting. By default the app's
      * own setting (the process-wide [io.cocode.app.ui.ScreenAwakeController]), null in previews.
@@ -202,9 +195,7 @@ internal fun HomeScreen(
                         agents = agents,
                         onAgentsChange = actions.onAgentsChange,
                         servers = localServers,
-                        onServersChange = actions.onServersChange,
-                        onSelectServer = actions.onSelectServer,
-                        codexLogin = codexLogin,
+                        onOpenCoxSettings = actions.onOpenCoxSettings,
                         modifier = Modifier.revealOnEnter(1, animate),
                     )
                     AnimatedVisibility(

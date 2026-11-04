@@ -19,8 +19,6 @@ object ProotCommands {
     const val T3_HOME = "/root/.t3"
     /** Cox data directory (`COX_HOME`); schema-compatible with a migrated T3 data directory. */
     const val COX_HOME = "/root/.cox"
-    const val OPENCHAMBER_CLI = "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js"
-    const val GUEST_OPENCODE = "/usr/local/bin/opencode"
     const val SHIM_PATH = "/opt/cocode/android-shim.cjs"
 
     /** Shared PRoot prefix: kill-on-exit, link2symlink, fake root, rootfs and the Android mounts. */
@@ -112,15 +110,6 @@ object ProotCommands {
                     T3_CLI
                 },
             )
-            ServerKind.OpenChamber ->
-                listOf(
-                    GUEST_NODE,
-                    OPENCHAMBER_CLI,
-                    "serve",
-                    "--foreground",
-                    "--port",
-                    kind.port.toString(),
-                )
         }
 
     /** Environment for the long-running server: cleared by the caller, then set to exactly this. */
@@ -138,7 +127,7 @@ object ProotCommands {
             put("PROOT_TMP_DIR", prootTmp.absolutePath)
             putAll(guestBaseEnvironment())
             // OpenCode must not try to update itself over the pinned npm install.
-            put("OPENCODE_DISABLE_AUTOUPDATE", if (kind == ServerKind.T3) "true" else "1")
+            put("OPENCODE_DISABLE_AUTOUPDATE", "true")
             // Android's SELinux makes os.networkInterfaces() throw; the shim supplies a loopback list.
             put("NODE_OPTIONS", "--require $SHIM_PATH")
             when (kind) {
@@ -159,14 +148,6 @@ object ProotCommands {
                     // refuses T3's bypassPermissions mode for root unless the process says it is
                     // sandboxed, which it is: the guest has no more rights than the app.
                     put("IS_SANDBOX", "1")
-                }
-                ServerKind.OpenChamber -> {
-                    put("OPENCHAMBER_HOST", "127.0.0.1")
-                    put("OPENCHAMBER_UI_PASSWORD", uiPassword)
-                    // No paired-device relay: this server is only reachable on device loopback.
-                    put("OPENCHAMBER_RELAY_HOST", "off")
-                    put("OPENCHAMBER_OPENCODE_BIN", GUEST_OPENCODE)
-                    put("OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS", "15000")
                 }
             }
         }

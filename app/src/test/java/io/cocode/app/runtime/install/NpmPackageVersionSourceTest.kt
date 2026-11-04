@@ -139,29 +139,15 @@ class NpmPackageVersionSourceTest {
         }
 
     @Test
-    fun `an OpenChamber-only pinned set never asks for Cox`() =
+    fun `bundled SDK versions follow Cox without querying a nonexistent npm package`() =
         runBlocking {
-            server.enqueue(MockResponse().setBody(metadata("2.5.3", "2.5.4")))
-            val combined =
-                DefaultPackageVersionSource(
-                    npm = source(),
-                    agents = emptyList(),
-                    fallbackT3Version = "0.1.14",
-                    openChamberPackage = "@openchamber/web",
-                )
-
-            val latest =
-                combined.latest(
-                    PackageVersions(
-                        t3 = "0.1.6-pw.5",
-                        agents = emptyMap(),
-                        servers = mapOf(ServerKind.OpenChamber to "2.5.3"),
-                    ),
-                )
-
+            server.enqueue(MockResponse().setBody(metadata("0.1.29")))
+            val cursor = AgentSpec("cursor", bin = "", displayName = "Cursor SDK", installation = "bundled")
+            val combined = DefaultPackageVersionSource(source(), listOf(cursor), "0.1.29")
+            val latest = combined.latest(PackageVersions("0.1.29", mapOf("cursor" to "bundled")))
+            assertEquals(mapOf("cursor" to "bundled"), latest.agents)
             assertEquals(1, server.requestCount)
-            assertEquals("/@openchamber%2fweb", server.takeRequest().path)
-            assertEquals("0.1.6-pw.5", latest.t3)
-            assertEquals(mapOf(ServerKind.OpenChamber to "2.5.4"), latest.servers)
+            assertEquals("/@doublepi123%2fcox", server.takeRequest().path)
         }
+
 }

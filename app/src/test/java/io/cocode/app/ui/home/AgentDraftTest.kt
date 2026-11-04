@@ -161,7 +161,7 @@ class AgentDraftTest {
 
     @Test
     fun `a required agent the user never picked is not sent as their choice`() {
-        // OpenChamber needs OpenCode; the user picked only Codex before setup.
+        // A required dependency is locked; the user picked only Codex before setup.
         val draft = AgentDraft.of(setOf("codex"), emptySet(), beforeInstall = true, locked = setOf("opencode"))
 
         assertEquals(setOf("codex", "opencode"), draft.checked)

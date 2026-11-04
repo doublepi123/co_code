@@ -46,7 +46,7 @@ internal object ScreenAwakePolicy {
 
     /**
      * [viewedTargetId] is the instance the app records as being viewed ([UiPrefs.KEY_LAST_TARGET_ID]):
-     * null on Home, an on-device id (`local-t3`, `local-openchamber`, or the legacy `local`) on a local
+     * null on Home, an on-device id (`local-t3` or the legacy `local`) on a local
      * page, a remote's id on that remote's page. Anything that isn't Home or a local page counts as a
      * remote, so an unknown id never holds the screen.
      */

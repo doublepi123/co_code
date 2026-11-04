@@ -40,9 +40,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,7 +84,6 @@ import io.cocode.app.ui.components.IconTile
 import io.cocode.app.ui.displayAddress
 import io.cocode.app.ui.isLoopbackHost
 import io.cocode.app.ui.label
-import io.cocode.app.ui.protocolLabel
 import io.cocode.app.ui.theme.ChamberTextStyles
 import io.cocode.app.ui.theme.ChamberTheme
 import java.util.UUID
@@ -266,7 +262,7 @@ private fun RemoteServerRow(
                     }
                 }
                 Text(
-                    // What runs there, then where: "OpenChamber · 192.0.2.20:3000".
+                    // The Cox instance and its address.
                     text = server.kind.label() + "  ·  " + displayAddress(server.baseUrl),
                     style = ChamberTextStyles.codeSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -378,10 +374,6 @@ internal fun ServerEditorDialog(
     var passwordVisible by remember { mutableStateOf(false) }
     var showErrors by rememberSaveable { mutableStateOf(false) }
     var allowInsecure by rememberSaveable { mutableStateOf(initial?.allowInsecureHttp == true) }
-    // Picked by the user, never guessed from the port: it decides how CoCode signs in.
-    var kindId by rememberSaveable { mutableStateOf((initial?.kind ?: ServerKind.T3).id) }
-    val kind = ServerKind.fromId(kindId) ?: ServerKind.T3
-
     val check = remember(address) { checkServerAddress(address) }
     val addressError: String? =
         when (check) {
@@ -410,7 +402,7 @@ internal fun ServerEditorDialog(
                 baseUrl = valid.url,
                 uiPassword = password.takeIf { it.isNotEmpty() },
                 allowInsecureHttp = insecureRemote && allowInsecure,
-                kind = kind,
+                kind = ServerKind.T3,
             ),
         )
     }
@@ -430,7 +422,6 @@ internal fun ServerEditorDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ServerKindPicker(selected = kind, onSelect = { kindId = it.id })
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
@@ -543,37 +534,4 @@ internal fun ServerEditorDialog(
             }
         },
     )
-}
-
-/** T3 Code or OpenChamber for a saved server: sets which sign-in CoCode uses. */
-@Composable
-private fun ServerKindPicker(
-    selected: ServerKind,
-    onSelect: (ServerKind) -> Unit,
-) {
-    Column {
-        Text(
-            text = stringResource(R.string.field_server_kind),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            ServerKind.entries.forEachIndexed { index, kind ->
-                SegmentedButton(
-                    selected = kind == selected,
-                    onClick = { onSelect(kind) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = ServerKind.entries.size),
-                ) {
-                    Text(kind.protocolLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.server_kind_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
 }

@@ -8,9 +8,11 @@
 
 **CoCode runs a coding-agent server locally on an Android phone — no computer, no root.**
 
-CoCode is derived from AndChamber (MIT). Install **Cox, OpenChamber, or both** in one Alpine Linux environment under PRoot (no root). One server runs at a time; switching requires confirmation before stopping the current server. Cox is a local-only fork of T3 Code and speaks the same protocol, so remote T3 Code servers still work. They share the guest home, projects and OpenCode configuration, but keep separate passwords, WebView profiles and server data. Both remote server types are supported too.
+CoCode is derived from AndChamber (MIT) and runs **Cox** in an Alpine Linux environment under PRoot (no root). Local installation, updates, page authentication and model configuration are dedicated to Cox. OpenChamber installation and remote connections are retired. Cox retains the T3 Code protocol, so existing compatible server records continue to work.
 
-- **Pick your agents**: Codex, Claude Code and OpenCode. Adding one preserves the others; removal needs confirmation. OpenCode is marked required when OpenChamber needs it.
+- **Pick your agents**: install Codex, Claude Code, OpenCode, Grok and Pi; Cursor uses Cox's bundled SDK. Adding one preserves the others; removal requires confirmation and retains projects and home configuration.
+- **Model center**: open Cox's model center from Home to configure service URLs, API keys, protocols, models and agent bindings. Cox starts automatically when needed and owns the saved configuration and secrets.
+- **Agent settings**: manage authentication, Antigravity and ACP registry installers in Cox. Fx and Muse require an upstream executable configured in Cox. CoCode no longer signs into Codex or reads/displays its login status.
 - **App update prompt**: checks this project's GitHub Releases on opening, including 0.x prereleases, and offers the download page. No automatic installation or task interruption.
 - **Distinct icon**: a phone with a terminal prompt, not the AndChamber cube.
 - No phone-control or browser-control tools.
@@ -23,11 +25,10 @@ Runtime errors are notified natively; agent notifications from the web UI are no
 |---|---|
 | Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
 | Node.js | Alpine 24.x |
-| Cox server | npm `@doublepi123/cox`, resolves latest on install, bundled fallback 0.1.15 (T3 Code protocol); node-pty rebuilt inside Alpine |
-| OpenChamber server (optional) | npm `@openchamber/web`, latest at install time |
-| Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode); latest at install time |
+| Cox server | npm `@doublepi123/cox`, resolves latest on install, bundled fallback 0.1.29 (T3 Code protocol); node-pty rebuilt inside Alpine |
+| Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode), `@xai-official/grok` (Grok), `@earendil-works/pi-coding-agent` (Pi); latest at install time |
 | PRoot | locally built 5.1.107.98 |
-| Ports | Cox 3773, OpenChamber 3000 (loopback only) |
+| Ports | Cox 3773 (loopback only) |
 
 ### Shared folders (optional)
 
@@ -68,3 +69,5 @@ The version lives in `gradle.properties` as `cocode.versionName` / `cocode.versi
 - Components downloaded at runtime keep their own licenses; see [NOTICE](NOTICE).
 
 Released under the [MIT license](LICENSE).
+
+See [Cox settings verification](docs/testing-cox-settings.md) for Agent installation methods and validation scope.

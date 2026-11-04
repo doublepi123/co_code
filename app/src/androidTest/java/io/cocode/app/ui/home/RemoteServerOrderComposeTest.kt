@@ -46,7 +46,7 @@ class RemoteServerOrderComposeTest {
     private fun s(id: Int) = context.getString(id)
 
     private fun server(name: String) =
-        ServerTarget.Remote(name.lowercase(), name, "https://${name.lowercase()}.example.com", null, kind = ServerKind.OpenChamber)
+        ServerTarget.Remote(name.lowercase(), name, "https://${name.lowercase()}.example.com", null, kind = ServerKind.T3)
 
     private val moves = mutableListOf<Pair<String, Int>>()
     private val opened = mutableListOf<String>()

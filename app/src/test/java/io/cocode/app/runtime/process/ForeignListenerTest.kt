@@ -92,15 +92,6 @@ class ForeignListenerTest {
 
     private fun foreignOk() = HealthReport(environmentId = "foreign", serverVersion = "0.1.6-pw.5")
 
-    private fun openChamberOk() =
-        HealthReport(
-            kind = ServerKind.OpenChamber,
-            status = "ok",
-            serverId = "srv-1",
-            openCodeReady = true,
-            openCodeRunning = true,
-        )
-
     private fun server(
         child: Process,
         health: HealthProbe,
@@ -265,65 +256,4 @@ class ForeignListenerTest {
         assertEquals(0, spawned.size)
     }
 
-    @Test
-    fun `openchamber uses its own port, marker, environment and policy`() {
-        val child =
-            FakeChild(
-                output = "OpenChamber server listening on 127.0.0.1:${ServerKind.OpenChamber.port}\n",
-                exitCode = 0,
-                lifetimeMillis = 10_000L,
-            )
-        val health = RecordingHealth(openChamberOk())
-        val envs = mutableListOf<Map<String, String>>()
-        val ports = mutableListOf<Int>()
-
-        val launchId =
-            server(
-                child,
-                health,
-                mutableListOf(),
-                capturedEnv = envs,
-                kind = ServerKind.OpenChamber,
-                precheckPorts = ports,
-            ).start(runtime(), "oc-secret", {}, { false })
-
-        assertTrue(launchId > 0)
-        assertEquals("the runtime metadata port must not decide the openchamber port", listOf(3000), ports)
-        assertEquals(listOf(3000), health.ports)
-        assertEquals("oc-secret", envs.single()["OPENCHAMBER_UI_PASSWORD"])
-        assertTrue(envs.single().keys.none { it.startsWith("T3CODE_") })
-
-        val policy = File(folder.root, "rootfs/etc/openchamber/policy.json")
-        assertEquals(OpenChamberPolicy.CONTENT, policy.readText())
-    }
-
-    @Test
-    fun `an openchamber opencode failure fails clearly instead of waiting for the timeout`() {
-        val child =
-            FakeChild(
-                output = "OpenChamber server listening on 127.0.0.1:${ServerKind.OpenChamber.port}\n",
-                exitCode = 0,
-                lifetimeMillis = 10_000L,
-            )
-        val failed =
-            HealthReport(
-                kind = ServerKind.OpenChamber,
-                status = "ok",
-                serverId = "srv-1",
-                openCodeReady = false,
-                openCodeRunning = false,
-                lastOpenCodeError = "opencode exited with code 1",
-            )
-
-        val error =
-            runCatching {
-                server(child, RecordingHealth(failed), mutableListOf(), kind = ServerKind.OpenChamber)
-                    .start(runtime(), "oc-secret", {}, { false })
-            }.exceptionOrNull()
-        val message = error?.message.orEmpty()
-
-        assertTrue("start must fail, got $error", error != null)
-        assertTrue(message.contains("OpenChamber could not start OpenCode"))
-        assertTrue(message.contains("opencode exited with code 1"))
-    }
 }

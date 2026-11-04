@@ -158,7 +158,7 @@ internal fun WebScreen(
     val inspection = LocalInspectionMode.current
     val darkTheme = isSystemInDarkTheme()
     val themeBackground = MaterialTheme.colorScheme.background
-    // Both on-device servers (local-t3 / local-openchamber) are local pages; their name comes from the id.
+    // The on-device Cox page keeps its historical local-t3 identity.
     val localKind = localKindOf(targetId)
     val isLocal = localKind != null
     val localName = localKind?.label()

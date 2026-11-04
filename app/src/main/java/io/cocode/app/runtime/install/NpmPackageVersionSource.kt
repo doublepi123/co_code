@@ -91,7 +91,6 @@ class DefaultPackageVersionSource(
     private val agents: List<AgentSpec>,
     private val fallbackT3Version: String,
     private val coxPackage: String = "@doublepi123/cox",
-    private val openChamberPackage: String = "@openchamber/web",
 ) : PackageVersionSource {
     override suspend fun latest(pinned: PackageVersions): PackageVersions {
         val t3Version =
@@ -107,13 +106,15 @@ class DefaultPackageVersionSource(
         val installedAgents =
             agents
                 .filter { it.id in pinned.agents }
-                .map { spec -> spec.id to npm.latest(spec.npmPackage, pinned.agents[spec.id]) }
+                .map { spec ->
+                    spec.id to if (spec.installation == "bundled") {
+                        RuntimeEnvironmentInstaller.BUNDLED_AGENT_VERSION
+                    } else {
+                        npm.latest(spec.npmPackage, pinned.agents[spec.id])
+                    }
+                }
                 .filter { (_, version) -> !version.isNullOrBlank() }
                 .associate { (id, version) -> id to version!! }
-        val openChamber =
-            pinned.servers[ServerKind.OpenChamber]?.let { current ->
-                npm.latest(openChamberPackage, current)?.let { mapOf(ServerKind.OpenChamber to it) }
-            } ?: emptyMap()
-        return PackageVersions(t3 = t3Version, agents = installedAgents, servers = openChamber)
+        return PackageVersions(t3 = t3Version, agents = installedAgents)
     }
 }

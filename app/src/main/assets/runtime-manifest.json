@@ -1,18 +1,11 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "2026.11.02.1",
+  "runtimeVersion": "2026.11.04.1",
   "alpineVersion": "3.24.1",
   "port": 3773,
   "t3": {
     "npmPackage": "@doublepi123/cox",
-    "version": "0.1.15"
-  },
-  "openchamber": {
-    "npmPackage": "@openchamber/web",
-    "version": "2.5.3",
-    "port": 3000,
-    "cliPath": "/usr/local/lib/node_modules/@openchamber/web/bin/cli.js",
-    "uiPath": "/usr/local/lib/node_modules/@openchamber/web/dist/index.html"
+    "version": "0.1.29"
   },
   "agents": [
     {
@@ -32,6 +25,24 @@
       "npmPackage": "@opencode/cli",
       "bin": "opencode",
       "displayName": "OpenCode"
+    },
+    {
+      "id": "grok",
+      "npmPackage": "@xai-official/grok",
+      "bin": "grok",
+      "displayName": "Grok"
+    },
+    {
+      "id": "pi",
+      "npmPackage": "@earendil-works/pi-coding-agent",
+      "bin": "pi",
+      "displayName": "Pi"
+    },
+    {
+      "id": "cursor",
+      "installation": "bundled",
+      "bin": "",
+      "displayName": "Cursor SDK"
     }
   ],
   "architectures": {

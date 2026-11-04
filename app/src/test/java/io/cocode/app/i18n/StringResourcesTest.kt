@@ -91,9 +91,9 @@ class StringResourcesTest {
     }
 
     @Test
-    fun `the number of translated strings is what the brief committed to`() {
-        // All app strings, one entry per key, as the loader keeps them.
-        assertEquals(330, english.size)
+    fun `Cox settings are translated and retired actions are absent`() {
+        assertTrue(english.keys.containsAll(setOf("cox_model_center", "cox_agent_settings")))
+        assertTrue(english.keys.none { it.startsWith("codex_") || it == "server_openchamber" })
     }
 
     private companion object {

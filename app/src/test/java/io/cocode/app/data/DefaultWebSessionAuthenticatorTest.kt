@@ -85,12 +85,6 @@ class DefaultWebSessionAuthenticatorTest {
                 } else {
                     """{"serverVersion":"0.1.6-pw.5"}"""
                 }
-            ServerKind.OpenChamber ->
-                if (ok) {
-                    """{"status":"ok","openchamberVersion":"2.5.3","serverId":"srv-1","isOpenCodeReady":true,"openCodeRunning":true}"""
-                } else {
-                    """{"status":"ok","serverId":"srv-1","isOpenCodeReady":false,"openCodeRunning":true}"""
-                }
         },
     )
 
@@ -293,191 +287,15 @@ class DefaultWebSessionAuthenticatorTest {
             }
         }
 
-    // --- OpenChamber protocol: explicit kind, never inferred from port ---
-
     @Test
-    fun `openchamber login posts its password to auth session and stores the port-scoped cookie`() =
-        runBlocking {
-            server.enqueue(health(kind = ServerKind.OpenChamber))
-            server.enqueue(loginOk("oc_ui_session_3000=oc-abc; Path=/; HttpOnly"))
-            val target = local(ServerKind.OpenChamber)
-            val cookies = cookiesFor(target)
-            val passwordKinds = mutableListOf<ServerKind>()
-            val readyKinds = mutableListOf<ServerKind>()
-
-            val result =
-                auth(
-                    localPassword = { kind ->
-                        passwordKinds += kind
-                        "oc-secret"
-                    },
-                    ready = LocalReadiness { kind ->
-                        readyKinds += kind
-                        7L
-                    },
-                ).prepare(target, cookies)
-
-            assertEquals(WebSessionResult.Ready(base()), result)
-            assertEquals(listOf(ServerKind.OpenChamber), passwordKinds)
-            assertEquals(List(3) { ServerKind.OpenChamber }, readyKinds)
-            assertEquals(listOf("oc_ui_session_3000=oc-abc; Path=/; HttpOnly"), cookies.stored.single().second)
-
-            assertEquals("/health", server.takeRequest().path)
-            val login = server.takeRequest()
-            assertEquals("POST", login.method)
-            assertEquals("/auth/session", login.path)
-            val body = login.body.readUtf8()
-            assertTrue(body, body.contains("\"password\":\"oc-secret\""))
-            assertFalse("the T3 credential field must not be used for OpenChamber", body.contains("credential"))
-            assertFalse(body, body.contains("trustDevice"))
-        }
-
-    @Test
-    fun `openchamber and t3 keep their own passwords and endpoints on the same port`() =
-        runBlocking {
-            server.enqueue(health()); server.enqueue(loginOk())
-            auth(localPassword = { kind -> if (kind == ServerKind.T3) "t3-secret" else "oc-secret" })
-                .prepare(local(ServerKind.T3), cookiesFor(local(ServerKind.T3)))
-            assertEquals("/.well-known/t3/environment", server.takeRequest().path)
-            assertTrue(server.takeRequest().body.readUtf8().contains("\"credential\":\"t3-secret\""))
-
-            server.enqueue(health(kind = ServerKind.OpenChamber))
-            server.enqueue(loginOk("oc_ui_session_3000=oc; Path=/"))
-            auth(localPassword = { kind -> if (kind == ServerKind.OpenChamber) "oc-secret" else "t3-secret" })
-                .prepare(local(ServerKind.OpenChamber), cookiesFor(local(ServerKind.OpenChamber)))
-            assertEquals("/health", server.takeRequest().path)
-            assertTrue(server.takeRequest().body.readUtf8().contains("\"password\":\"oc-secret\""))
-        }
-
-    @Test
-    fun `openchamber health is not ready while opencode starts, so no password is sent`() =
-        runBlocking {
-            server.enqueue(health(ok = false, kind = ServerKind.OpenChamber))
-            var reads = 0
-            val target = local(ServerKind.OpenChamber)
-
-            val result = auth(localPassword = { reads++; "oc-secret" }).prepare(target, cookiesFor(target))
-
-            assertTrue(result is WebSessionResult.Unreachable)
-            assertEquals("health only, no POST", 1, server.requestCount)
-            assertEquals(0, reads)
-        }
-
-    @Test
-    fun `openchamber opencode failure is Unreachable with its reason and sends no password`() =
-        runBlocking {
-            server.enqueue(
-                MockResponse().setBody(
-                    """{"status":"ok","serverId":"srv-1","isOpenCodeReady":false,"openCodeRunning":false,"lastOpenCodeError":"opencode exited"}""",
-                ),
-            )
-            var reads = 0
-            val target = local(ServerKind.OpenChamber)
-
-            val result = auth(localPassword = { reads++; "oc-secret" }).prepare(target, cookiesFor(target))
-
-            assertTrue(result is WebSessionResult.Unreachable)
-            assertTrue((result as WebSessionResult.Unreachable).reason.contains("opencode exited"))
-            assertEquals(1, server.requestCount)
-            assertEquals(0, reads)
-        }
-
-    @Test
-    fun `openchamber wrong password and rate limit are NeedsLogin and store nothing`() =
-        runBlocking {
-            for (code in listOf(401, 429)) {
-                server.enqueue(health(kind = ServerKind.OpenChamber))
-                server.enqueue(MockResponse().setResponseCode(code))
-                val target = local(ServerKind.OpenChamber)
-                val cookies = cookiesFor(target)
-
-                assertEquals(WebSessionResult.NeedsLogin(base()), auth().prepare(target, cookies))
-                assertTrue(cookies.stored.isEmpty())
-            }
-        }
-
-    @Test
-    fun `openchamber without a password trusts only an already authenticated session`() =
-        runBlocking {
-            server.enqueue(health(kind = ServerKind.OpenChamber))
-            server.enqueue(MockResponse().setBody("""{"authenticated":true}"""))
-            val target = remote(null, ServerKind.OpenChamber)
-            val cookies = cookiesFor(target)
-            cookies.jar = "oc_ui_session_3000=kept"
-
-            assertEquals(WebSessionResult.Ready(base()), auth().prepare(target, cookies))
-            assertEquals("/health", server.takeRequest().path)
-            val probe = server.takeRequest()
-            assertEquals("GET", probe.method)
-            assertEquals("/auth/session", probe.path)
-            assertEquals("oc_ui_session_3000=kept", probe.getHeader("Cookie"))
-        }
-
-    @Test
-    fun `openchamber redirects are never followed`() =
-        runBlocking {
-            val elsewhere = MockWebServer()
-            elsewhere.start()
-            try {
-                server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", elsewhere.url("/auth/session").toString()))
-                val target = local(ServerKind.OpenChamber)
-
-                assertTrue(auth().prepare(target, cookiesFor(target)) is WebSessionResult.Unreachable)
-                assertEquals(0, elsewhere.requestCount)
-            } finally {
-                elsewhere.shutdown()
-            }
-        }
-
-    @Test
-    fun `a redirect on openchamber login is NeedsLogin, stores nothing and is not followed`() =
-        runBlocking {
-            val elsewhere = MockWebServer()
-            elsewhere.start()
-            try {
-                server.enqueue(health(kind = ServerKind.OpenChamber))
-                server.enqueue(
-                    MockResponse().setResponseCode(302)
-                        .addHeader("Location", elsewhere.url("/auth/session").toString())
-                        .addHeader("Set-Cookie", "trap=1; Path=/"),
-                )
-                val target = local(ServerKind.OpenChamber)
-                val cookies = cookiesFor(target)
-
-                assertEquals(WebSessionResult.NeedsLogin(base()), auth().prepare(target, cookies))
-                assertTrue(cookies.stored.isEmpty())
-                assertEquals(0, elsewhere.requestCount)
-            } finally {
-                elsewhere.shutdown()
-            }
-        }
-
-    @Test
-    fun `a cloudflare gate on openchamber health needs gateway login and no password`() =
-        runBlocking {
-            server.enqueue(
-                MockResponse().setResponseCode(302)
-                    .addHeader("Location", "https://team.cloudflareaccess.com/cdn-cgi/access/login/oc.example.com"),
-            )
-            val target = remote("oc-secret", ServerKind.OpenChamber)
-
-            assertEquals(WebSessionResult.NeedsGatewayLogin(base()), auth().prepare(target, cookiesFor(target)))
-            assertEquals(1, server.requestCount)
-        }
-
-    @Test
-    fun `openchamber cookies bound to another target make no request and read no password`() =
-        runBlocking {
-            var reads = 0
-            val target = local(ServerKind.OpenChamber)
-            val wrong = FakeCookies(WebSessionIdentity("other", canonicalWebOrigin(target.baseUrl)!!))
-
-            val result = auth(localPassword = { reads++; "oc-secret" }).prepare(target, wrong)
-
-            assertTrue(result is WebSessionResult.Unreachable)
-            assertEquals(0, server.requestCount)
-            assertEquals(0, reads)
-        }
+    fun `a retired server response never releases the Cox password`() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"status":"ok","serverId":"old-server","isOpenCodeReady":true}"""))
+        var reads = 0
+        val target = local()
+        assertTrue(auth(localPassword = { reads++; "test-secret" }).prepare(target, cookiesFor(target)) is WebSessionResult.Unreachable)
+        assertEquals(0, reads)
+        assertEquals(1, server.requestCount)
+    }
 
     // --- session probe without a password ---
 

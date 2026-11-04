@@ -31,6 +31,7 @@ class AgentSelectionApplyTest {
 
     private val codex = AgentSpec("codex", "@openai/codex", "codex", "Codex")
     private val opencode = AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode")
+    private val cursor = AgentSpec("cursor", bin = "", displayName = "Cursor SDK", installation = "bundled")
 
     private val manifest =
         RuntimeManifest(
@@ -42,7 +43,7 @@ class AgentSelectionApplyTest {
                 T3Spec(
                     version = "0.1.14",
                 ),
-            agents = listOf(codex, opencode),
+            agents = listOf(codex, opencode, cursor),
             architectures =
                 mapOf(
                     "arm64-v8a" to
@@ -110,18 +111,6 @@ class AgentSelectionApplyTest {
             parentFile?.mkdirs()
             writeText("")
         }
-    }
-
-    private fun seedOpenChamberAssets() {
-        rootfs.resolve("usr/local/lib/node_modules/@openchamber/web/bin/cli.js").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        rootfs.resolve("usr/local/lib/node_modules/@openchamber/web/dist/index.html").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        rootfs.resolve("usr/local/lib/node_modules/@openchamber/web/node_modules/node-pty").mkdirs()
     }
 
     /** Writes the active metadata the way a previous install/apply would have. */
@@ -277,48 +266,6 @@ class AgentSelectionApplyTest {
     }
 
     @Test
-    fun `a lost server asset fails the apply and leaves the active metadata unchanged`() {
-        seedInstalled(codex)
-        seedT3Assets()
-        seedOpenChamberAssets()
-        val before =
-            current(
-                agents = mapOf("codex" to "1.0.0"),
-                servers = mapOf(ServerKind.T3 to "0.1.6-pw.5", ServerKind.OpenChamber to "2.5.3"),
-            )
-        seedMetadata(before)
-        val runner =
-            runner(
-                beforeInstall = {
-                    // Simulate npm pruning the other server's package during an agent install.
-                    rootfs
-                        .resolve("usr/local/lib/node_modules/@openchamber/web/node_modules/node-pty")
-                        .deleteRecursively()
-                },
-            )
-
-        assertThrows(UserFacingException::class.java) {
-            installer.applyAgentSelection(
-                report = report,
-                environment = environment,
-                rootfs = rootfs,
-                current = before,
-                wanted = setOf("codex", "opencode"),
-                runner = runner,
-                expectedServers = before.recordedServerVersions(),
-            )
-        }
-
-        assertEquals(
-            "a lost expected server must fail, never narrow the committed record",
-            before.servers,
-            readMetadata().servers,
-        )
-        assertEquals(before.agents, readMetadata().agents)
-        assertTrue("the unrelated T3 assets stay in staging", rootfs.resolve("opt/t3/bin.mjs").isFile)
-    }
-
-    @Test
     fun `a selected agent missing after package work is restored at its recorded version`() {
         seedInstalled(codex)
         seedMetadata(current(mapOf("codex" to "1.0.0")))
@@ -383,5 +330,43 @@ class AgentSelectionApplyTest {
         assertEquals("the stale tree must be gone before npm runs", false, leftoverSeenAtInstall)
         assertTrue(packageExists(codex))
         assertTrue(packageExists(opencode))
+    }
+
+    @Test
+    fun `selecting only bundled Cursor removes unselected CLI but never installs or probes a CLI`() {
+        seedInstalled(codex)
+        val sdk = rootfs.resolve("opt/t3/node_modules/@cursor/sdk/package.json").apply {
+            parentFile?.mkdirs()
+            writeText("{}")
+        }
+        val runner = runner()
+
+        val metadata = installer.applyAgentSelection(
+            report = report,
+            environment = environment,
+            rootfs = rootfs,
+            current = current(mapOf("codex" to "1.0.0")),
+            wanted = setOf("cursor"),
+            runner = runner,
+        )
+
+        assertEquals(mapOf("cursor" to "bundled"), metadata.agents)
+        assertTrue(runner.scripts.isEmpty())
+        assertFalse(packageExists(codex))
+        assertTrue(sdk.isFile)
+    }
+
+    @Test
+    fun `missing bundled SDK cannot be recorded as installed`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            installer.applyAgentSelection(
+                report = report,
+                environment = environment,
+                rootfs = rootfs,
+                current = current(emptyMap()),
+                wanted = setOf("cursor"),
+                runner = runner(),
+            )
+        }
     }
 }

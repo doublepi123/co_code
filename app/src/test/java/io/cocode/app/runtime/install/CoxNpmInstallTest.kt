@@ -90,7 +90,7 @@ class CoxNpmInstallTest {
     fun `same version migration removes the old program but preserves other server and user data`() {
         val rootfs = folder.newFolder()
         val old = File(rootfs, "opt/t3/bin.mjs").apply { parentFile?.mkdirs(); writeText("old") }
-        val survivor = File(rootfs, "usr/local/lib/node_modules/@openchamber/web/keep").apply {
+        val survivor = File(rootfs, "usr/local/lib/node_modules/@opencode/cli/keep").apply {
             parentFile?.mkdirs()
             writeText("keep")
         }

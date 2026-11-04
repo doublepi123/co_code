@@ -51,12 +51,7 @@ class RuntimeInstallerImpl(
             runCatching { json.decodeFromString<RuntimeMetadata>(metadataFile.readText()) }
                 .getOrNull() ?: return null
         if (metadata.abi != abi) return null
-        val servers =
-            installedServerVersions(paths.rootfs, metadata)
-                .filterKeys { kind ->
-                    kind != ServerKind.OpenChamber ||
-                        manifest.agent("opencode")?.let { InstalledComponents.agentFilesPresent(paths.rootfs, it) } != false
-                }
+        val servers = installedServerVersions(paths.rootfs, metadata)
         if (servers.isEmpty()) return null
         val agents =
             metadata.agents.filter { (id, _) ->

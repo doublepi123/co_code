@@ -12,7 +12,7 @@ class RemoteServerOrderTest {
     private fun server(
         id: String,
         name: String = id.uppercase(),
-    ) = ServerTarget.Remote(id, name, "https://$id.example.com", null, kind = ServerKind.OpenChamber)
+    ) = ServerTarget.Remote(id, name, "https://$id.example.com", null, kind = ServerKind.T3)
 
     private fun EncryptedRemoteServerStore.ids() = servers.value.map { it.id }
 

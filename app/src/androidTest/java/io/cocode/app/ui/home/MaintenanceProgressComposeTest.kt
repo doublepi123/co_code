@@ -26,7 +26,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Adding OpenChamber while a T3 Code update is on offer: the progress is generic maintenance. It must
+ * Adding agents while a T3 Code update is on offer: the progress is generic maintenance. It must
  * not say T3 Code is being updated or list the offer's versions (ARM64 E2E regression).
  */
 @RunWith(AndroidJUnit4::class)
@@ -36,7 +36,7 @@ class MaintenanceProgressComposeTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun addingOpenChamberNeverClaimsAT3CodeUpdate() {
+    fun addingAgentsNeverClaimsACoxUpdate() {
         val offer =
             RuntimeUpdate(
                 t3 = VersionChange(current = "0.1.6-pw.5", target = "0.1.6-pw.6"),
@@ -75,7 +75,7 @@ class MaintenanceProgressComposeTest {
                         updates = RuntimeUpdateState(available = offer),
                         servers =
                             ServersState(
-                                selected = setOf(ServerKind.T3, ServerKind.OpenChamber),
+                                selected = setOf(ServerKind.T3),
                                 installed = mapOf(ServerKind.T3 to "0.1.6-pw.5"),
                                 active = ServerKind.T3,
                             ),

@@ -387,7 +387,7 @@ private fun ScreenAwakeRowPreview() {
 private fun WebLocalStoppedPreview() {
     CoCodeTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
-            LocalServerPanel(state = RuntimeState.Stopped, serverName = "OpenChamber", onStart = {}, onHome = {})
+            LocalServerPanel(state = RuntimeState.Stopped, serverName = "Cox", onStart = {}, onHome = {})
         }
     }
 }
@@ -412,7 +412,7 @@ private fun AppUpdateDialogPreview() {
                 AppReleaseUpdate(
                     version = "0.2.0",
                     pageUrl = "https://github.com/example/co_code/releases/tag/v0.2.0",
-                    notes = "## What's new\n- Pick OpenChamber, T3 Code or both\n- **Fixed**: unchecking OpenCode no longer closes the app",
+                    notes = "## What's new\n- Configure Cox model services and agents\n- **Fixed**: unchecking OpenCode no longer closes the app",
                 ),
             currentVersion = "0.1.0",
             onLater = {},

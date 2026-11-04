@@ -8,9 +8,11 @@
 
 **CoCode 在 Android 手机上本地运行一个编码代理服务器，不依赖电脑，也不需要 root。**
 
-CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot，无 root）环境中，可安装 **Cox、OpenChamber，或两者都装**；同一时间运行一个，切换前会提示中断当前服务。Cox 是 T3 Code 的本地化分支，沿用同一协议，因此也能连接远程 T3 Code 服务器。两者共用主目录、项目与 OpenCode 配置，但登录密码、页面数据和服务数据分别保存。也支持连接这些远程服务器。
+CoCode 由 AndChamber（MIT）派生而来，在 Alpine Linux（PRoot，无 root）环境中专门运行 **Cox**。本机安装、更新、页面认证和模型配置都围绕 Cox；不再安装或连接 OpenChamber。Cox 沿用 T3 Code 协议，已有兼容服务器记录仍可使用。
 
-- **代理任选**：Codex、Claude Code、OpenCode。追加安装保留已有代理；卸载需要确认。OpenChamber 依赖的 OpenCode 会标明为必需组件。
+- **代理任选**：可安装 Codex、Claude Code、OpenCode、Grok、Pi；Cursor 使用 Cox 内置 SDK。追加安装保留已有代理；卸载需要确认，项目与主目录配置保留。
+- **模型中心**：首页可直接打开 Cox 的模型中心，配置服务地址、API 密钥、协议和模型，并绑定到 Agent。Cox 停止时会先自动启动，配置与密钥由 Cox 管理。
+- **Agent 设置**：首页进入 Cox 设置，管理认证、Antigravity 和 ACP 注册表安装。Fx、Muse 需要在 Cox 中配置上游可执行文件；不提供虚构的 npm 安装包。CoCode 不再提供 Codex 登录，也不查询或展示 Codex 登录态。
 - **App 更新提示**：打开 App 时检查本项目的 GitHub Releases（包括 0.x 预发布版），有新版时提示前往下载；不会自动安装或中断任务。
 - **独立图标**：手机与终端提示符，不再使用 AndChamber 的立方体。
 - 不包含手机操控或浏览器操控工具。
@@ -23,11 +25,10 @@ CoCode 由 AndChamber（MIT）派生而来。在同一个 Alpine Linux（PRoot�
 |---|---|
 | Alpine Linux | 3.24.1（每个 ABI 固定 URL 与 SHA-256） |
 | Node.js | Alpine 24.x |
-| Cox 服务器 | npm `@doublepi123/cox`，安装时解析 latest，内置回退版本 0.1.15（兼容 T3 Code 协议）；在 Alpine 内重编译 node-pty |
-| OpenChamber 服务器（可选） | npm `@openchamber/web`，安装时取最新版 |
-| 编码代理 CLI | `@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode），安装时取最新版 |
+| Cox 服务器 | npm `@doublepi123/cox`，安装时解析 latest，内置回退版本 0.1.29（兼容 T3 Code 协议）；在 Alpine 内重编译 node-pty |
+| 编码代理 CLI | `@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode）、`@xai-official/grok`（Grok）、`@earendil-works/pi-coding-agent`（Pi），安装时取最新版 |
 | PRoot | 本地编译的 5.1.107.98 |
-| 端口 | Cox 3773、OpenChamber 3000（仅回环） |
+| 端口 | Cox 3773（仅回环） |
 
 ### 公共目录（可选）
 
@@ -68,3 +69,5 @@ python3 scripts/prepare_android_runtime_sources.py --output-dir build/runtime-so
 - 运行时下载的组件遵循各自的许可证，详见 [NOTICE](NOTICE)。
 
 本项目以 [MIT 许可证](LICENSE) 发布。
+
+验证范围与各 Agent 安装方式见 [Cox 设置验证](docs/testing-cox-settings.md)。

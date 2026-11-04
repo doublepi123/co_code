@@ -109,13 +109,7 @@ interface RuntimeInstaller {
         selected: Set<String>,
     ): InstalledRuntime
 
-    /**
-     * Applies a server selection through a staging copy and an atomic swap (the server must be
-     * stopped). Adds/removes only the selected server program trees, keeps both the other server and
-     * every effective agent, verifies all survivors, then swaps. [agents] is the effective agent set
-     * after the change (including the OpenChamber OpenCode dependency). Throws on failure, leaving
-     * the active environment untouched.
-     */
+    /** Applies the compatibility server/agent selection using a verified atomic staging swap. */
     suspend fun applyServers(
         report: InstallReporter,
         selected: Set<ServerKind>,

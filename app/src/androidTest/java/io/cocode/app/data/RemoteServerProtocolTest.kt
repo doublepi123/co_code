@@ -25,10 +25,11 @@ class RemoteServerProtocolTest {
     }
 
     @Test
-    fun openChamberProtocolSurvivesReload() = withStore { prefs ->
-        val server = ServerTarget.Remote("oc", "OpenChamber", "https://example.com", null, kind = ServerKind.OpenChamber)
-        EncryptedRemoteServerStore(prefs).upsert(server)
-        assertEquals(server, EncryptedRemoteServerStore(prefs).servers.value.single())
+    fun retiredProtocolIsNotLoadedAsCox() = withStore { prefs ->
+        prefs.edit().putString("servers", """[{"id":"old","displayName":"Retired","baseUrl":"https://example.com","kind":"openchamber"}]""").commit()
+        assertEquals(emptyList<ServerTarget.Remote>(), EncryptedRemoteServerStore(prefs).servers.value)
+        // Ignoring an unsupported record does not overwrite the persisted data during loading.
+        assertEquals(true, prefs.getString("servers", "")!!.contains("openchamber"))
     }
 
     @Test

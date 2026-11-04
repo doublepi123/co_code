@@ -8,7 +8,7 @@ Files:
 - `CoCodeApp.kt`: `CoCodeApp(...)` root, `Routes`, `LocalActions`, launch and record-keeping coroutines.
 - `LaunchDecision.kt`: pure rules (`launchTarget`, `resumeTarget`, `initialLaunchStage`, `shownLocalState`, `sanitizedPagePath`). No Android or Compose imports (okhttp only, via `canonicalWebOrigin`), so unit tests call them directly.
 - `LaunchFlow.kt`: launch timing constants, `UiPrefs`, `LaunchCover`, `isLauncherLaunch()`.
-- `LocalServers.kt`: on-device target ids (`local-t3`, `local-openchamber`; legacy `local` = Cox), `localKindOf`, `isLocalTargetId`, `migratedTargetId`, `ServersState.openableKind()` (active, or the installed one; never a non-installed server), `ServerKind.label()` (local product name) and `ServerKind.protocolLabel()` (remote "Cox / T3 Code").
+- `LocalServers.kt`: on-device target ids (`local-t3`; legacy `local` = Cox), `localKindOf`, `isLocalTargetId`, `migratedTargetId`, `ServersState.openableKind()` (active, or the installed one; never a non-installed server), `ServerKind.label()` (local product name) and `ServerKind.protocolLabel()` (remote "Cox / T3 Code").
 - `AppUpdatePrompt.kt`: `AppUpdatePrompt` (CoCode's own GitHub release check: one process-wide `update.AppReleaseChecker` on `BuildConfig.VERSION_NAME`, checked on every `ON_START`, dialog over Home or a server page once the launch cover is gone), `AppUpdateDialog` (Later / View release, which opens the official https GitHub release page in the browser; nothing is downloaded or installed), `releaseNotesPreview` (Markdown notes as short plain text).
 - `SystemUi.kt`: `findActivity()`, `SystemBarsEffect`, `WindowBackgroundEffect`.
 - `ScreenAwake.kt`: opt-in local-runtime screen hold. `ScreenAwakeController` shares `ui_prefs` with `UiPrefs` and exposes the setting and recorded target as StateFlows; `MainActivity` combines them with runtime and lifecycle state and sets `FLAG_KEEP_SCREEN_ON` only while Running, foreground and not on a remote page. No WakeLock.
@@ -78,3 +78,5 @@ Shared-storage permission:
 - Launch: `ResumeTarget.Local(kind)` remembers which local server was open; `localKindToOpen` reopens it only while installed (switching via `selectServer` instead of starting the old one), else the active one.
 - `UiPrefs` migrates the legacy `local` last-target and page to `local-t3` once. Pages are kept per unique target id.
 - `WebViewSlot.of` puts both local ids in the Local slot: one pooled WebView, rebound (destroyed and recreated) per identity, so each server keeps its own profile and cookies.
+
+- Home Cox settings shortcuts discard the pooled local page, remember a fixed settings route and start Cox when stopped before opening the local WebView. Credentials and model-service configuration remain owned by Cox.

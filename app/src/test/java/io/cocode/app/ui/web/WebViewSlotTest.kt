@@ -16,7 +16,7 @@ class WebViewSlotTest {
     @Test
     fun `the local target owns the local slot`() {
         assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.Local("http://localhost:49152").id))
-        assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.Local("http://localhost:49153", ServerKind.OpenChamber).id))
+        assertEquals(WebViewSlot.Local, WebViewSlot.of(ServerTarget.Local("http://localhost:49153", ServerKind.T3).id))
     }
 
     @Test

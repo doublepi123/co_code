@@ -11,42 +11,20 @@ class ServerSelectionTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
-    fun `the file store round-trips selected and active servers`() {
-        val root = temporaryFolder.newFolder("runtime")
-        val store = FileServerSelectionStore(root)
-        store.save(ServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber), ServerKind.OpenChamber))
-
-        val loaded = FileServerSelectionStore(root).load()
-
-        assertEquals(setOf(ServerKind.T3, ServerKind.OpenChamber), loaded.selected)
-        assertEquals(ServerKind.OpenChamber, loaded.active)
-    }
-
-    @Test
-    fun `an empty persisted selection falls back to installed servers then T3`() {
-        assertEquals(setOf(ServerKind.OpenChamber), sanitizeServerSelection(emptySet(), setOf(ServerKind.OpenChamber)))
-        assertEquals(setOf(ServerKind.T3), sanitizeServerSelection(emptySet()))
-    }
-
-    @Test
-    fun `a non-empty selection is kept as requested`() {
-        assertEquals(
-            setOf(ServerKind.T3, ServerKind.OpenChamber),
-            sanitizeServerSelection(setOf(ServerKind.T3, ServerKind.OpenChamber)),
-        )
-    }
-
-    @Test
-    fun `OpenChamber selection requires the OpenCode agent without making it a user choice`() {
-        val known = setOf("codex", "opencode")
-
-        assertEquals(setOf("opencode"), requiredAgentsForServers(setOf(ServerKind.OpenChamber), emptySet(), known))
-        assertEquals(setOf("opencode"), requiredAgentsForServers(setOf(ServerKind.T3), setOf(ServerKind.OpenChamber), known))
-        assertTrue(requiredAgentsForServers(setOf(ServerKind.T3), emptySet(), known).isEmpty())
-    }
-
-    @Test
     fun `the default server state is T3 with nothing installed`() {
         assertEquals(ServersState(setOf(ServerKind.T3), emptyMap(), ServerKind.T3), ServersState())
+    }
+
+    @Test
+    fun `retired persisted server selection adopts Cox without deleting preferences`() {
+        val root = temporaryFolder.newFolder("legacy-runtime")
+        java.io.File(root, "server-selection").writeText("selected=openchamber\nactive=openchamber\n")
+        val store = FileServerSelectionStore(root)
+        assertEquals(ServerSelection(), store.load())
+        assertEquals(ServerSelection(), store.storedSelection())
+        store.save(store.load())
+        assertEquals("selected=t3\nactive=t3\n", java.io.File(root, "server-selection").readText())
+        assertEquals(null, ServerKind.fromId("openchamber"))
+        assertTrue(requiredAgentsForServers(setOf(ServerKind.T3), emptySet(), setOf("opencode")).isEmpty())
     }
 }

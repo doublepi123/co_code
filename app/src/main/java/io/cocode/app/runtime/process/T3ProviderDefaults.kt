@@ -9,17 +9,24 @@ import kotlinx.serialization.json.put
 import java.io.File
 
 /**
- * Cox (and the legacy T3 Code build it replaces) enables only its Codex and Claude providers until a
- * provider instance is configured. An agent the person installed on purpose should simply be usable,
- * so before each start the app adds `providerInstances.<id> = {"driver": <id>, "enabled": true}` to the
- * server's `settings.json` for every installed agent whose driver is off by default.
+ * Seeds modern Cox provider-instance envelopes for explicitly installed agents, with separate opt-in
+ * entries for providers whose installers or executable configuration belong to Cox's settings UI.
  *
  * Only missing instances are added: an instance the person configured (including one they turned
  * off) is never touched, and an unreadable settings file is left as it is.
  */
 object T3ProviderDefaults {
-    /** Agent id → provider driver/instance id, for drivers the server disables until configured. */
-    private val OFF_BY_DEFAULT = mapOf("opencode" to "opencode")
+    /** Installed agent id to Cox's provider driver and default instance identity. */
+    private val AGENT_DRIVERS =
+        mapOf(
+            "codex" to "codex",
+            "claude" to "claudeAgent",
+            "opencode" to "opencode",
+            "grok" to "grok",
+            "pi" to "pi",
+            "cursor" to "cursor",
+        )
+    private val MANAGED_DRIVERS = setOf("antigravity", "acpRegistry", "fx", "muse")
 
     /** Cox's data directory name under the guest home. */
     const val COX_HOME_DIR = ".cox"
@@ -32,15 +39,18 @@ object T3ProviderDefaults {
     /** `<home>/<homeDir>/userdata/settings.json` for the bind-mounted guest home. */
     fun settingsFile(
         home: File,
-        homeDir: String = T3_HOME_DIR,
+        homeDir: String = COX_HOME_DIR,
     ): File = File(File(home, homeDir), "userdata/settings.json")
 
     /**
      * Returns the new settings text, or null when nothing has to change. Pure, for tests.
      * [current] is the file content or null when the file does not exist yet.
      */
-    fun merge(current: String?, installedAgents: Set<String>): String? {
-        val wanted = installedAgents.mapNotNull { OFF_BY_DEFAULT[it] }
+    fun merge(current: String?, installedAgents: Set<String>, cox: Boolean = true): String? {
+        val installed =
+            if (cox) installedAgents.mapNotNull(AGENT_DRIVERS::get).toSet()
+            else installedAgents.intersect(setOf("opencode"))
+        val wanted = if (installed.isEmpty()) emptySet() else installed + if (cox) MANAGED_DRIVERS else emptySet()
         if (wanted.isEmpty()) return null
         val root: JsonObject =
             if (current.isNullOrBlank()) {
@@ -53,13 +63,19 @@ object T3ProviderDefaults {
             is JsonObject -> existing
             else -> return null
         }
-        val missing = wanted.filterNot { instances.containsKey(it) }
+        val configuredDrivers =
+            instances.values
+                .mapNotNull { (it as? JsonObject)?.get("driver") as? JsonPrimitive }
+                .map { it.content }
+                .toSet()
+        val missing = wanted.filterNot { instances.containsKey(it) || it in configuredDrivers }
         if (missing.isEmpty()) return null
         val merged: Map<String, JsonElement> =
             instances + missing.associateWith { id ->
                 buildJsonObject {
                     put("driver", JsonPrimitive(id))
-                    put("enabled", true)
+                    put("enabled", id in installed)
+                    put("config", buildJsonObject {})
                 }
             }
         return json.encodeToString(JsonObject.serializer(), JsonObject(root + ("providerInstances" to JsonObject(merged))))
@@ -69,11 +85,11 @@ object T3ProviderDefaults {
     fun apply(
         home: File,
         installedAgents: Set<String>,
-        homeDir: String = T3_HOME_DIR,
+        homeDir: String = COX_HOME_DIR,
     ) {
         val file = settingsFile(home, homeDir)
         val current = if (file.isFile) file.readText() else null
-        val next = merge(current, installedAgents) ?: return
+        val next = merge(current, installedAgents, cox = homeDir != T3_HOME_DIR) ?: return
         file.parentFile?.mkdirs()
         val temp = File(file.parentFile, "${file.name}.cocode-tmp")
         temp.writeText(next)

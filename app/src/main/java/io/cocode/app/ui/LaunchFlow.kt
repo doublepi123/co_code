@@ -97,8 +97,7 @@ internal class UiPrefs(
     }
 
     /**
-     * Before OpenChamber there was one local id, `local`, and it always meant T3 Code. Its record and
-     * page move to `local-t3` once, so they stay T3 Code's and never open OpenChamber.
+     * The original local id, `local`, and its page migrate to Cox's stable `local-t3` identity.
      */
     private fun migrateLegacyLocalId(stored: Map<String, *>) {
         if (prefs == null) return

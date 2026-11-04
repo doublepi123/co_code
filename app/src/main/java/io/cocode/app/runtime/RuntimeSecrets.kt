@@ -4,16 +4,7 @@ import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
 
-/**
- * The password that protects an on-device web server (T3 Code or OpenChamber).
- *
- * Each server listens on loopback, which any app with INTERNET can reach. The password is persisted in
- * the app-private runtime directory so the server and the WebView login agree across restarts and is
- * passed to the server through its own environment variable. T3 keeps the historical `ui-password`
- * file; OpenChamber has a separate file, so a password is never reused across kinds.
- *
- * T3 requires at least 8 characters; generated secrets are much longer.
- */
+/** Cox's loopback password, persisted in the historical app-private UI password file. */
 object RuntimeSecrets {
     private const val SECRET_BYTES = 32
 

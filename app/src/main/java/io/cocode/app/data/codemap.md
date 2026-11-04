@@ -25,7 +25,7 @@ Network and persistence adapters for remote and local Cox / T3 Code servers, use
 - Transport rule: a remote target without `allowInsecureHttp` is refused unless the URL is https or loopback (`HttpUrl.isTransportSafe`). Refusal happens before any login request.
 - Results include `NeedsGatewayLogin(base)` when Cloudflare Access gates health, probe or login; its pure detector recognizes Access redirects and challenge headers. This result never sends the UI password.
 - Set-Cookie headers are written through the bound profile's `WebSessionCookies.storeCookies` and flushed there. The T3 protocol names the cookie `t3_session_<port>`; Cox keeps that name, which keeps two servers on one host apart.
-- Login body: Cox/T3 uses `{"credential": ...}`; OpenChamber uses `{"password": ...}`. Successful HTTP responses must also contain `authenticated:true`; empty, invalid or unauthenticated bodies return `NeedsLogin` without storing cookies. 4xx and 3xx map to `NeedsLogin`; other non-2xx map to `Unreachable`.
+- Login body: Cox uses `{"credential": ...}`. Successful HTTP responses must also contain `authenticated:true`; empty, invalid or unauthenticated bodies return `NeedsLogin` without storing cookies. 4xx and 3xx map to `NeedsLogin`; other non-2xx map to `Unreachable`.
 
 ### Named profile removal
 
@@ -64,3 +64,5 @@ Remote server CRUD: UI calls `upsert`/`remove`/`move` → JSON re-encoded → En
   - `GET /api/auth/session` (session probe).
   - `POST /api/auth/browser-session` (login with `{"credential":...}`).
 - Networking: `app/src/main/res/xml/network_security_config.xml` governs cleartext; the code-level plain-HTTP guard is in `WebSessionAuthenticatorImpl`.
+
+- Saved remote entries with a retired or unknown protocol are not loaded as Cox. Their stored records are left untouched during loading.

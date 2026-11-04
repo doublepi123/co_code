@@ -8,11 +8,11 @@ import io.cocode.app.runtime.ServersState
 
 /**
  * The on-device servers as the UI addresses them. Each [ServerKind] has its own target id
- * (`local-t3`, `local-openchamber`), so it keeps its own WebView profile, cookies and last page; only
+ * (`local-t3`), so it keeps its own WebView profile, cookies and last page; only
  * the pooled WebView object is shared (see `WebViewSlot`).
  */
 
-/** The single local target id of versions before OpenChamber; it always meant T3 Code. */
+/** The original local target id; it always meant the Cox/T3 protocol. */
 internal const val LEGACY_LOCAL_TARGET_ID = "local"
 
 /** Every on-device target id. */
@@ -50,7 +50,6 @@ internal fun ServerKind.label(): String =
     stringResource(
         when (this) {
             ServerKind.T3 -> R.string.server_t3
-            ServerKind.OpenChamber -> R.string.server_openchamber
         },
     )
 
@@ -63,6 +62,5 @@ internal fun ServerKind.protocolLabel(): String =
     stringResource(
         when (this) {
             ServerKind.T3 -> R.string.server_t3_remote
-            ServerKind.OpenChamber -> R.string.server_openchamber
         },
     )

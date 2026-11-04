@@ -6,7 +6,6 @@ The control-room home screen (`Routes.HOME`). Shows the on-device Cox runtime (s
 
 Files:
 - `HomeScreen.kt`: `HomeScreen`, `HomeActions` (lambdas passed in from the root), header, one-shot `HomeEntrance`.
-- `AgentDraft.kt`: `SelectionDraft<T>` (aliases `AgentDraft`, `ServerDraft`), a picker's local draft: checked set vs. installed baseline, additions/removals/kept, `locked` dependencies (OpenCode for OpenChamber) that can't be unchecked and are only sent when the user asked for them, `canSetUp`/`canApply`, what a toggle saves. Never yields an empty selection.
 - `LocalRuntimeCard.kt`: `LocalRuntimeCard`, `RuntimePhase` (coarse phase of `RuntimeState`), per-phase bodies, `AgentSelectionSection` (checkboxes for the manifest agents, installed versions, Apply after install), the update notice (`UpdateOfferRow`, `UpdateProblemRow`, `RawOutput`, `VersionChanges`), footer toggles, `AutoOpenRow`, `ScreenAwakeRow`, `UpdateCheckRow`.
 - `SharedStorageCard.kt`: `SharedStorageCard` (switch, status, folder tree, restart notice, permission and unavailable bodies).
 - `RemoteServers.kt`: `RemoteServersSection`, server rows, `RemoveServerDialog`, `ServerEditorDialog`.
@@ -78,12 +77,13 @@ Storage card:
 - `i18n.UserMessages.stepLabel(InstallStep)`, `UserMessages.headline(MessageKey)` (update failures), and `R.string.*` / `R.plurals`.
 - `ON_RESUME` observed via `LifecycleEventEffect` in `SharedStorageCard`.
 
-## Local servers (Cox / OpenChamber)
 
-- `LocalRuntimeCard` takes `ServersState` and `onServersChange` / `onSelectServer`. The header, status, actions and log are the active server's. A "Servers" `SelectionSection` (same rules as agents) picks Cox, OpenChamber or both; unchecking an installed server asks first (`servers_remove_*`). With both installed an `ActiveServerSelector` (segmented) switches; the switch dialog says running tasks are interrupted, Cancel sends nothing. While OpenChamber is installed or picked, OpenCode is locked in the agent list ("Required by OpenChamber"), from `AgentsState.required` plus the picked servers.
-- `RemoteServers.kt`: the editor has a Cox / T3 Code / OpenChamber segmented choice saved as `ServerTarget.Remote.kind` (sign-in protocol; never guessed from the port); rows show the kind before the address.
 
-## Codex sign-in
 
-- `CodexSignIn.kt`: `CodexSignInStatus` (end of the Codex agent row: nothing while unknown, "Sign in" when signed out, "Signed in" + overflow "Sign in again", "Continue" for a hidden running flow), `CodexSignInDialog` (Starting/Verifying spinner; WaitingForUser with step 1 open page via `openUrl`, step 2 large mono code + copy + `m:ss` countdown, "Use an API key instead" password field calling `signInWithApiKey`; SignedIn with Done; Failed with collapsible technical detail, Try again, Close; Cancelled auto-dismisses), `formatCountdown`, `CodexSignInActions` (test seam), `openInBrowser` (ACTION_VIEW + NEW_TASK, toast when nothing can open it), `rememberCodexSignInUi()` (Koin `CodexLogin` singleton, null in previews).
-- `LocalRuntimeCard` takes `codexLogin: CodexSignInUi?`. Shown only when the runtime is installed (`info != null`) and Codex is in `agents.installed`. Unknown status triggers one `refreshStatus()`. A running flow's dialog can be hidden (not cancelled) and reopened from the row; results (SignedIn/Failed) pop a dialog only for a flow started from this card, never for the background status check.
+## Cox settings and agent installation
+
+- `CoxSettings.kt` defines fixed `CoxSettingsPage` routes; `CoxSettingsSection.kt` presents `/settings/model-services` and `/settings/providers` as full-width actions with localised hints. Disabled before setup and while maintenance runs. The root starts Cox when necessary, saves the requested local page and discards a pooled chat view before opening the settings page in the same authenticated profile.
+- `LocalRuntimeCard` has only an agent picker; there is no server selector or native Codex authentication state. Cursor's `bundled` marker is displayed as a translated inclusion label.
+- `CoxSettingsComposeTest` covers route selection and disabled controls. `RemoteServerProtocolTest` verifies retired/unknown protocols are ignored without rewriting saved data on read.
+
+Model center requires Cox 0.1.21 or newer; older runtimes retain Agent settings and show an update hint. `CoxSettingsTest` covers that migration boundary.

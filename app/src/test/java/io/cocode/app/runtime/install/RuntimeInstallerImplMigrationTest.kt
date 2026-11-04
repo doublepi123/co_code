@@ -3,13 +3,13 @@ package io.cocode.app.runtime.install
 import io.cocode.app.runtime.RuntimePaths
 import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.manifest.AgentSpec
-import io.cocode.app.runtime.manifest.OpenChamberSpec
 import io.cocode.app.runtime.manifest.RuntimeArchitecture
 import io.cocode.app.runtime.manifest.RuntimeManifest
 import io.cocode.app.runtime.manifest.T3Spec
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -29,7 +29,6 @@ class RuntimeInstallerImplMigrationTest {
                 T3Spec(
                     version = "0.1.14",
                 ),
-            openchamber = OpenChamberSpec(),
             agents = listOf(AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode")),
             architectures =
                 mapOf(
@@ -68,21 +67,6 @@ class RuntimeInstallerImplMigrationTest {
         }
     }
 
-    private fun openChamberAssets(rootfs: File) {
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/bin/cli.js").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/dist/index.html").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/node_modules/node-pty").mkdirs()
-        File(rootfs, "usr/local/lib/node_modules/@openchamber/web/package.json").writeText(
-            """{"name":"@openchamber/web","version":"2.5.3"}""",
-        )
-    }
-
     private fun writeLegacyMetadata(paths: RuntimePaths) {
         paths.metadataFile.writeText(
             """
@@ -110,24 +94,34 @@ class RuntimeInstallerImplMigrationTest {
     }
 
     @Test
-    fun `an OpenChamber-only environment is detected without opt t3`() {
+    fun `retired-only environment is installable again without deleting home or old environment`() {
         val (paths, rootfs) = environment()
-        openChamberAssets(rootfs)
-        File(rootfs, "usr/local/lib/node_modules/@opencode/cli").mkdirs()
-        File(rootfs, "usr/local/bin/opencode").apply {
-            parentFile?.mkdirs()
-            writeText("")
-        }
+        t3Assets(rootfs)
+        val homeData = File(paths.home, ".config/keep").apply { parentFile?.mkdirs(); writeText("credentials") }
+        val project = File(paths.workspace, "keep.txt").apply { parentFile?.mkdirs(); writeText("project") }
+        val record = """{"schemaVersion":2,"runtimeVersion":"r","alpineVersion":"3.24.1","abi":"arm64-v8a","port":3773,"t3Version":"stale","servers":{"openchamber":"2.5.3"},"agents":{},"installedAt":1}"""
+        paths.metadataFile.writeText(record)
+
+        assertNull(installer(paths).installedRuntime())
+        assertEquals(record, paths.metadataFile.readText())
+        assertEquals("credentials", homeData.readText())
+        assertEquals("project", project.readText())
+    }
+
+    @Test
+    fun `mixed legacy metadata drops retired server identity while retaining Cox and user data`() {
+        val (paths, rootfs) = environment()
+        t3Assets(rootfs)
+        val data = File(paths.home, ".cox/keep").apply { parentFile?.mkdirs(); writeText("keep") }
         paths.metadataFile.writeText(
-            """
-            {"schemaVersion":2,"runtimeVersion":"r","alpineVersion":"3.24.1","abi":"arm64-v8a","port":3773,
-             "t3Version":"0.1.6-pw.5","servers":{"openchamber":"2.5.3"},"agents":{},"installedAt":1}
-            """.trimIndent(),
+            """{"schemaVersion":2,"runtimeVersion":"r","alpineVersion":"3.24.1","abi":"arm64-v8a","port":3773,"t3Version":"0.1.14","servers":{"t3":"0.1.14","openchamber":"2.5.3"},"agents":{},"installedAt":1}""",
         )
 
-        val runtime = installer(paths).installedRuntime()
+        val runtime = installer(paths).installedRuntime()!!
 
-        assertEquals(mapOf(ServerKind.OpenChamber to "2.5.3"), runtime?.metadata?.recordedServerVersions())
-        assertEquals(mapOf("openchamber" to "2.5.3"), runtime?.metadata?.servers)
+        assertEquals(mapOf("t3" to "0.1.14"), runtime.metadata.servers)
+        assertEquals(mapOf("t3" to "0.1.14"), Json.decodeFromString<RuntimeMetadata>(paths.metadataFile.readText()).servers)
+        assertEquals("keep", data.readText())
     }
+
 }

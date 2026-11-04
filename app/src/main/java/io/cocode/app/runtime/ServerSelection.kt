@@ -152,16 +152,9 @@ fun sanitizeServerSelection(
         else -> DEFAULT_SERVERS
     }
 
-/**
- * Agents required by the server selection but not necessarily requested by the user. OpenChamber
- * runs the shared OpenCode CLI, so it must be installed while OpenChamber is selected or installed.
- * This set is kept separate from [AgentsState.selected] so the UI can show the dependency.
- */
+/** Compatibility dependency API: Cox has no mandatory CLI agent dependency. */
 fun requiredAgentsForServers(
     selected: Set<ServerKind>,
     installed: Set<ServerKind>,
     knownAgents: Set<String>,
-): Set<String> {
-    val needsOpenCode = ServerKind.OpenChamber in selected || ServerKind.OpenChamber in installed
-    return if (needsOpenCode) knownAgents.filterTo(mutableSetOf()) { it == "opencode" } else emptySet()
-}
+): Set<String> = emptySet()

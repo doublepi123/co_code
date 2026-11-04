@@ -38,36 +38,10 @@ class HealthProbeTest {
     }
 
     @Test
-    fun `openchamber probe reads health and requires a ready opencode`() {
-        server.enqueue(
-            MockResponse().setBody(
-                """{"status":"ok","serverId":"srv-1","isOpenCodeReady":true,"openCodeRunning":true}""",
-            ),
-        )
-
-        val report = HealthProbe.loopback(ServerKind.OpenChamber).read(server.port)
-
-        assertEquals("/health", server.takeRequest().path)
-        assertEquals("srv-1", report?.serverId)
-        assertTrue(report?.ready == true)
-    }
-
-    @Test
-    fun `openchamber probe is not healthy while opencode is not ready`() {
-        server.enqueue(
-            MockResponse().setBody(
-                """{"status":"ok","serverId":"srv-1","isOpenCodeReady":false,"openCodeRunning":true}""",
-            ),
-        )
-
-        assertFalse(HealthProbe.loopback(ServerKind.OpenChamber).isHealthy(server.port))
-    }
-
-    @Test
     fun `a redirect is never followed`() {
         server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/health"))
 
-        assertNull(HealthProbe.loopback(ServerKind.OpenChamber).read(server.port))
+        assertNull(HealthProbe.loopback(ServerKind.T3).read(server.port))
         assertEquals(1, server.requestCount)
     }
 }

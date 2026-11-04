@@ -43,11 +43,8 @@ fun interface LocalReadiness {
  * the password when one is known, and stores the resulting Set-Cookie headers through the caller's
  * [WebSessionCookies] (the capability of that target's own WebView profile).
  *
- * T3 Code uses `GET /.well-known/t3/environment`, `GET /api/auth/session` and
- * `POST /api/auth/browser-session` with `{"credential": ...}`. OpenChamber uses `GET /health`,
- * `GET /auth/session` and `POST /auth/session` with `{"password": ...}` and the
- * `oc_ui_session_<port>` cookie. The kind is always the target's explicit kind, never inferred from
- * the port or address.
+ * Cox uses `GET /.well-known/t3/environment`, `GET /api/auth/session` and
+ * `POST /api/auth/browser-session` with `{"credential": ...}`.
  *
  * Rules:
  *  - The cookies must belong to this target and its canonical origin. Otherwise: no HTTP request, no
@@ -161,13 +158,6 @@ class DefaultWebSessionAuthenticator(
                 if (isCloudflareAccessGate(response.code, response.header("Location"), response.headers.toMultimap())) return@use HealthResult(false, true)
                 if (!response.isSuccessful) return@use HealthResult(false, false)
                 val report = HealthProbe.parse(response.body?.string().orEmpty(), kind)
-                if (report?.openCodeFailed == true) {
-                    return@use HealthResult(
-                        false,
-                        false,
-                        "${kind.displayName} could not start OpenCode: ${report.lastOpenCodeError}",
-                    )
-                }
                 HealthResult(report?.ready == true, false)
             }
         }
@@ -183,7 +173,7 @@ class DefaultWebSessionAuthenticator(
         val header = cookies.cookieHeader(base)
         val reply =
             fetch<SetCookieReply?>(default = null) {
-                val builder = Request.Builder().url("$base${sessionPath(kind)}").get()
+                val builder = Request.Builder().url("$base$SESSION_PATH").get()
                 if (header != null) builder.header("Cookie", header)
                 authClient.newCall(builder.build()).execute().use { response ->
                     SetCookieReply(
@@ -211,11 +201,11 @@ class DefaultWebSessionAuthenticator(
     ): WebSessionResult {
         val body =
             buildJsonObject {
-                put(loginField(kind), password)
+                put("credential", password)
             }.toString()
         val request =
             Request.Builder()
-                .url("$base${loginPath(kind)}")
+                .url("$base$LOGIN_PATH")
                 .apply { if (target is ServerTarget.Remote) cookies.cookieHeader(base)?.let { header("Cookie", it) } }
                 .post(body.toRequestBody(JSON_MEDIA))
                 .build()
@@ -302,32 +292,10 @@ class DefaultWebSessionAuthenticator(
 
     private enum class ProbeResult { Accepted, Rejected, Gateway }
 
-    private fun sessionPath(kind: ServerKind): String =
-        when (kind) {
-            ServerKind.T3 -> SESSION_PATH
-            ServerKind.OpenChamber -> OPENCHAMBER_SESSION_PATH
-        }
-
-    private fun loginPath(kind: ServerKind): String =
-        when (kind) {
-            ServerKind.T3 -> LOGIN_PATH
-            ServerKind.OpenChamber -> OPENCHAMBER_LOGIN_PATH
-        }
-
-    /** T3 Code calls it a credential; OpenChamber calls it a password. */
-    private fun loginField(kind: ServerKind): String =
-        when (kind) {
-            ServerKind.T3 -> "credential"
-            ServerKind.OpenChamber -> "password"
-        }
-
     private companion object {
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         const val SESSION_PATH = "/api/auth/session"
         const val LOGIN_PATH = "/api/auth/browser-session"
-        // Both OpenChamber endpoints live on /auth/session: GET status, POST password login.
-        const val OPENCHAMBER_SESSION_PATH = "/auth/session"
-        const val OPENCHAMBER_LOGIN_PATH = "/auth/session"
     }
 }
 

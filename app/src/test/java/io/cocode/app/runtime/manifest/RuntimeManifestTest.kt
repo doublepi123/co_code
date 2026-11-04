@@ -101,4 +101,11 @@ class RuntimeManifestTest {
         assertEquals("OpenCode", parsed.agent("opencode")?.displayName)
     }
 
+    @Test
+    fun `bundled agent requires no npm package and unknown installers are rejected`() {
+        val cursor = AgentSpec("cursor", bin = "", displayName = "Cursor SDK", installation = "bundled")
+        manifest().copy(agents = listOf(cursor)).validate()
+        assertThrows(IllegalArgumentException::class.java) { cursor.copy(installation = "shell").validate() }
+    }
+
 }
