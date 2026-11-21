@@ -23,6 +23,8 @@ Pushes to `main`, manual runs and `ios-v*` tags publish a public GitHub Release.
 
 The IPA embeds `CoCodeGuest.json`, which names the release URL, sizes and SHA-256 digests of the compressed and the decompressed image. On first launch, or after an update that names a new image, CoCode downloads the image without credentials, checks both digests, and moves it into place before it starts Linux. A failed check keeps Linux from starting and offers a retry. Sign the IPA before installing it on an iPhone; no file has to be copied by hand.
 
+On `main`, the workflow also exports the archive using Apple-managed distribution signing in the `testflight` GitHub environment. It checks the app signature, bundle identifier and both runtime memory entitlements before uploading an internal-only build to App Store Connect. Configure the environment for the `main` branch with `APPLE_TEAM_ID`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` and the PEM contents of `APPLE_API_PRIVATE_KEY`. The Apple team must have an app record for `io.cocode.ios` and access to cloud-managed distribution signing.
+
 The guest starts BusyBox init, sets up its terminal devices and network, and runs Cox on guest port `3773`. The iOS host publishes that port on iOS loopback only. CoCode stores projects in `/root/projects`, Cox data in `/root/.cox`, and the generated local login password in a private file under `/root`. Those paths must be backed by the host's persistent disk.
 
 ## Verify on an iPhone

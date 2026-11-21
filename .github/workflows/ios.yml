@@ -178,6 +178,7 @@ jobs:
           key: ios-darwin-kernels-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
       - name: Build and package CoCode
         env:
+          COCODE_IOS_ARCHIVE_ZIP: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && format('{0}/CoCode.xcarchive.zip', runner.temp) || '' }}
           COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: user.name
@@ -199,6 +200,24 @@ jobs:
           path: build/ios/package/
           if-no-files-found: error
           compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: CoCode-iOS-archive
+          path: ${{ runner.temp }}/CoCode.xcarchive.zip
+          retention-days: 1
+          if-no-files-found: error
+
+  testflight:
+    name: Sign and upload to internal TestFlight
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: ipa
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ios-testflight.yml
+    with:
+      archive_run_id: ${{ format('{0}', github.run_id) }}
 
   release:
     name: Publish GitHub Release

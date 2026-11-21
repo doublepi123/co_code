@@ -1,0 +1,106 @@
+name: CoCode internal TestFlight
+
+on:
+  workflow_call:
+    inputs:
+      archive_run_id:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      archive_run_id:
+        description: Main branch CoCode iOS run containing the archive
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  testflight:
+    name: Sign and upload to internal TestFlight
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: xcode-27
+    environment: testflight
+    steps:
+      - name: Check archive provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.archive_run_id }}
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" | jq -e \
+            --arg repo "$GITHUB_REPOSITORY" '
+              .path == ".github/workflows/ios.yml" and .head_branch == "main" and
+              .head_repository.full_name == $repo and (.event == "push" or .event == "workflow_dispatch")
+            ' >/dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.archive_run_id }}
+          name: CoCode-iOS-archive
+          path: ${{ runner.temp }}
+      - name: Export with Apple-managed signing and upload
+        working-directory: ${{ runner.temp }}
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$API_KEY" > "$key"
+          unset API_KEY
+          ditto -x -k CoCode.xcarchive.zip .
+          # Xcode derives export entitlements from the signature on the archived app.
+          archive_app=CoCode.xcarchive/Products/Applications/Kernarium.app
+          if ! plutil -extract NSCameraUsageDescription raw "$archive_app/Info.plist" >/dev/null 2>&1; then
+            plutil -insert NSCameraUsageDescription -string \
+              "The embedded guest runtime can use your camera to provide a video feed to a guest app when you allow camera access." \
+              "$archive_app/Info.plist"
+          fi
+          plutil -create xml1 memory.plist
+          /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.kernel.extended-virtual-addressing bool true' memory.plist
+          /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.kernel.increased-memory-limit bool true' memory.plist
+          for framework in "$archive_app"/Frameworks/*.framework; do
+            codesign --force --sign - "$framework"
+          done
+          codesign --force --sign - --entitlements memory.plist "$archive_app"
+          plutil -create xml1 ExportOptions.plist
+          plutil -insert method -string app-store-connect ExportOptions.plist
+          plutil -insert destination -string export ExportOptions.plist
+          plutil -insert teamID -string "$TEAM_ID" ExportOptions.plist
+          plutil -insert signingStyle -string automatic ExportOptions.plist
+          plutil -insert testFlightInternalTestingOnly -bool YES ExportOptions.plist
+          export_archive() {
+            xcodebuild -exportArchive -archivePath CoCode.xcarchive \
+              -exportPath "$1" -exportOptionsPlist ExportOptions.plist \
+              -allowProvisioningUpdates -authenticationKeyPath "$key" \
+              -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER"
+          }
+          export_archive signed
+          ditto -x -k signed/*.ipa verified
+          app=(verified/Payload/*.app)
+          codesign --verify --deep --strict "${app[0]}"
+          codesign -d --entitlements :- "${app[0]}" > entitlements.plist
+          security cms -D -i "${app[0]}/embedded.mobileprovision" > profile.plist
+          python3 - <<'PYTHON'
+          import os
+          import plistlib
+          from pathlib import Path
+
+          signature = plistlib.loads(Path("entitlements.plist").read_bytes())
+          profile = plistlib.loads(Path("profile.plist").read_bytes())["Entitlements"]
+          for data in (signature, profile):
+              if data.get("application-identifier") != os.environ["TEAM_ID"] + ".io.cocode.ios":
+                  raise SystemExit("Unexpected signed application identifier")
+              for capability in ("extended-virtual-addressing", "increased-memory-limit"):
+                  if data.get("com.apple.developer.kernel." + capability) is not True:
+                      raise SystemExit("Missing memory entitlement: " + capability)
+          PYTHON
+          plutil -replace destination -string upload ExportOptions.plist
+          export_archive upload

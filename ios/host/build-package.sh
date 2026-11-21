@@ -52,7 +52,7 @@ mkdir -p "$MOUNT"
 cleanup() {
     if [ "$mounted" = 1 ]; then
         cd /
-        hdiutil detach -quiet "$MOUNT" || return
+        hdiutil detach -quiet "$MOUNT" || hdiutil detach -force "$MOUNT" || return
     fi
     rm -rf "$WORK"
 }
@@ -151,6 +151,9 @@ ARCHIVE="$WORK/CoCode.xcarchive"
 xcodebuild -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" \
     -scheme Kernarium -configuration Release -destination 'generic/platform=iOS' \
     -derivedDataPath "$WORK/derived" -archivePath "$ARCHIVE" CODE_SIGNING_ALLOWED=NO archive
+if [[ -n "${COCODE_IOS_ARCHIVE_ZIP:-}" ]]; then
+    /usr/bin/ditto -c -k --keepParent "$ARCHIVE" "$COCODE_IOS_ARCHIVE_ZIP"
+fi
 APP="$ARCHIVE/Products/Applications/Kernarium.app"
 [ -d "$APP" ] || fail "Xcode archive missing app: $APP"
 /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx io.cocode.ios >/dev/null || fail 'app bundle identifier is not io.cocode.ios'

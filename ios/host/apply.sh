@@ -26,4 +26,5 @@ patch="$overlay/cocode-kernarium.patch"
 git -C "$checkout" apply --check "$patch"
 if [ "$check_only" -eq 0 ]; then
     git -C "$checkout" apply "$patch"
+    cp "$overlay"/AppIcon.appiconset/* "$checkout/Kernarium/Kernarium/Assets.xcassets/AppIcon.appiconset/"
 fi
