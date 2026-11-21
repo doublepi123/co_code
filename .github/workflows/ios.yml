@@ -3,6 +3,7 @@ name: CoCode iOS
 on:
   push:
     branches: [main, 'ios/**']
+    tags: ['ios-v*']
     paths:
       - 'ios/**'
       - '.github/workflows/ios.yml'
@@ -17,7 +18,7 @@ permissions:
 
 concurrency:
   group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   KERNARIUM_REV: b14aa9e6da9df15f467d8aad0090888373cc9b21
@@ -26,18 +27,60 @@ jobs:
   guest:
     name: ARM64 Cox guest
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 45
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Choose the release for this build
+        id: release
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/ios-v* ]]; then
+            tag=$GITHUB_REF_NAME publish=true
+          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]] || [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            tag=ios-build-$GITHUB_RUN_NUMBER publish=true
+          else
+            tag=ios-preview-$GITHUB_RUN_NUMBER publish=false
+          fi
+          printf 'tag=%s\npublish=%s\n' "$tag" "$publish" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - name: Build and check guest filesystem
         run: |
           docker buildx build --platform linux/arm64 --target bundle \
             --output type=local,dest=build/ios/guest --progress plain ios/guest
-          cd build/ios/guest
-          sha256sum cocode-linux.erofs > cocode-linux.erofs.sha256
+      - name: Compress the image and write its download manifest
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        working-directory: build/ios/guest
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
+          zstd -19 -T0 --no-progress -o cocode-linux.erofs.zst cocode-linux.erofs
+          zstd -t cocode-linux.erofs.zst
+          python3 - "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/cocode-linux.erofs.zst" "$TAG" <<'PY'
+          import hashlib, json, os, sys
+          def digest(path):
+              value = hashlib.sha256()
+              with open(path, 'rb') as stream:
+                  for chunk in iter(lambda: stream.read(1 << 20), b''):
+                      value.update(chunk)
+              return value.hexdigest()
+          manifest = {
+              'version': sys.argv[2],
+              'url': sys.argv[1],
+              'compressedSHA256': digest('cocode-linux.erofs.zst'),
+              'compressedSize': os.path.getsize('cocode-linux.erofs.zst'),
+              'imageSHA256': digest('cocode-linux.erofs'),
+              'imageSize': os.path.getsize('cocode-linux.erofs'),
+          }
+          with open('CoCodeGuest.json', 'w', encoding='utf-8') as stream:
+              json.dump(manifest, stream, indent=2)
+              stream.write('\n')
+          PY
+          cat CoCodeGuest.json
+          rm cocode-linux.erofs
       - uses: actions/upload-artifact@v4
         with:
           name: CoCode-iOS-ARM64-guest
@@ -108,7 +151,8 @@ jobs:
       - name: Verify build inputs
         id: toolchain
         run: |
-          (cd build/ios/guest && shasum -a 256 -c cocode-linux.erofs.sha256)
+          python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["compressedSize"] > 0' build/ios/guest/CoCodeGuest.json
+          test "$(shasum -a 256 build/ios/guest/cocode-linux.erofs.zst | awk '{print $1}')" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["compressedSHA256"])' build/ios/guest/CoCodeGuest.json)"
           (cd build/ios/boot && shasum -a 256 -c uml-boot-base-aarch64.cpio.gz.sha256)
           xcodebuild -version
           sdk=$(xcrun --sdk iphoneos --show-sdk-version)
@@ -143,7 +187,7 @@ jobs:
         run: |
           export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
           bash ios/host/build-package.sh kernarium build/ios/boot \
-            build/ios/guest/cocode-linux.erofs build/ios/package
+            build/ios/guest/CoCodeGuest.json build/ios/package
       - uses: actions/cache/save@v4
         if: ${{ !cancelled() && steps.kernels.outputs.cache-hit != 'true' && hashFiles('build/ios/host-kernels/*/kernel-artifact.json') != '' }}
         with:
@@ -155,3 +199,45 @@ jobs:
           path: build/ios/package/
           if-no-files-found: error
           compression-level: 0
+
+  release:
+    name: Publish GitHub Release
+    needs: [guest, ipa]
+    if: ${{ needs.guest.outputs.publish == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.guest.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CoCode-iOS-ARM64-guest
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: CoCode-iOS-unsigned
+          path: package
+      - name: Publish the image and the unsigned IPA
+        working-directory: release
+        run: |
+          (cd ../package && shasum -a 256 -c SHA256SUMS)
+          mv ../package/CoCode-unsigned.ipa .
+          cmp CoCodeGuest.json <(unzip -p CoCode-unsigned.ipa Payload/CoCode.app/CoCodeGuest.json)
+          sha256sum cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json > SHA256SUMS
+          prerelease=--prerelease
+          [[ "$TAG" == ios-v* ]] && prerelease=
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
+            --title "CoCode iOS $TAG" \
+            --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \
+            cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS
+      - name: Verify the image downloads without credentials
+        working-directory: release
+        run: |
+          url=$(python3 -c 'import json; print(json.load(open("CoCodeGuest.json"))["url"])')
+          expected=$(python3 -c 'import json; print(json.load(open("CoCodeGuest.json"))["compressedSHA256"])')
+          env -u GH_TOKEN curl -fsSL --retry 5 --retry-all-errors -o anonymous.zst "$url"
+          test "$(sha256sum anonymous.zst | awk '{print $1}')" = "$expected"
+          echo "Anonymous download verified: $url"

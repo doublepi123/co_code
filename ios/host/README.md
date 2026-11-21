@@ -43,18 +43,15 @@ xcodebuild -project Kernarium/Kernarium.xcodeproj -scheme Kernarium \
 
 ## Install and smoke-test
 
-Set `DEVICE` to the CoreDevice identifier and `IMAGE` to the absolute path of the arm64 CoCode EROFS image. Install the app, then stage the image in its Documents directory before launch.
+Set `DEVICE` to the CoreDevice identifier. A local Xcode build needs a `CoCodeGuest.json` in `Kernarium/Kernarium/`; copy it from a published CoCode iOS release, or let `ios/host/build-package.sh` place it. Install and launch the app:
 
 ```sh
 xcrun devicectl device install app --device "$DEVICE" \
     .build/cocode-xcode/Build/Products/Release-iphoneos/Kernarium.app
-xcrun devicectl device copy to --device "$DEVICE" --domain-type appDataContainer \
-    --domain-identifier io.cocode.ios --source "$IMAGE" \
-    --destination Documents/cocode-linux.erofs
 xcrun devicectl device process launch --device "$DEVICE" io.cocode.ios
 ```
 
-CoCode boots `Documents/cocode-linux.erofs` automatically. The guest's `/sbin/init` starts DHCP on `eth0` and runs Cox on guest TCP port 3773. SLiRP forwards `127.0.0.1:3773` on the iOS device to its DHCP guest `10.0.2.15:3773`. The Linux release runtime sets `console=ttyS0` and connects `ssl0` to its native console relay. Guest output written to `/dev/console` is visible in **Console**. Read the guest's `CoCode local password` message there, then enter it on Cox's sign-in page in the **Cox** tab. The WebKit session uses an ephemeral data store and a policy scoped to the exact local origin.
+On first launch CoCode downloads the image named in its bundled `CoCodeGuest.json` from the public GitHub Release, verifies the compressed and decompressed SHA-256 digests, and stores it as `Documents/cocode-linux.erofs`. Later launches start without the network while the bundled manifest names the same image. The guest's `/sbin/init` starts DHCP on `eth0` and runs Cox on guest TCP port 3773. SLiRP forwards `127.0.0.1:3773` on the iOS device to its DHCP guest `10.0.2.15:3773`. The Linux release runtime sets `console=ttyS0` and connects `ssl0` to its native console relay. Guest output written to `/dev/console` is visible in **Console**. Read the guest's `CoCode local password` message there, then enter it on Cox's sign-in page in the **Cox** tab. The WebKit session uses an ephemeral data store and a policy scoped to the exact local origin.
 
 The app stores the sparse ext4 overlay in its private `Library/CoCode/cocode-state.ext4`. The first boot formats the disk, and later boots mount it as-is. `/root`, including Cox's password and state, is writable on this overlay. Keep the EROFS image and its existing overlay together for this prototype. The initial disk size can be selected before the first boot and stays fixed afterward.
 

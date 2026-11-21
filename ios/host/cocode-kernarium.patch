@@ -1,8 +1,8 @@
 diff --git a/Kernarium/Info.plist b/Kernarium/Info.plist
-index 4dca895..5b52a6f 100644
+index 4dca895..007ccec 100644
 --- a/Kernarium/Info.plist
 +++ b/Kernarium/Info.plist
-@@ -2,9 +2,22 @@
+@@ -2,12 +2,25 @@
  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
  <plist version="1.0">
  <dict>
@@ -25,12 +25,24 @@ index 4dca895..5b52a6f 100644
 +		<string>io.cocode.ios.guest.*</string>
  	</array>
  	<key>NSMicrophoneUsageDescription</key>
- 	<string>Kernarium records from the microphone only when you turn on Microphone in Emulator settings, so that programs in the guest can use it.</string>
+-	<string>Kernarium records from the microphone only when you turn on Microphone in Emulator settings, so that programs in the guest can use it.</string>
++	<string>CoCode uses the microphone only when you enable Microphone in Emulator settings so programs in the Linux environment can record audio.</string>
+ 	<key>UIBackgroundModes</key>
+ 	<array>
+ 		<string>audio</string>
 diff --git a/Kernarium/Kernarium.xcodeproj/project.pbxproj b/Kernarium/Kernarium.xcodeproj/project.pbxproj
-index e7648c5..7c381cf 100644
+index e7648c5..9721b8d 100644
 --- a/Kernarium/Kernarium.xcodeproj/project.pbxproj
 +++ b/Kernarium/Kernarium.xcodeproj/project.pbxproj
-@@ -621,7 +621,7 @@
+@@ -325,6 +325,7 @@
+ 			knownRegions = (
+ 				en,
+ 				Base,
++				"zh-Hans",
+ 			);
+ 			mainGroup = 8AF5E8C6302C966200B19616;
+ 			minimizedProjectReferenceProxies = 1;
+@@ -621,7 +622,7 @@
  				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
  				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
  				MARKETING_VERSION = 1.0;
@@ -39,7 +51,7 @@ index e7648c5..7c381cf 100644
  				PRODUCT_NAME = "$(TARGET_NAME)";
  				SDKROOT = iphoneos;
  				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-@@ -669,7 +669,7 @@
+@@ -669,7 +670,7 @@
  				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
  				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
  				MARKETING_VERSION = 1.0;
@@ -49,9 +61,22 @@ index e7648c5..7c381cf 100644
  				SDKROOT = iphoneos;
  				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 diff --git a/Kernarium/Kernarium/BackgroundJob.swift b/Kernarium/Kernarium/BackgroundJob.swift
-index 434bd5a..7bd661c 100644
+index 434bd5a..c9b5cff 100644
 --- a/Kernarium/Kernarium/BackgroundJob.swift
 +++ b/Kernarium/Kernarium/BackgroundJob.swift
+@@ -36,9 +36,9 @@ struct BackgroundJobTimeline: Equatable {
+     func subtitle(at date: Date) -> String {
+         let minutes = Int((remaining(at: date) / 60).rounded(.up))
+         switch minutes {
+-        case ...0: return "Finishing"
+-        case 1: return "1 minute left"
+-        default: return "\(minutes) minutes left"
++        case ...0: return String(localized: "Finishing")
++        case 1: return String(localized: "1 minute left")
++        default: return String(localized: "\(minutes) minutes left")
+         }
+     }
+ }
 @@ -157,7 +157,7 @@ final class BackgroundJob: ObservableObject {
          case running(BackgroundJobTimeline)
      }
@@ -61,11 +86,447 @@ index 434bd5a..7bd661c 100644
  
      @Published private(set) var state = State.idle
      weak var controller: BackgroundController?
+@@ -200,9 +200,8 @@ final class BackgroundJob: ObservableObject {
+         let submission = submissions
+         scheduler.submit(
+             identifier: Self.identifier,
+-            title: "\(guestName) is running",
+-            subtitle: "Stops after " +
+-                BackgroundSettings.limitTitle(minutes: limitMinutes)
++            title: String(localized: "\(guestName) is running"),
++            subtitle: String(localized: "Stops after \(BackgroundSettings.limitTitle(minutes: limitMinutes))")
+         ) { [weak self] error in
+             self?.refuse(submission, error: error)
+         }
+diff --git a/Kernarium/Kernarium/BackgroundPolicy.swift b/Kernarium/Kernarium/BackgroundPolicy.swift
+index 5c8eaaf..3a972af 100644
+--- a/Kernarium/Kernarium/BackgroundPolicy.swift
++++ b/Kernarium/Kernarium/BackgroundPolicy.swift
+@@ -20,26 +20,20 @@ enum BackgroundMode: String, CaseIterable, Identifiable {
+ 
+     var title: String {
+         switch self {
+-        case .off: "Pause the guest"
+-        case .pictureInPicture: "Keep running in Picture in Picture"
+-        case .keepRunning: "Keep running for a set time"
++        case .off: String(localized: "Pause the Linux environment")
++        case .pictureInPicture: String(localized: "Keep running in Picture in Picture")
++        case .keepRunning: String(localized: "Keep running for a set time")
+         }
+     }
+ 
+     var explanation: String {
+         switch self {
+         case .off:
+-            "The guest is paused while Kernarium is in the background and " +
+-                "continues when you return."
++            String(localized: "The Linux environment pauses when CoCode goes into the background and resumes when you return.")
+         case .pictureInPicture:
+-            "The guest keeps running while its display shows in a small " +
+-                "floating window. Close the window to pause the guest. This " +
+-                "uses the battery as the guest does in the foreground."
++            String(localized: "The Linux environment keeps running with its display in a floating window. Close the window to pause it. Battery use is similar to running in the foreground.")
+         case .keepRunning:
+-            "Tap the keep running button, then leave Kernarium: the guest " +
+-                "keeps working, with its graphics paused, until the time " +
+-                "is up. iOS shows the progress and lets you stop it at any " +
+-                "time. Android turns its screen off meanwhile."
++            String(localized: "Tap the keep running button before leaving CoCode. The Linux environment keeps working until time runs out, with graphics paused. iOS shows the progress and lets you stop the task at any time.")
+         }
+     }
+ }
+@@ -105,9 +99,13 @@ struct BackgroundSettings {
+     /// or "1 minute".
+     static func limitTitle(minutes: Int) -> String {
+         if minutes % 60 == 0 {
+-            return minutes == 60 ? "1 hour" : "\(minutes / 60) hours"
++            return minutes == 60
++                ? String(localized: "1 hour")
++                : String(localized: "\(minutes / 60) hours")
+         }
+-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
++        return minutes == 1
++            ? String(localized: "1 minute")
++            : String(localized: "\(minutes) minutes")
+     }
+ 
+     func setLimitMinutes(_ minutes: Int, forGuest guest: String) {
+diff --git a/Kernarium/Kernarium/BackgroundSession.swift b/Kernarium/Kernarium/BackgroundSession.swift
+index e9a9126..e3cef0f 100644
+--- a/Kernarium/Kernarium/BackgroundSession.swift
++++ b/Kernarium/Kernarium/BackgroundSession.swift
+@@ -79,11 +79,10 @@ struct BackgroundMarker {
+ struct GuestRestart: Equatable {
+     let enteredBackgroundAt: Date
+ 
+-    var title: String { "Guest restarted" }
++    var title: String { String(localized: "The Linux environment restarted") }
+ 
+     var message: String {
+-        "Kernarium was closed while it was in the background, so the guest " +
+-            "started again from boot."
++        String(localized: "CoCode closed while it was in the background, so the Linux environment started again from boot.")
+     }
+ 
+     var systemName: String { "arrow.clockwise" }
+diff --git a/Kernarium/Kernarium/CoCodeGuestImage.swift b/Kernarium/Kernarium/CoCodeGuestImage.swift
+new file mode 100644
+index 0000000..bd91eb3
+--- /dev/null
++++ b/Kernarium/Kernarium/CoCodeGuestImage.swift
+@@ -0,0 +1,251 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++import CryptoKit
++import Darwin
++import Foundation
++import GuestHostCore
++
++nonisolated struct CoCodeGuestImage: Decodable, Sendable {
++    let version: String
++    let url: URL
++    let compressedSHA256: String
++    let compressedSize: Int64
++    let imageSHA256: String
++    let imageSize: Int64
++
++    private enum CodingKeys: String, CodingKey {
++        case version, url, compressedSHA256, compressedSize, imageSHA256, imageSize
++    }
++
++    private static let spaceMargin: Int64 = 256 * 1024 * 1024
++    private static let image = RootfsImage.documentsDirectory
++        .appendingPathComponent(RootfsImage.defaultFilename)
++    private static let versionFile = RootfsImage.documentsDirectory
++        .appendingPathComponent(".cocode-linux.version")
++
++    init(from decoder: any Decoder) throws {
++        let fields = try decoder.container(keyedBy: CodingKeys.self)
++        version = try fields.decode(String.self, forKey: .version)
++        let address = try fields.decode(String.self, forKey: .url)
++        compressedSHA256 = try fields.decode(String.self, forKey: .compressedSHA256)
++        compressedSize = try fields.decode(Int64.self, forKey: .compressedSize)
++        imageSHA256 = try fields.decode(String.self, forKey: .imageSHA256)
++        imageSize = try fields.decode(Int64.self, forKey: .imageSize)
++        guard !version.isEmpty,
++              version == version.trimmingCharacters(in: .whitespacesAndNewlines),
++              version.rangeOfCharacter(from: .controlCharacters) == nil,
++              let parsedURL = URL(string: address, encodingInvalidCharacters: false),
++              Self.isPublicHTTPS(parsedURL),
++              parsedURL.lastPathComponent == "cocode-linux.erofs.zst",
++              Self.isSHA256(compressedSHA256), Self.isSHA256(imageSHA256),
++              compressedSize > 0, imageSize > 0,
++              compressedSize <= Int64.max - imageSize - Self.spaceMargin
++        else { throw Failure.manifest }
++        url = parsedURL
++    }
++
++    static func bundled() throws -> Self {
++        guard let file = Bundle.main.url(forResource: "CoCodeGuest", withExtension: "json"),
++              let data = try? Data(contentsOf: file),
++              let manifest = try? JSONDecoder().decode(Self.self, from: data)
++        else { throw Failure.manifest }
++        return manifest
++    }
++
++    var isInstalled: Bool {
++        (try? Self.image.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true &&
++            (try? Data(contentsOf: Self.versionFile)) == Data(version.utf8)
++    }
++
++    func checkFreeSpace() throws {
++        let required = UInt64(compressedSize + imageSize + Self.spaceMargin)
++        let available = HostStorage.freeBytes()
++        guard available >= required else {
++            throw Failure.space(required: required, available: available)
++        }
++    }
++
++    func install(
++        progress: @escaping @Sendable (Int64) -> Void,
++        installing: @escaping @MainActor () -> Void
++    ) async throws {
++        let files = FileManager.default
++        let compressed = URL.cachesDirectory
++            .appendingPathComponent(".cocode-\(UUID().uuidString).zst")
++        let unpacked = RootfsImage.documentsDirectory
++            .appendingPathComponent(".cocode-\(UUID().uuidString).erofs")
++        defer {
++            try? files.removeItem(at: compressed)
++            try? files.removeItem(at: unpacked)
++        }
++
++        let configuration = URLSessionConfiguration.ephemeral
++        configuration.httpShouldSetCookies = false
++        configuration.httpCookieStorage = nil
++        configuration.urlCredentialStorage = nil
++        try await withCheckedThrowingContinuation { continuation in
++            let delegate = GuestImageDownload(
++                destination: compressed, size: compressedSize,
++                progress: progress, continuation: continuation
++            )
++            let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
++            session.downloadTask(with: url).resume()
++            session.finishTasksAndInvalidate()
++        }
++
++        await installing()
++        try await Task.detached(priority: .userInitiated) {
++            do {
++                guard try Self.verify(compressed, size: compressedSize, sha256: compressedSHA256) else {
++                    throw Failure.compressedIntegrity
++                }
++                try ZstdUtil.decompress(from: compressed, to: unpacked, sparse: false)
++                guard try Self.verify(unpacked, size: imageSize, sha256: imageSHA256) else {
++                    throw Failure.imageIntegrity
++                }
++
++                // A failed publication must not leave a marker for a different image.
++                if files.fileExists(atPath: Self.versionFile.path) {
++                    try files.removeItem(at: Self.versionFile)
++                }
++                let result = unpacked.path.withCString { source in
++                    Self.image.path.withCString { destination in Darwin.rename(source, destination) }
++                }
++                guard result == 0 else { throw Failure.install }
++                try Data(version.utf8).write(to: Self.versionFile, options: .atomic)
++            } catch let failure as Failure {
++                throw failure
++            } catch {
++                throw Failure.install
++            }
++        }.value
++    }
++
++    fileprivate static func isPublicHTTPS(_ url: URL) -> Bool {
++        url.scheme?.lowercased() == "https" && url.host?.isEmpty == false &&
++            url.user == nil && url.password == nil && url.fragment == nil
++    }
++
++    private static func isSHA256(_ digest: String) -> Bool {
++        digest.utf8.count == 64 && digest.utf8.allSatisfy {
++            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
++        }
++    }
++
++    private static func verify(_ file: URL, size: Int64, sha256: String) throws -> Bool {
++        let input = try FileHandle(forReadingFrom: file)
++        defer { try? input.close() }
++        guard try input.seekToEnd() == UInt64(size) else { return false }
++        try input.seek(toOffset: 0)
++        var digest = SHA256()
++        while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
++            digest.update(data: chunk)
++        }
++        return digest.finalize().map { String(format: "%02x", $0) }.joined() == sha256.lowercased()
++    }
++
++    enum Failure: LocalizedError {
++        case manifest
++        case space(required: UInt64, available: UInt64)
++        case network
++        case http(Int)
++        case compressedIntegrity
++        case imageIntegrity
++        case install
++
++        var errorDescription: String? {
++            switch self {
++            case .manifest:
++                String(localized: "This copy of CoCode is missing a valid Linux image manifest. Reinstall CoCode from a complete build.")
++            case let .space(required, available):
++                String(localized: "Installing the Linux environment needs \(Formats.size(bytes: required)) of free space. This device has \(Formats.size(bytes: available)) available. Free up space and try again.")
++            case .network:
++                String(localized: "The Linux image could not be downloaded. Check your internet connection and try again.")
++            case let .http(status):
++                String(localized: "The Linux image server returned HTTP \(status). Try again later.")
++            case .compressedIntegrity:
++                String(localized: "The downloaded Linux image did not match the expected size or checksum. Try again.")
++            case .imageIntegrity:
++                String(localized: "The unpacked Linux image did not match the expected size or checksum. Try again.")
++            case .install:
++                String(localized: "CoCode could not unpack or save the Linux image. Check available storage and try again.")
++            }
++        }
++    }
++}
++
++// URLSession calls these methods on its serial delegate queue. Only that
++// queue reads or writes the result, and it resumes the continuation once.
++private nonisolated final class GuestImageDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
++    private let destination: URL
++    private let size: Int64
++    private let progress: @Sendable (Int64) -> Void
++    private let continuation: CheckedContinuation<Void, any Error>
++    private var result: Result<Void, CoCodeGuestImage.Failure>?
++
++    init(
++        destination: URL, size: Int64,
++        progress: @escaping @Sendable (Int64) -> Void,
++        continuation: CheckedContinuation<Void, any Error>
++    ) {
++        self.destination = destination
++        self.size = size
++        self.progress = progress
++        self.continuation = continuation
++    }
++
++    func urlSession(
++        _ session: URLSession, task: URLSessionTask,
++        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
++        completionHandler: @escaping @Sendable (URLRequest?) -> Void
++    ) {
++        completionHandler(request.url.map(CoCodeGuestImage.isPublicHTTPS) == true ? request : nil)
++    }
++
++    func urlSession(
++        _ session: URLSession, downloadTask: URLSessionDownloadTask,
++        didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
++        totalBytesExpectedToWrite: Int64
++    ) {
++        guard result == nil else { return }
++        guard totalBytesWritten <= size else {
++            result = .failure(.compressedIntegrity)
++            downloadTask.cancel()
++            return
++        }
++        progress(totalBytesWritten)
++    }
++
++    func urlSession(
++        _ session: URLSession, downloadTask: URLSessionDownloadTask,
++        didFinishDownloadingTo location: URL
++    ) {
++        guard result == nil else { return }
++        guard let response = downloadTask.response as? HTTPURLResponse,
++              response.url.map(CoCodeGuestImage.isPublicHTTPS) == true else {
++            result = .failure(.network)
++            return
++        }
++        guard response.statusCode == 200 else {
++            result = .failure(.http(response.statusCode))
++            return
++        }
++        do {
++            // URLSession deletes its own temporary file when this method returns.
++            try FileManager.default.moveItem(at: location, to: destination)
++            result = .success(Void())
++        } catch {
++            result = .failure(.install)
++        }
++    }
++
++    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
++        if case let .failure(failure) = result {
++            continuation.resume(throwing: failure)
++        } else if error == nil, case .success = result {
++            continuation.resume()
++        } else {
++            continuation.resume(throwing: CoCodeGuestImage.Failure.network)
++        }
++    }
++}
+diff --git a/Kernarium/Kernarium/CoCodeGuestSetup.swift b/Kernarium/Kernarium/CoCodeGuestSetup.swift
+new file mode 100644
+index 0000000..190057b
+--- /dev/null
++++ b/Kernarium/Kernarium/CoCodeGuestSetup.swift
+@@ -0,0 +1,54 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++import Combine
++import Foundation
++
++@MainActor
++final class CoCodeGuestSetup: ObservableObject {
++    enum Stage {
++        case checking
++        case downloading(received: Int64, total: Int64)
++        case installing
++        case failed(String)
++        case ready(version: String)
++    }
++
++    @Published private(set) var stage: Stage = .checking
++    @Published private(set) var attempt = 0
++
++    var version: String? {
++        if case let .ready(version) = stage { return version }
++        return nil
++    }
++
++    func prepare() async {
++        let attempt = self.attempt
++        do {
++            let manifest = try CoCodeGuestImage.bundled()
++            if !manifest.isInstalled {
++                try manifest.checkFreeSpace()
++                let total = manifest.compressedSize
++                stage = .downloading(received: 0, total: total)
++                try await manifest.install { [weak self] bytes in
++                    Task { @MainActor in
++                        guard let self, self.attempt == attempt,
++                              case let .downloading(received, _) = self.stage,
++                              bytes > received else { return }
++                        self.stage = .downloading(received: bytes, total: total)
++                    }
++                } installing: {
++                    self.stage = .installing
++                }
++            }
++            stage = .ready(version: manifest.version)
++        } catch {
++            stage = .failed(error.localizedDescription)
++        }
++    }
++
++    func retry() {
++        guard case .failed = stage else { return }
++        stage = .checking
++        attempt += 1
++    }
++}
 diff --git a/Kernarium/Kernarium/ContentView.swift b/Kernarium/Kernarium/ContentView.swift
-index 8ee4cfa..7783af5 100644
+index 8ee4cfa..4f9addc 100644
 --- a/Kernarium/Kernarium/ContentView.swift
 +++ b/Kernarium/Kernarium/ContentView.swift
-@@ -52,7 +52,20 @@ struct ContentView: View {
+@@ -8,6 +8,7 @@ import SwiftUI
+ 
+ struct ContentView: View {
+     @StateObject private var serialConsole = SerialConsoleController()
++    @StateObject private var imageSetup = CoCodeGuestSetup()
+     @ObservedObject private var launcher = EmulatorLauncher.shared
+     @ObservedObject private var backgroundSession = BackgroundSession.shared
+     @ObservedObject private var backgroundJob = BackgroundJob.shared
+@@ -33,16 +34,18 @@ struct ContentView: View {
+                     .allowsHitTesting(false)
+                     .accessibilityHidden(true)
+ 
+-                GuestDisplayView(
+-                    keyboardVisible: $framebufferKeyboardVisible,
+-                    scale: EmulatorLauncher.shared.displayScale
+-                ) { view, geometry in
+-                    EmulatorLauncher.shared.start(view: view, geometry: geometry)
++                if imageSetup.version != nil {
++                    GuestDisplayView(
++                        keyboardVisible: $framebufferKeyboardVisible,
++                        scale: EmulatorLauncher.shared.displayScale
++                    ) { view, geometry in
++                        EmulatorLauncher.shared.start(view: view, geometry: geometry)
++                    }
++                    .opacity(guestViewMode == .framebuffer ? 1 : 0)
++                    .allowsHitTesting(guestViewMode == .framebuffer)
++                    .accessibilityHidden(guestViewMode != .framebuffer)
++                    .accessibilityIdentifier("framebufferView")
+                 }
+-                .opacity(guestViewMode == .framebuffer ? 1 : 0)
+-                .allowsHitTesting(guestViewMode == .framebuffer)
+-                .accessibilityHidden(guestViewMode != .framebuffer)
+-                .accessibilityIdentifier("framebufferView")
+ 
+                 SerialConsoleView(
+                     controller: serialConsole,
+@@ -52,7 +55,22 @@ struct ContentView: View {
                      .allowsHitTesting(guestViewMode == .serialConsole)
                      .accessibilityHidden(guestViewMode != .serialConsole)
  
@@ -76,10 +537,12 @@ index 8ee4cfa..7783af5 100644
 +                        .allowsHitTesting(guestViewMode == .cox)
 +                        .accessibilityHidden(guestViewMode != .cox)
 +                } else if launcher.phase == .running && guestViewMode == .cox {
-+                    ProgressView("Starting the CoCode guest…")
++                    ProgressView("Starting the Linux environment…")
 +                }
 +
-+                if let issue = launcher.launchIssue {
++                if imageSetup.version == nil {
++                    imageSetupView
++                } else if let issue = launcher.launchIssue {
 +                    ContentUnavailableView(
 +                        "CoCode could not start", systemImage: "externaldrive", description: Text(issue)
 +                    )
@@ -87,23 +550,27 @@ index 8ee4cfa..7783af5 100644
                      MemoryRefusalNotice(reason: refusal)
                          .padding()
                  } else if let shortage = launcher.startShortage {
-@@ -97,7 +110,31 @@ struct ContentView: View {
+@@ -97,7 +115,35 @@ struct ContentView: View {
                  SceneCoverage.cornerOffsetEdges(coversScreen: sceneCoversScreen),
                  sizeToFit: true
              )
 -            floatingButtons
-+            if guestViewMode != .cox {
++            if guestViewMode != .cox && imageSetup.version != nil {
 +                floatingButtons
 +            }
 +        }
 +        .safeAreaInset(edge: .top, spacing: 0) {
 +            HStack {
-+                Picker("View", selection: $guestViewMode) {
-+                    Text("Cox").tag(GuestViewMode.cox)
-+                    Text("Console").tag(GuestViewMode.serialConsole)
-+                    Text("Display").tag(GuestViewMode.framebuffer)
++                if imageSetup.version != nil {
++                    Picker("View", selection: $guestViewMode) {
++                        Text("Cox").tag(GuestViewMode.cox)
++                        Text("Console").tag(GuestViewMode.serialConsole)
++                        Text("Display").tag(GuestViewMode.framebuffer)
++                    }
++                    .pickerStyle(.segmented)
++                } else {
++                    Spacer()
 +                }
-+                .pickerStyle(.segmented)
 +                if guestViewMode == .cox {
 +                    Button("Emulator settings", systemImage: "gearshape") {
 +                        settingsPresented = true
@@ -120,7 +587,60 @@ index 8ee4cfa..7783af5 100644
          }
          .ignoresSafeArea(.keyboard)
          .overlay {
-@@ -191,7 +228,6 @@ struct ContentView: View {
+@@ -118,7 +164,10 @@ struct ContentView: View {
+             SceneCoverageReader { sceneCoversScreen = $0 }
+         }
+         .sheet(isPresented: $settingsPresented) {
+-            EmulatorSettingsView()
++            EmulatorSettingsView(imageSetup: imageSetup)
++        }
++        .task(id: imageSetup.attempt) {
++            await imageSetup.prepare()
+         }
+         .onAppear {
+             serialConsole.startObserving()
+@@ -178,6 +227,40 @@ struct ContentView: View {
+         }
+     }
+ 
++    @ViewBuilder
++    private var imageSetupView: some View {
++        switch imageSetup.stage {
++        case .checking:
++            ProgressView("Checking the Linux environment…")
++        case let .downloading(received, total):
++            let receivedSize = Formats.size(bytes: UInt64(received))
++            let totalSize = Formats.size(bytes: UInt64(total))
++            let fraction = Double(received) / Double(total)
++            let percent = fraction.formatted(.percent.precision(.fractionLength(0)))
++            ProgressView(value: fraction) {
++                Text("Downloading the Linux environment…")
++            } currentValueLabel: {
++                Text("\(percent) · \(receivedSize) of \(totalSize)")
++            }
++            .frame(maxWidth: 340)
++            .padding(24)
++        case .installing:
++            ProgressView("Verifying and installing the Linux environment…")
++                .padding(24)
++        case let .failed(message):
++            ContentUnavailableView {
++                Label("CoCode could not start", systemImage: "externaldrive")
++            } description: {
++                Text(message)
++            } actions: {
++                Button("Retry") { imageSetup.retry() }
++                    .buttonStyle(.borderedProminent)
++            }
++        case .ready:
++            EmptyView()
++        }
++    }
++
+     @ViewBuilder
+     private var floatingButtons: some View {
+         GlassEffectContainer(spacing: FloatingControlMetrics.spacing) {
+@@ -191,7 +274,6 @@ struct ContentView: View {
              if keepRunningChosen && launcher.phase == .running {
                  keepRunningButton
              }
@@ -128,7 +648,29 @@ index 8ee4cfa..7783af5 100644
              keyboardButton
              specialKeysRow
          }
-@@ -254,17 +290,6 @@ struct ContentView: View {
+@@ -219,7 +301,7 @@ struct ContentView: View {
+         guard let guest = launcher.runningGuestName else { return }
+         backgroundJob.start(
+             limitMinutes: BackgroundSettings().limitMinutes(forGuest: guest),
+-            guestName: (guest as NSString).deletingPathExtension
++            guestName: String(localized: "Linux environment")
+         )
+     }
+ 
+@@ -240,9 +322,9 @@ struct ContentView: View {
+ 
+     private var keepRunningLabel: String {
+         switch backgroundJob.state {
+-        case .idle: "Keep the guest running in the background"
+-        case .submitted: "Starting to keep the guest running"
+-        case .running: "Stop keeping the guest running"
++        case .idle: String(localized: "Keep the Linux environment running in the background")
++        case .submitted: String(localized: "Starting a background task for the Linux environment")
++        case .running: String(localized: "Stop the background task for the Linux environment")
+         }
+     }
+ 
+@@ -254,21 +336,10 @@ struct ContentView: View {
          backgroundJob.reconcile(mode: mode)
      }
  
@@ -146,7 +688,12 @@ index 8ee4cfa..7783af5 100644
      private var settingsButton: some View {
          floatingIconButton(
              systemName: "gearshape",
-@@ -278,6 +303,7 @@ struct ContentView: View {
+-            accessibilityLabel: "Emulator settings",
++            accessibilityLabel: String(localized: "Emulator settings"),
+             identifier: "settingsButton"
+         ) {
+             settingsPresented = true
+@@ -278,6 +349,7 @@ struct ContentView: View {
      /// Whether the view on screen holds the keyboard.
      private var keyboardVisible: Bool {
          switch guestViewMode {
@@ -154,7 +701,29 @@ index 8ee4cfa..7783af5 100644
          case .framebuffer: framebufferKeyboardVisible
          case .serialConsole: serialConsole.isFocused
          }
-@@ -360,6 +386,8 @@ struct ContentView: View {
+@@ -289,8 +361,8 @@ struct ContentView: View {
+                 ? "keyboard.chevron.compact.down"
+                 : "keyboard",
+             accessibilityLabel: keyboardVisible
+-                ? "Hide keyboard"
+-                : "Show keyboard",
++                ? String(localized: "Hide keyboard")
++                : String(localized: "Show keyboard"),
+             identifier: "keyboardButton",
+             action: toggleKeyboard
+         )
+@@ -309,8 +381,8 @@ struct ContentView: View {
+                     ? "chevron.right"
+                     : "chevron.left",
+                 accessibilityLabel: specialKeysExpanded
+-                    ? "Hide special keys"
+-                    : "Show special keys",
++                    ? String(localized: "Hide special keys")
++                    : String(localized: "Show special keys"),
+                 identifier: "specialKeysButton"
+             ) {
+                 withAnimation {
+@@ -360,6 +432,8 @@ struct ContentView: View {
      /// text reaches what the user is looking at.
      private func toggleKeyboard() {
          switch guestViewMode {
@@ -163,7 +732,7 @@ index 8ee4cfa..7783af5 100644
          case .framebuffer:
              framebufferKeyboardVisible.toggle()
          case .serialConsole:
-@@ -370,26 +398,14 @@ struct ContentView: View {
+@@ -370,26 +444,14 @@ struct ContentView: View {
              }
          }
      }
@@ -192,7 +761,114 @@ index 8ee4cfa..7783af5 100644
  }
  
  /// How this launch's guest run ended, as the application reports it.
-@@ -696,6 +712,33 @@ enum OverlayDisk {
+@@ -412,20 +474,19 @@ struct GuestRunEnd: Equatable {
+     }
+ 
+     var title: String {
+-        if restartedInALoop { return "Guest kept restarting" }
+-        return shutDown ? "Guest shut down" : "Guest stopped with an error"
++        if restartedInALoop { return String(localized: "The Linux environment kept restarting") }
++        return shutDown
++            ? String(localized: "The Linux environment shut down")
++            : String(localized: "The Linux environment stopped with an error")
+     }
+ 
+     var message: String {
+-        let relaunch = "Relaunch Kernarium to start it again."
+         if restartedInALoop {
+-            return "The guest restarted itself again and again within " +
+-                "seconds of booting, so Kernarium stopped booting it. " +
+-                relaunch
++            return String(localized: "The Linux environment restarted repeatedly just after boot, so CoCode stopped it. Reopen CoCode to try again.")
+         }
+         return shutDown
+-            ? relaunch
+-            : "The runtime returned \(result). \(relaunch)"
++            ? String(localized: "Reopen CoCode to start the Linux environment again.")
++            : String(localized: "The runtime returned \(result). Reopen CoCode to try again.")
+     }
+ 
+     var systemName: String {
+@@ -461,9 +522,8 @@ private struct MemoryRefusalNotice: View {
+     var body: some View {
+         GuestNoticeCard(
+             systemName: "memorychip",
+-            title: "The virtual machine can\u{2019}t start",
+-            message: reason + ". Choose another size in Emulator " +
+-                "settings and relaunch Kernarium.",
++            title: String(localized: "The Linux environment could not start"),
++            message: String(localized: "\(reason) Choose another size in Emulator settings and reopen CoCode."),
+             messageStyle: .primary
+         )
+         .accessibilityElement(children: .combine)
+@@ -481,9 +541,8 @@ private struct StartShortageNotice: View {
+         VStack(spacing: 14) {
+             GuestNoticeCard(
+                 systemName: "externaldrive.badge.exclamationmark",
+-                title: StartSpace.title,
+-                message: shortage.message(device: EmulatorLauncher.deviceName)
+-                    + " " + shortage.advice(device: EmulatorLauncher.deviceName),
++                title: String(localized: "Not enough free space"),
++                message: String(localized: "Starting the Linux environment needs \(Formats.size(bytes: shortage.neededBytes)) of free space. This device has \(Formats.size(bytes: shortage.freeBytes)) available. Free up space in Settings › General › \(EmulatorLauncher.deviceName) Storage."),
+                 messageStyle: .primary
+             )
+             Button("Check again", action: checkAgain)
+@@ -537,15 +596,10 @@ struct GPUBudgetWarning: Equatable {
+         floorMiB = mebibytes(plan.budget_bytes)
+     }
+ 
+-    var title: String { "Memory may run short" }
++    var title: String { String(localized: "Memory may run short") }
+ 
+     var message: String {
+-        "The system lets Kernarium use \(limitMiB) MiB. After the guest's " +
+-            "\(guestMemoryMiB) MiB and what the emulator keeps beside it, " +
+-            "\(availableMiB) MiB are left for graphics, and graphics are " +
+-            "given \(floorMiB) MiB at least. The guest starts anyway, and " +
+-            "the system is likely to end Kernarium. Giving the guest less " +
+-            "memory in Emulator settings avoids it."
++        String(localized: "The system lets CoCode use \(limitMiB) MiB. After allocating \(guestMemoryMiB) MiB to the Linux environment and reserving memory for the emulator, \(availableMiB) MiB remain for graphics, which need at least \(floorMiB) MiB. iOS is likely to close CoCode. Reduce the Linux RAM in Emulator settings.")
+     }
+ 
+     var systemName: String { "exclamationmark.triangle" }
+@@ -564,7 +618,7 @@ private struct GPUBudgetWarningNotice: View {
+                 title: warning.title,
+                 message: warning.message,
+                 messageStyle: .primary,
+-                footer: "Tap to dismiss"
++                footer: String(localized: "Tap to dismiss")
+             )
+         }
+         .buttonStyle(.plain)
+@@ -589,7 +643,7 @@ private struct GuestRestartedNotice: View {
+                 title: restart.title,
+                 message: restart.message,
+                 messageStyle: .primary,
+-                footer: "Tap to dismiss"
++                footer: String(localized: "Tap to dismiss")
+             )
+         }
+         .buttonStyle(.plain)
+@@ -665,12 +719,12 @@ enum GuestSpecialKey: UInt16, CaseIterable, Identifiable {
+ 
+     var accessibilityLabel: String {
+         switch self {
+-        case .power: "Power"
+-        case .volumeUp: "Volume up"
+-        case .volumeDown: "Volume down"
+-        case .escape: "Escape"
+-        case .tab: "Tab"
+-        case .home: "Home"
++        case .power: String(localized: "Power")
++        case .volumeUp: String(localized: "Volume up")
++        case .volumeDown: String(localized: "Volume down")
++        case .escape: String(localized: "Escape")
++        case .tab: String(localized: "Tab")
++        case .home: String(localized: "Home")
+         }
+     }
+ 
+@@ -696,6 +750,33 @@ enum OverlayDisk {
          return UInt64(sizeGiB) * 1024 * 1024 * 1024
      }
  
@@ -226,7 +902,7 @@ index 8ee4cfa..7783af5 100644
      static func recreate(
          sizeGiB: Int,
          in directory: URL = FileManager.default.temporaryDirectory
-@@ -892,6 +935,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -892,6 +973,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
      /// Set while the device has too little free space for the guest to start.
      /// Nothing started: the guest starts once there is room and the person
      /// asks again.
@@ -234,7 +910,7 @@ index 8ee4cfa..7783af5 100644
      @Published private(set) var startShortage: StartSpace?
      /// Set when the memory this launch states is a size the runtime refuses
      /// (`MemoryRefusal`): nothing started, and a relaunch is what starts it.
-@@ -954,16 +998,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -954,16 +1036,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          geometry: GuestDisplayGeometry
      ) {
          guard phase == .idle else { return }
@@ -247,23 +923,40 @@ index 8ee4cfa..7783af5 100644
 +        let rootfsFilename = RootfsImage.defaultFilename
          guard let selection = RootfsImage.selection(named: rootfsFilename) else {
 -            print("Kernarium: Documents/\(rootfsFilename) is missing")
-+            launchIssue = "Copy cocode-linux.erofs to CoCode’s Documents folder, then reopen the app."
++            launchIssue = String(localized: "The installed Linux image is missing. Reopen CoCode to download it again.")
              return
          }
 +        launchIssue = nil
          // The runtime refuses a size this host does not admit; the settings
          // never offer one, so this says why rather than end on its bare result.
          guard kernarium_runtime_loader_guest_memory_admitted(
-@@ -1003,7 +1043,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -972,10 +1050,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+             // Every layout of the guest view asks to start while the run is
+             // idle, so a refusal is said, and published, once.
+             if memoryRefusal == nil {
+-                let reason = MemoryRefusal.reason(
+-                    memoryMiB: configuration.guestMemoryMiB,
+-                    ceilingMiB: EmulatorConfiguration.guestMemoryCeilingMiB
+-                )
++                let memory = configuration.guestMemoryMiB
++                let ceiling = EmulatorConfiguration.guestMemoryCeilingMiB
++                let size = Formats.size(mib: memory)
++                let reason = memory > ceiling
++                    ? String(localized: "This device cannot allocate \(size) to the Linux environment. The limit is \(Formats.size(mib: ceiling)).")
++                    : String(localized: "The Linux environment cannot start with \(size) of memory.")
+                 print("Kernarium: cannot start the guest: \(reason)")
+                 memoryRefusal = reason
+             }
+@@ -1003,7 +1083,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          guard kernarium_runtime_loader_select(
              selection.flavor.rawValue
          ) == 0 else {
 -            print("Kernarium: cannot load the runtime")
-+            launchIssue = "The Linux runtime framework could not load."
++            launchIssue = String(localized: "The Linux runtime framework could not load.")
              return
          }
          // A guest that restarts itself is booted again inside the run; the
-@@ -1115,30 +1155,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1115,30 +1195,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          return run()
      }
  
@@ -293,22 +986,22 @@ index 8ee4cfa..7783af5 100644
 -                "Kernarium: cannot create " +
 -                "\(configuration.overlaySizeGiB) GiB overlay disk: \(error)"
 -            )
-+            launchIssue = "The persistent guest disk could not be opened. Check available storage."
++            launchIssue = String(localized: "The persistent Linux disk could not be opened. Check available storage.")
 +            print("CoCode: cannot prepare guest disk: \(error)")
              return nil
          }
      }
-@@ -1175,6 +1199,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1175,6 +1239,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          stopThermalObservation()
          restartIndicator.runEnded()
          restarting = false
 +        if result == Int32(KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED) {
-+            launchIssue = "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode."
++            launchIssue = String(localized: "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode.")
 +        }
          phase = .ended(result: result)
          UIApplication.shared.isIdleTimerDisabled = false
          print("Kernarium: runtime returned \(result)")
-@@ -1208,7 +1235,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1208,7 +1275,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
                  atPath: bundle.dataDisk.path
              )
          } else {
@@ -319,7 +1012,7 @@ index 8ee4cfa..7783af5 100644
      }
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..6b8ff56
+index 0000000..3a3958f
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
 @@ -0,0 +1,175 @@
@@ -352,7 +1045,7 @@ index 0000000..6b8ff56
 +                }
 +            } else if let rules {
 +                CoxWebView(rules: rules) {
-+                    failure = "The Cox page could not load. Check the guest console."
++                    failure = String(localized: "The Cox page could not load. Check the guest console.")
 +                }
 +            } else {
 +                ProgressView("Waiting for Cox…")
@@ -368,13 +1061,13 @@ index 0000000..6b8ff56
 +                )
 +            } catch {
 +                if !Task.isCancelled {
-+                    failure = "WebKit could not install the Cox origin policy."
++                    failure = String(localized: "WebKit could not install the Cox origin policy.")
 +                }
 +                return
 +            }
 +            guard let compiled else {
 +                if !Task.isCancelled {
-+                    failure = "WebKit could not install the Cox origin policy."
++                    failure = String(localized: "WebKit could not install the Cox origin policy.")
 +                }
 +                return
 +            }
@@ -396,7 +1089,7 @@ index 0000000..6b8ff56
 +                try? await Task.sleep(for: .seconds(1))
 +            }
 +            if !Task.isCancelled {
-+                failure = "Cox did not answer. Check the guest console for startup errors."
++                failure = String(localized: "Cox did not answer. Check the guest console for startup errors.")
 +            }
 +        }
 +    }
@@ -499,7 +1192,7 @@ index 0000000..6b8ff56
 +    }
 +}
 diff --git a/Kernarium/Kernarium/EmulatorConfiguration.swift b/Kernarium/Kernarium/EmulatorConfiguration.swift
-index fb5fc1a..d66537e 100644
+index fb5fc1a..214cce7 100644
 --- a/Kernarium/Kernarium/EmulatorConfiguration.swift
 +++ b/Kernarium/Kernarium/EmulatorConfiguration.swift
 @@ -398,10 +398,7 @@ enum GuestSelection {
@@ -510,15 +1203,23 @@ index fb5fc1a..d66537e 100644
 -    /// which carries its own session setup. It applies only while the
 -    /// settings store no name: a stored name, `rootfs.erofs` included, is kept.
 -    static let defaultFilename = "kde-20260929-r2.erofs"
-+    static let defaultFilename = "cocode-linux.erofs"
++    nonisolated static let defaultFilename = "cocode-linux.erofs"
      static let environmentKey = "KERNARIUM_ROOTFS"
  
      nonisolated static var documentsDirectory: URL {
 diff --git a/Kernarium/Kernarium/EmulatorSettingsView.swift b/Kernarium/Kernarium/EmulatorSettingsView.swift
-index e722b7d..854803e 100644
+index e722b7d..15ca1e8 100644
 --- a/Kernarium/Kernarium/EmulatorSettingsView.swift
 +++ b/Kernarium/Kernarium/EmulatorSettingsView.swift
-@@ -14,8 +14,6 @@ struct EmulatorSettingsView: View {
+@@ -7,6 +7,7 @@ import UIKit
+ struct EmulatorSettingsView: View {
+     @Environment(\.dismiss) private var dismiss
+     @ObservedObject private var microphone = MicrophoneSetting.shared
++    @ObservedObject private var imageSetup: CoCodeGuestSetup
+ 
+     @State private var configuration: EmulatorConfiguration
+     @State private var backgroundMode: BackgroundMode
+@@ -14,8 +15,6 @@ struct EmulatorSettingsView: View {
  
      private let maximumVCPUCount: Int
      private let defaults: UserDefaults
@@ -527,7 +1228,7 @@ index e722b7d..854803e 100644
  
      /// The most guest RAM the memory limit leaves at the chosen vCPU count.
      private var maximumGuestMemoryMiB: Int {
-@@ -24,13 +22,6 @@ struct EmulatorSettingsView: View {
+@@ -24,18 +23,13 @@ struct EmulatorSettingsView: View {
          )
      }
  
@@ -541,7 +1242,15 @@ index e722b7d..854803e 100644
      init(
          defaults: UserDefaults = .standard,
          physicalProcessorCount: Int = EmulatorConfiguration.physicalProcessorCount,
-@@ -45,14 +36,6 @@ struct EmulatorSettingsView: View {
+-        documentsDirectory: URL = RootfsImage.documentsDirectory
++        documentsDirectory: URL = RootfsImage.documentsDirectory,
++        imageSetup: CoCodeGuestSetup = CoCodeGuestSetup()
+     ) {
++        self.imageSetup = imageSetup
+         let loaded = EmulatorConfiguration.load(
+             defaults: defaults,
+             physicalProcessorCount: physicalProcessorCount,
+@@ -45,14 +39,6 @@ struct EmulatorSettingsView: View {
              physicalProcessorCount: physicalProcessorCount
          )
          self.defaults = defaults
@@ -556,7 +1265,48 @@ index e722b7d..854803e 100644
          _configuration = State(initialValue: loaded)
          let background = BackgroundSettings(defaults: defaults)
          _backgroundMode = State(
-@@ -137,12 +120,14 @@ struct EmulatorSettingsView: View {
+@@ -89,17 +75,13 @@ struct EmulatorSettingsView: View {
+                         .accessibilityIdentifier("retinaModeToggle")
+ 
+                     Toggle(
+-                        "Automatically resize guest display",
++                        "Automatically resize the Linux display",
+                         isOn: $configuration.autoResizeGuest
+                     )
+                     .accessibilityIdentifier("autoResizeGuestToggle")
+ 
+                     Text(
+-                        "Controls whether settled view-size changes resize " +
+-                            "the guest. When off, the guest keeps its " +
+-                            "resolution and is fitted to the view. A " +
+-                            "guest-selected resolution pauses automatic " +
+-                            "resizing until the guest restarts."
++                        "Automatically adjusts the Linux display when the view finishes resizing. When off, the display keeps its resolution and scales to fit. A resolution selected within Linux pauses automatic resizing until Linux restarts."
+                     )
+                     .font(.footnote)
+                     .foregroundStyle(.secondary)
+@@ -115,7 +97,7 @@ struct EmulatorSettingsView: View {
+                     }
+ 
+                     Stepper(
+-                        "Guest RAM: \(configuration.guestMemoryMiB) MiB",
++                        "Linux RAM: \(configuration.guestMemoryMiB) MiB",
+                         value: $configuration.guestMemoryMiB,
+                         in: EmulatorConfiguration.guestMemoryRangeMiB
+                             .lowerBound...maximumGuestMemoryMiB,
+@@ -126,23 +108,21 @@ struct EmulatorSettingsView: View {
+                     if maximumGuestMemoryMiB <
+                         EmulatorConfiguration.guestMemoryCeilingMiB {
+                         Text(
+-                            "With \(configuration.vCPUCount) \(configuration.vCPUCount == 1 ? "vCPU" : "vCPUs") the " +
+-                                "system leaves room for at most " +
+-                                "\(maximumGuestMemoryMiB) MiB of guest RAM " +
+-                                "beside graphics and the emulator. More " +
+-                                "vCPUs lower it."
++                            "At \(configuration.vCPUCount) virtual CPU cores, this device can allocate at most \(maximumGuestMemoryMiB) MiB of RAM to the Linux environment. More cores reduce this limit."
+                         )
+                         .font(.footnote)
+                         .foregroundStyle(.secondary)
                          .accessibilityIdentifier("guestMemoryLimitNote")
                      }
  
@@ -568,7 +1318,7 @@ index e722b7d..854803e 100644
 -                    .accessibilityIdentifier("overlaySizeStepper")
 +                    if !FileManager.default.fileExists(atPath: OverlayDisk.persistentURL.path) {
 +                        Stepper(
-+                            "Guest disk: \(configuration.overlaySizeGiB) GiB",
++                            "Linux disk: \(configuration.overlaySizeGiB) GiB",
 +                            value: $configuration.overlaySizeGiB,
 +                            in: EmulatorConfiguration.overlaySizeRangeGiB
 +                        )
@@ -577,7 +1327,7 @@ index e722b7d..854803e 100644
                  }
  
                  // Unlike the rest of the form this applies at once, whatever
-@@ -180,44 +165,12 @@ struct EmulatorSettingsView: View {
+@@ -180,44 +160,15 @@ struct EmulatorSettingsView: View {
                  }
  
                  Section("Storage") {
@@ -588,7 +1338,9 @@ index e722b7d..854803e 100644
 -                        ForEach(rootfsFilenames, id: \.self) { filename in
 -                            Text(filename).tag(filename)
 -                        }
--                    }
++                    if let version = imageSetup.version {
++                        Text("Installed Linux image version: \(version)")
+                     }
 -                    .accessibilityIdentifier("rootfsPicker")
 -
 -                    if androidBundleSelected {
@@ -614,7 +1366,7 @@ index e722b7d..854803e 100644
 -                        "EROFS images and .\(GuestBundle.pathExtension) " +
 -                        "guest bundles are loaded from Documents."
 -                    )
-+                    Text("CoCode boots cocode-linux.erofs from Documents.")
++                    Text("CoCode downloads the Linux image when it is first needed and when the bundled version changes. Your Linux files are kept on a separate disk.")
                  }
  
                  Section("Background") {
@@ -624,7 +1376,7 @@ index e722b7d..854803e 100644
                          selection: $backgroundMode
                      ) {
                          ForEach(offeredBackgroundModes) { mode in
-@@ -245,13 +198,6 @@ struct EmulatorSettingsView: View {
+@@ -245,13 +196,6 @@ struct EmulatorSettingsView: View {
                          .font(.footnote)
                          .foregroundStyle(.secondary)
                  }
@@ -638,6 +1390,1221 @@ index e722b7d..854803e 100644
  
                  Section {
                      Text("Changes take effect the next time the app launches.")
+diff --git a/Kernarium/Kernarium/InfoPlist.xcstrings b/Kernarium/Kernarium/InfoPlist.xcstrings
+new file mode 100644
+index 0000000..60837f2
+--- /dev/null
++++ b/Kernarium/Kernarium/InfoPlist.xcstrings
+@@ -0,0 +1,38 @@
++{
++  "sourceLanguage": "en",
++  "strings": {
++    "CFBundleDisplayName": {
++      "localizations": {
++        "en": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode"
++          }
++        },
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode"
++          }
++        }
++      }
++    },
++    "NSMicrophoneUsageDescription": {
++      "localizations": {
++        "en": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode uses the microphone only when you enable Microphone in Emulator settings so programs in the Linux environment can record audio."
++          }
++        },
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "只有在“模拟器设置”中开启麦克风后，CoCode 才会使用麦克风，让 Linux 环境中的程序录音。"
++          }
++        }
++      }
++    }
++  },
++  "version": "1.0"
++}
+diff --git a/Kernarium/Kernarium/Localizable.xcstrings b/Kernarium/Kernarium/Localizable.xcstrings
+new file mode 100644
+index 0000000..747d909
+--- /dev/null
++++ b/Kernarium/Kernarium/Localizable.xcstrings
+@@ -0,0 +1,1136 @@
++{
++  "sourceLanguage": "en",
++  "strings": {
++    "%@ · %@ of %@": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%1$@ · 已下载 %2$@，共 %3$@"
++          }
++        }
++      }
++    },
++    "%@ Choose another size in Emulator settings and reopen CoCode.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%@ 请在“模拟器设置”中选择其他内存大小，然后重新打开 CoCode。"
++          }
++        }
++      }
++    },
++    "%@ is running": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%@正在运行"
++          }
++        }
++      }
++    },
++    "%lld hours": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%lld 小时"
++          }
++        }
++      }
++    },
++    "%lld minutes": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%lld 分钟"
++          }
++        }
++      }
++    },
++    "%lld minutes left": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "剩余 %lld 分钟"
++          }
++        }
++      }
++    },
++    "1 hour": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "1 小时"
++          }
++        }
++      }
++    },
++    "1 minute": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "1 分钟"
++          }
++        }
++      }
++    },
++    "1 minute left": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "剩余 1 分钟"
++          }
++        }
++      }
++    },
++    "At %lld virtual CPU cores, this device can allocate at most %lld MiB of RAM to the Linux environment. More cores reduce this limit.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "使用 %1$lld 个虚拟 CPU 核时，此设备最多可为 Linux 环境分配 %2$lld MiB 内存。增加核数会降低此上限。"
++          }
++        }
++      }
++    },
++    "Automatically adjusts the Linux display when the view finishes resizing. When off, the display keeps its resolution and scales to fit. A resolution selected within Linux pauses automatic resizing until Linux restarts.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "视图大小调整完成后，自动调整 Linux 显示分辨率。关闭后，显示内容会保持原分辨率并缩放以适应视图。在 Linux 内更改分辨率后，自动调整会暂停，直到 Linux 重启。"
++          }
++        }
++      }
++    },
++    "Automatically resize the Linux display": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "自动调整 Linux 显示分辨率"
++          }
++        }
++      }
++    },
++    "Background": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "后台运行"
++          }
++        }
++      }
++    },
++    "Cancel": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "取消"
++          }
++        }
++      }
++    },
++    "Changes take effect the next time the app launches.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "更改将在下次打开应用时生效。"
++          }
++        }
++      }
++    },
++    "Check again": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "重新检查"
++          }
++        }
++      }
++    },
++    "Checking the Linux environment…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在检查 Linux 环境…"
++          }
++        }
++      }
++    },
++    "CoCode closed while it was in the background, so the Linux environment started again from boot.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 在后台关闭，Linux 环境已重新启动。"
++          }
++        }
++      }
++    },
++    "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 无法打开本地 3773 端口。请关闭占用该端口的应用，然后重新打开 CoCode。"
++          }
++        }
++      }
++    },
++    "CoCode could not start": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法启动 CoCode"
++          }
++        }
++      }
++    },
++    "CoCode could not unpack or save the Linux image. Check available storage and try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 无法解压或保存 Linux 镜像。请检查可用存储空间后重试。"
++          }
++        }
++      }
++    },
++    "CoCode downloads the Linux image when it is first needed and when the bundled version changes. Your Linux files are kept on a separate disk.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 会在首次启动以及应用要求的版本变更时下载 Linux 镜像。你的 Linux 文件保存在单独的数据磁盘中。"
++          }
++        }
++      }
++    },
++    "Console": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "控制台"
++          }
++        }
++      }
++    },
++    "Cox": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox"
++          }
++        }
++      }
++    },
++    "Cox did not answer. Check the guest console for startup errors.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox 没有响应，请在 Linux 控制台查看启动错误。"
++          }
++        }
++      }
++    },
++    "Cox is unavailable": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox 暂不可用"
++          }
++        }
++      }
++    },
++    "Display": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "显示"
++          }
++        }
++      }
++    },
++    "Downloading the Linux environment…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在下载 Linux 环境…"
++          }
++        }
++      }
++    },
++    "Emulator settings": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "模拟器设置"
++          }
++        }
++      }
++    },
++    "Escape": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "退出键（Esc）"
++          }
++        }
++      }
++    },
++    "Finishing": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "即将结束"
++          }
++        }
++      }
++    },
++    "Hardware": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "硬件"
++          }
++        }
++      }
++    },
++    "Hide keyboard": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "隐藏键盘"
++          }
++        }
++      }
++    },
++    "Hide special keys": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "隐藏特殊按键"
++          }
++        }
++      }
++    },
++    "Home": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "主屏幕键"
++          }
++        }
++      }
++    },
++    "Installed Linux image version: %@": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "已安装的 Linux 镜像版本：%@"
++          }
++        }
++      }
++    },
++    "Installing the Linux environment needs %@ of free space. This device has %@ available. Free up space and try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "安装 Linux 环境需要 %1$@ 可用空间，当前仅剩 %2$@。请释放空间后重试。"
++          }
++        }
++      }
++    },
++    "iOS has not allowed CoCode to use the microphone, so programs in the Linux environment record silence. Allow CoCode to use it in Settings.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "iOS 尚未允许 CoCode 使用麦克风，Linux 环境中的程序只能录到静音。请在“设置”中为 CoCode 开启麦克风权限。"
++          }
++        }
++      }
++    },
++    "Keep running for": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "继续运行时长"
++          }
++        }
++      }
++    },
++    "Keep running for a set time": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "在指定时间内继续运行"
++          }
++        }
++      }
++    },
++    "Keep running in Picture in Picture": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "在画中画中继续运行"
++          }
++        }
++      }
++    },
++    "Keep the Linux environment running in the background": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "让 Linux 环境在后台继续运行"
++          }
++        }
++      }
++    },
++    "Linux disk: %lld GiB": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 数据磁盘：%lld GiB"
++          }
++        }
++      }
++    },
++    "Linux environment": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境"
++          }
++        }
++      }
++    },
++    "Linux RAM: %lld MiB": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境内存：%lld MiB"
++          }
++        }
++      }
++    },
++    "Memory may run short": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "内存可能不足"
++          }
++        }
++      }
++    },
++    "Microphone": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "麦克风"
++          }
++        }
++      }
++    },
++    "Not enough free space": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可用空间不足"
++          }
++        }
++      }
++    },
++    "Off. Programs in the Linux environment record silence. CoCode does not use the microphone. This change takes effect immediately.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "已关闭。Linux 环境中的程序只能录到静音，CoCode 不会使用麦克风。更改立即生效。"
++          }
++        }
++      }
++    },
++    "On. Programs in the Linux environment can record from this device’s microphone. iOS shows an indicator while they record. This change takes effect immediately.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "已开启。Linux 环境中的程序可以使用本机麦克风录音，录音时 iOS 会显示提示。更改立即生效。"
++          }
++        }
++      }
++    },
++    "Only %@ of free space remains and the Linux environment could not pause. Shut it down before space runs out, or free up space and check again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可用空间仅剩 %@，Linux 环境未能暂停。请在空间用尽前关机，或释放空间后重新检查。"
++          }
++        }
++      }
++    },
++    "Only %@ of free space remains. Free up at least %@ in total before trying to resume again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可用空间仅剩 %1$@。请释放空间，确保至少有 %2$@ 可用空间后再尝试恢复。"
++          }
++        }
++      }
++    },
++    "Only %@ of free space remains. Free up at least %@ in total, then resume. You can also shut down the Linux environment.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可用空间仅剩 %1$@。请释放空间，确保至少有 %2$@ 可用空间后再恢复。你也可以关闭 Linux 环境。"
++          }
++        }
++      }
++    },
++    "Only %@ of free space remains. The Linux environment is saving its data.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可用空间仅剩 %@。Linux 环境正在保存数据。"
++          }
++        }
++      }
++    },
++    "Open Settings": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "打开系统设置"
++          }
++        }
++      }
++    },
++    "Pause the Linux environment": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "暂停 Linux 环境"
++          }
++        }
++      }
++    },
++    "Pausing the Linux environment": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在暂停 Linux 环境"
++          }
++        }
++      }
++    },
++    "Pausing…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在暂停…"
++          }
++        }
++      }
++    },
++    "Power": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "电源"
++          }
++        }
++      }
++    },
++    "Reopen CoCode to start the Linux environment again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "重新打开 CoCode 即可再次启动 Linux 环境。"
++          }
++        }
++      }
++    },
++    "Restarting": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在重启"
++          }
++        }
++      }
++    },
++    "Resume": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "恢复"
++          }
++        }
++      }
++    },
++    "Resuming…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在恢复…"
++          }
++        }
++      }
++    },
++    "Retina mode": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "视网膜显示模式"
++          }
++        }
++      }
++    },
++    "Retry": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "重试"
++          }
++        }
++      }
++    },
++    "Save": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "保存"
++          }
++        }
++      }
++    },
++    "Show keyboard": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "显示键盘"
++          }
++        }
++      }
++    },
++    "Show special keys": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "显示特殊按键"
++          }
++        }
++      }
++    },
++    "Shut down": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "关机"
++          }
++        }
++      }
++    },
++    "Shutting down…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在关机…"
++          }
++        }
++      }
++    },
++    "Starting a background task for the Linux environment": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在为 Linux 环境启动后台任务"
++          }
++        }
++      }
++    },
++    "Starting the Linux environment needs %@ of free space. This device has %@ available. Free up space in Settings › General › %@ Storage.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "启动 Linux 环境需要 %1$@ 可用空间，当前仅剩 %2$@。请前往“设置 › 通用 › %3$@ 储存空间”释放空间。"
++          }
++        }
++      }
++    },
++    "Starting the Linux environment…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在启动 Linux 环境…"
++          }
++        }
++      }
++    },
++    "Stop the background task for the Linux environment": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "结束 Linux 环境的后台任务"
++          }
++        }
++      }
++    },
++    "Stops after %@": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "将在 %@后停止"
++          }
++        }
++      }
++    },
++    "Storage": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "存储"
++          }
++        }
++      }
++    },
++    "Tab": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "制表键（Tab）"
++          }
++        }
++      }
++    },
++    "Tap the keep running button before leaving CoCode. The Linux environment keeps working until time runs out, with graphics paused. iOS shows the progress and lets you stop the task at any time.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "离开 CoCode 前，先轻点继续运行按钮。Linux 环境会继续运行到设定时间，期间暂停图形显示。iOS 会显示进度，你可以随时结束任务。"
++          }
++        }
++      }
++    },
++    "Tap to dismiss": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "轻点关闭"
++          }
++        }
++      }
++    },
++    "The Cox page could not load. Check the guest console.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法加载 Cox 页面，请查看 Linux 控制台。"
++          }
++        }
++      }
++    },
++    "The downloaded Linux image did not match the expected size or checksum. Try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "下载的 Linux 镜像大小或校验值不符合预期，请重试。"
++          }
++        }
++      }
++    },
++    "The installed Linux image is missing. Reopen CoCode to download it again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "找不到已安装的 Linux 镜像。请重新打开 CoCode 重新下载。"
++          }
++        }
++      }
++    },
++    "The Linux environment cannot start with %@ of memory.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境无法使用 %@ 内存启动。"
++          }
++        }
++      }
++    },
++    "The Linux environment could not start": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法启动 Linux 环境"
++          }
++        }
++      }
++    },
++    "The Linux environment is paused": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境已暂停"
++          }
++        }
++      }
++    },
++    "The Linux environment is saving its data and shutting down.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境正在保存数据并关机。"
++          }
++        }
++      }
++    },
++    "The Linux environment is still running": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境仍在运行"
++          }
++        }
++      }
++    },
++    "The Linux environment is stopping. Data already saved to disk is kept.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境正在停止，已写入磁盘的数据会保留。"
++          }
++        }
++      }
++    },
++    "The Linux environment keeps running with its display in a floating window. Close the window to pause it. Battery use is similar to running in the foreground.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境会在浮窗中继续运行。关闭浮窗即可暂停。耗电量与在前台运行时相近。"
++          }
++        }
++      }
++    },
++    "The Linux environment kept restarting": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境反复重启"
++          }
++        }
++      }
++    },
++    "The Linux environment pauses when CoCode goes into the background and resumes when you return.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 进入后台时会暂停 Linux 环境，返回应用后继续运行。"
++          }
++        }
++      }
++    },
++    "The Linux environment restarted": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境已重启"
++          }
++        }
++      }
++    },
++    "The Linux environment restarted repeatedly just after boot, so CoCode stopped it. Reopen CoCode to try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境在启动后反复重启，CoCode 已将其停止。请重新打开 CoCode 再试。"
++          }
++        }
++      }
++    },
++    "The Linux environment shut down": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境已关机"
++          }
++        }
++      }
++    },
++    "The Linux environment stopped with an error": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境因错误停止"
++          }
++        }
++      }
++    },
++    "The Linux image could not be downloaded. Check your internet connection and try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法下载 Linux 镜像。请检查网络连接后重试。"
++          }
++        }
++      }
++    },
++    "The Linux image server returned HTTP %lld. Try again later.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 镜像服务器返回 HTTP %lld。请稍后重试。"
++          }
++        }
++      }
++    },
++    "The Linux runtime framework could not load.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法加载 Linux 运行时框架。"
++          }
++        }
++      }
++    },
++    "The persistent Linux disk could not be opened. Check available storage.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "无法打开 Linux 数据磁盘，请检查可用存储空间。"
++          }
++        }
++      }
++    },
++    "The runtime returned %d. Reopen CoCode to try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "运行时返回错误代码 %d。请重新打开 CoCode 再试。"
++          }
++        }
++      }
++    },
++    "The system lets CoCode use %lld MiB. After allocating %lld MiB to the Linux environment and reserving memory for the emulator, %lld MiB remain for graphics, which need at least %lld MiB. iOS is likely to close CoCode. Reduce the Linux RAM in Emulator settings.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "系统允许 CoCode 使用 %1$lld MiB 内存。为 Linux 环境分配 %2$lld MiB 并预留模拟器所需内存后，图形处理可用 %3$lld MiB，低于所需的 %4$lld MiB。iOS 可能会关闭 CoCode。请在“模拟器设置”中调低 Linux 环境的内存。"
++          }
++        }
++      }
++    },
++    "The unpacked Linux image did not match the expected size or checksum. Try again.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "解压后的 Linux 镜像大小或校验值不符合预期，请重试。"
++          }
++        }
++      }
++    },
++    "This copy of CoCode is missing a valid Linux image manifest. Reinstall CoCode from a complete build.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 缺少有效的 Linux 镜像清单。请安装完整版本的 CoCode。"
++          }
++        }
++      }
++    },
++    "This device cannot allocate %@ to the Linux environment. The limit is %@.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "设备无法为 Linux 环境分配 %1$@ 内存，最多可分配 %2$@。"
++          }
++        }
++      }
++    },
++    "vCPUs: %lld": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "虚拟 CPU 核数：%lld"
++          }
++        }
++      }
++    },
++    "Verifying and installing the Linux environment…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在校验并安装 Linux 环境…"
++          }
++        }
++      }
++    },
++    "View": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "视图"
++          }
++        }
++      }
++    },
++    "Volume down": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "降低音量"
++          }
++        }
++      }
++    },
++    "Volume up": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "提高音量"
++          }
++        }
++      }
++    },
++    "Waiting for Cox…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在等待 Cox…"
++          }
++        }
++      }
++    },
++    "Waiting for your response to the iOS microphone permission request. Programs in the Linux environment record silence until you allow access.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在等待你回应 iOS 的麦克风权限请求。允许之前，Linux 环境中的程序只能录到静音。"
++          }
++        }
++      }
++    },
++    "WebKit could not install the Cox origin policy.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "WebKit 无法应用 Cox 的来源限制。"
++          }
++        }
++      }
++    },
++    "When CoCode is in the background": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 进入后台时"
++          }
++        }
++      }
++    }
++  },
++  "version": "1.0"
++}
+diff --git a/Kernarium/Kernarium/MicrophoneSetting.swift b/Kernarium/Kernarium/MicrophoneSetting.swift
+index ded12cd..af8faa3 100644
+--- a/Kernarium/Kernarium/MicrophoneSetting.swift
++++ b/Kernarium/Kernarium/MicrophoneSetting.swift
+@@ -86,20 +86,15 @@ final class MicrophoneSetting: ObservableObject {
+     /// What the settings screen says about the setting.
+     static func explanation(isOn: Bool, access: MicrophoneAccess) -> String {
+         guard isOn else {
+-            return "Off. Programs in the guest record silence, and Kernarium " +
+-                "does not use the microphone. This applies at once."
++            return String(localized: "Off. Programs in the Linux environment record silence. CoCode does not use the microphone. This change takes effect immediately.")
+         }
+         switch access {
+         case .granted:
+-            return "On. Programs in the guest can record from this device's " +
+-                "microphone, and iOS shows its recording indicator while " +
+-                "they do. This applies at once."
++            return String(localized: "On. Programs in the Linux environment can record from this device’s microphone. iOS shows an indicator while they record. This change takes effect immediately.")
+         case .notAsked:
+-            return "Waiting for your answer to iOS's request for microphone " +
+-                "access. Until then the guest records silence."
++            return String(localized: "Waiting for your response to the iOS microphone permission request. Programs in the Linux environment record silence until you allow access.")
+         case .denied:
+-            return "iOS has not allowed Kernarium to use the microphone, so the " +
+-                "guest records silence. Allow it for Kernarium in Settings."
++            return String(localized: "iOS has not allowed CoCode to use the microphone, so programs in the Linux environment record silence. Allow CoCode to use it in Settings.")
+         }
+     }
+ }
 diff --git a/Kernarium/Kernarium/SerialConsoleView.swift b/Kernarium/Kernarium/SerialConsoleView.swift
 index af65dd1..8179c49 100644
 --- a/Kernarium/Kernarium/SerialConsoleView.swift
@@ -667,6 +2634,202 @@ index af65dd1..8179c49 100644
          guard terminalView?.surface != nil else {
              pendingOutput.append(data)
              return
+diff --git a/Kernarium/Kernarium/SpacePauseOverlay.swift b/Kernarium/Kernarium/SpacePauseOverlay.swift
+index 1d4f5b1..4851659 100644
+--- a/Kernarium/Kernarium/SpacePauseOverlay.swift
++++ b/Kernarium/Kernarium/SpacePauseOverlay.swift
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++import Foundation
+ import GuestHostCore
+ import SwiftUI
+ 
+@@ -24,10 +25,10 @@ struct SpacePauseOverlay: View {
+                         .font(.title3)
+                         .foregroundStyle(Color.orange)
+                         .accessibilityHidden(true)
+-                    Text(pause.title)
++                    Text(title)
+                         .font(.title3.weight(.bold))
+                 }
+-                Text(pause.detail)
++                Text(detail)
+                     .font(.subheadline)
+                     .foregroundStyle(.secondary)
+                     .fixedSize(horizontal: false, vertical: true)
+@@ -44,16 +45,48 @@ struct SpacePauseOverlay: View {
+         .accessibilityIdentifier("spacePauseOverlay")
+     }
+ 
++    private var title: String {
++        switch pause.stage {
++        case .pausing: String(localized: "Pausing the Linux environment")
++        case .paused: String(localized: "The Linux environment is paused")
++        case .notPaused: String(localized: "The Linux environment is still running")
++        }
++    }
++
++    private var detail: String {
++        let free = Formats.size(bytes: pause.freeBytes)
++        let needed = Formats.size(bytes: RunSpace.resumeAtBytes)
++        if pause.working == .shuttingDown {
++            return switch pause.ending {
++            case .powerOff: String(localized: "The Linux environment is saving its data and shutting down.")
++            case .stop: String(localized: "The Linux environment is stopping. Data already saved to disk is kept.")
++            }
++        }
++        switch pause.stage {
++        case .pausing:
++            return String(localized: "Only \(free) of free space remains. The Linux environment is saving its data.")
++        case .paused:
++            if pause.stillShort {
++                return String(localized: "Only \(free) of free space remains. Free up at least \(needed) in total before trying to resume again.")
++            }
++            return String(localized: "Only \(free) of free space remains. Free up at least \(needed) in total, then resume. You can also shut down the Linux environment.")
++        case .notPaused:
++            return String(localized: "Only \(free) of free space remains and the Linux environment could not pause. Shut it down before space runs out, or free up space and check again.")
++        }
++    }
++
+     @ViewBuilder
+     private var buttons: some View {
+         if let working = pause.working {
+             progress(
+-                working == .resuming ? "Resuming\u{2026}" : "Shutting down\u{2026}"
++                working == .resuming
++                    ? String(localized: "Resuming…")
++                    : String(localized: "Shutting down…")
+             )
+         } else {
+             switch pause.stage {
+             case .pausing:
+-                progress("Pausing\u{2026}")
++                progress(String(localized: "Pausing…"))
+             case .paused:
+                 HStack(spacing: 10) {
+                     Spacer()
+diff --git a/Kernarium/KernariumTests/BackgroundSessionTests.swift b/Kernarium/KernariumTests/BackgroundSessionTests.swift
+index dc271ba..dc3fce4 100644
+--- a/Kernarium/KernariumTests/BackgroundSessionTests.swift
++++ b/Kernarium/KernariumTests/BackgroundSessionTests.swift
+@@ -23,7 +23,7 @@ struct BackgroundSessionTests {
+ 
+         let relaunched = BackgroundSession(marker: marker)
+         #expect(relaunched.restart?.enteredBackgroundAt == entered)
+-        #expect(relaunched.restart?.title == "Guest restarted")
++        #expect(relaunched.restart?.title == "The Linux environment restarted")
+         #expect(relaunched.restart?.message.contains("closed") == true)
+ 
+         // Reported once: the launch after it starts clean.
+diff --git a/Kernarium/KernariumTests/GuestRunEndTests.swift b/Kernarium/KernariumTests/GuestRunEndTests.swift
+index 5701796..feca718 100644
+--- a/Kernarium/KernariumTests/GuestRunEndTests.swift
++++ b/Kernarium/KernariumTests/GuestRunEndTests.swift
+@@ -12,14 +12,14 @@ struct GuestRunEndTests {
+     @Test
+     func theNoticeTellsAShutdownFromAnError() {
+         let shutDown = GuestRunEnd(result: 0)
+-        #expect(shutDown.title == "Guest shut down")
+-        #expect(shutDown.message == "Relaunch Kernarium to start it again.")
++        #expect(shutDown.title == "The Linux environment shut down")
++        #expect(shutDown.message == "Reopen CoCode to start the Linux environment again.")
+ 
+         let failed = GuestRunEnd(result: -5)
+-        #expect(failed.title == "Guest stopped with an error")
++        #expect(failed.title == "The Linux environment stopped with an error")
+         #expect(failed.message.contains("-5"))
+         #expect(
+-            failed.message.hasSuffix("Relaunch Kernarium to start it again.")
++            failed.message.hasSuffix("Reopen CoCode to try again.")
+         )
+         #expect(failed.systemName != shutDown.systemName)
+     }
+@@ -30,13 +30,13 @@ struct GuestRunEndTests {
+     @Test
+     func aRunTheApplicationStoppedIsAShutdownWhateverTheStatus() {
+         let stopped = GuestRunEnd(result: -4, requested: true)
+-        #expect(stopped.title == "Guest shut down")
+-        #expect(stopped.message == "Relaunch Kernarium to start it again.")
++        #expect(stopped.title == "The Linux environment shut down")
++        #expect(stopped.message == "Reopen CoCode to start the Linux environment again.")
+         #expect(stopped.systemName == GuestRunEnd(result: 0).systemName)
+ 
+         // Without the request the same status is an error.
+         let failed = GuestRunEnd(result: -4)
+-        #expect(failed.title == "Guest stopped with an error")
++        #expect(failed.title == "The Linux environment stopped with an error")
+         #expect(failed.message.contains("-4"))
+     }
+ 
+@@ -49,11 +49,11 @@ struct GuestRunEndTests {
+             result: Int32(KERNARIUM_RUNTIME_RESULT_RESTART_LOOP)
+         )
+         #expect(looping.restartedInALoop)
+-        #expect(looping.title == "Guest kept restarting")
+-        #expect(looping.message.contains("restarted itself"))
++        #expect(looping.title == "The Linux environment kept restarting")
++        #expect(looping.message.contains("restarted repeatedly"))
+         #expect(!looping.message.contains("returned"))
+         #expect(
+-            looping.message.hasSuffix("Relaunch Kernarium to start it again.")
++            looping.message.hasSuffix("Reopen CoCode to try again.")
+         )
+         let failed = GuestRunEnd(result: -5)
+         #expect(!failed.restartedInALoop)
+diff --git a/Kernarium/KernariumTests/MicrophoneSettingTests.swift b/Kernarium/KernariumTests/MicrophoneSettingTests.swift
+index 8de9f37..137acb9 100644
+--- a/Kernarium/KernariumTests/MicrophoneSettingTests.swift
++++ b/Kernarium/KernariumTests/MicrophoneSettingTests.swift
+@@ -177,30 +177,25 @@ struct MicrophoneSettingTests {
+     func theExplanationSaysEverythingForEachState() {
+         #expect(
+             MicrophoneSetting.explanation(isOn: false, access: .granted) ==
+-                "Off. Programs in the guest record silence, and Kernarium " +
+-                "does not use the microphone. This applies at once."
++                "Off. Programs in the Linux environment record silence. CoCode does not use the microphone. This change takes effect immediately."
+         )
+         #expect(
+             MicrophoneSetting.explanation(isOn: true, access: .granted) ==
+-                "On. Programs in the guest can record from this device's " +
+-                "microphone, and iOS shows its recording indicator while " +
+-                "they do. This applies at once."
++                "On. Programs in the Linux environment can record from this device’s microphone. iOS shows an indicator while they record. This change takes effect immediately."
+         )
+         #expect(
+             MicrophoneSetting.explanation(isOn: true, access: .notAsked) ==
+-                "Waiting for your answer to iOS's request for microphone " +
+-                "access. Until then the guest records silence."
++                "Waiting for your response to the iOS microphone permission request. Programs in the Linux environment record silence until you allow access."
+         )
+         #expect(
+             MicrophoneSetting.explanation(isOn: true, access: .denied) ==
+-                "iOS has not allowed Kernarium to use the microphone, so the " +
+-                "guest records silence. Allow it for Kernarium in Settings."
++                "iOS has not allowed CoCode to use the microphone, so programs in the Linux environment record silence. Allow CoCode to use it in Settings."
+         )
+         // A setting that is off says so whatever the system's answer is.
+         for access in [MicrophoneAccess.notAsked, .denied, .granted] {
+             #expect(
+                 MicrophoneSetting.explanation(isOn: false, access: access)
+-                    .hasSuffix("This applies at once.")
++                    .hasSuffix("This change takes effect immediately.")
+             )
+         }
+     }
+diff --git a/Kernarium/KernariumTests/SpacePauseGuestTests.swift b/Kernarium/KernariumTests/SpacePauseGuestTests.swift
+index 2e58947..7fcd94b 100644
+--- a/Kernarium/KernariumTests/SpacePauseGuestTests.swift
++++ b/Kernarium/KernariumTests/SpacePauseGuestTests.swift
+@@ -233,7 +233,7 @@ struct SpacePauseGuestTests {
+         // screen says the guest shut down either way.
+         let end = GuestRunEnd(result: result, requested: launcher.stopRequested)
+         say("the run ended: status \(result), the screen says \"\(end.title)\"")
+-        #expect(end.title == "Guest shut down")
++        #expect(end.title == "The Linux environment shut down")
+         #expect(space.pause == nil)
+         #expect(!policy.spaceHeld)
+     }
 diff --git a/Kernarium/Runtime/KernariumRuntime.h b/Kernarium/Runtime/KernariumRuntime.h
 index c3484e0..db3700c 100644
 --- a/Kernarium/Runtime/KernariumRuntime.h
@@ -903,6 +3066,32 @@ index 47cfba7..99fe04b 100644
  	std::vector<HostForward> forwards_;
  	/* Guarded by start_mutex_. */
  	std::array<unsigned char, 6> mac_{default_guest_mac};
+diff --git a/dependencies/build-apple-gpu.sh b/dependencies/build-apple-gpu.sh
+index c5f6b0a..51aeda6 100755
+--- a/dependencies/build-apple-gpu.sh
++++ b/dependencies/build-apple-gpu.sh
+@@ -449,7 +449,7 @@ mesa_setup()
+ MESA_BUILD="$BUILDS/Mesa"
+ MESA_PKG_CONFIG="$BUILDS/empty-mesa-pkgconfig"
+ mkdir -p -- "$MESA_PKG_CONFIG"
+-MESA_TOOL_PATH="$(dirname -- "$PYTHON"):$(dirname -- "$MESON"):$(dirname -- "$NINJA"):$APPLE_GPU_TOOL_PATH"
++MESA_TOOL_PATH="$(dirname -- "$BISON"):$(dirname -- "$FLEX"):$(dirname -- "$PYTHON"):$(dirname -- "$MESON"):$(dirname -- "$NINJA"):$APPLE_GPU_TOOL_PATH"
+ VENUS_PROTOCOL_GENERATED_SHA256=
+ if [ "$SOFTWARE" -eq 0 ]; then
+ 	# The protocol producer runs out of tree against authenticated source, so
+diff --git a/dependencies/manifest.tsv b/dependencies/manifest.tsv
+index 9b8e017..db14af7 100644
+--- a/dependencies/manifest.tsv
++++ b/dependencies/manifest.tsv
+@@ -26,7 +26,7 @@ xxhash	0.8.3	macos	https://github.com/Cyan4973/xxHash.git	e626a72bc2321cd320e953
+ unordered-dense	4.8.1	macos	https://github.com/martinus/unordered_dense.git	3234af2c03549bc85656bfd3a86993bf1cd8aef1	.	-
+ nasm	3.02	x86-conformance	https://github.com/netwide-assembler/nasm.git	4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065	.	patches/nasm/series.tsv
+ x86-k-semantics	2020-03-04	x86-conformance	https://github.com/kframework/X86-64-semantics.git	592380aea04820ea11cfa5475b343f0257f2474e	.	-
+-gawk	5.4.1	kernel-host-tools	https://git.savannah.gnu.org/git/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
++gawk	5.4.1	kernel-host-tools	https://github.com/sailfishos-mirror/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
+ argp-standalone	1.5.0	kernel-host-tools	https://github.com/argp-standalone/argp-standalone.git	b931da3e7e9a999b0d9515c087488e96821845fb	.	-
+ musl-obstack	1.2.3	kernel-host-tools	https://github.com/void-linux/musl-obstack.git	f4385255be1615688c6a5f042277304d7ab288b1	.	patches/musl-obstack/series.tsv
+ elfutils	0.197	kernel-host-tools	https://sourceware.org/git/elfutils.git	d1e04729ece4d4fa4097a83dbbad541edaf149f7	.	patches/elfutils/series.tsv
 diff --git a/tools/rootfs/boot-ramdisk/init b/tools/rootfs/boot-ramdisk/init
 index 5f54778..1e2e0fa 100755
 --- a/tools/rootfs/boot-ramdisk/init
@@ -977,27 +3166,3 @@ index 5f54778..1e2e0fa 100755
  			mkdir -p "/newroot/var/lib/$name" && \
  			mount -o bind "/state/$name" "/newroot/var/lib/$name" || \
  			fail "cannot bind the $name state"
-diff --git a/dependencies/build-apple-gpu.sh b/dependencies/build-apple-gpu.sh
---- a/dependencies/build-apple-gpu.sh
-+++ b/dependencies/build-apple-gpu.sh
-@@ -449,7 +449,7 @@
- MESA_BUILD="$BUILDS/Mesa"
- MESA_PKG_CONFIG="$BUILDS/empty-mesa-pkgconfig"
- mkdir -p -- "$MESA_PKG_CONFIG"
--MESA_TOOL_PATH="$(dirname -- "$PYTHON"):$(dirname -- "$MESON"):$(dirname -- "$NINJA"):$APPLE_GPU_TOOL_PATH"
-+MESA_TOOL_PATH="$(dirname -- "$BISON"):$(dirname -- "$FLEX"):$(dirname -- "$PYTHON"):$(dirname -- "$MESON"):$(dirname -- "$NINJA"):$APPLE_GPU_TOOL_PATH"
- VENUS_PROTOCOL_GENERATED_SHA256=
- if [ "$SOFTWARE" -eq 0 ]; then
- 	# The protocol producer runs out of tree against authenticated source, so
-diff --git a/dependencies/manifest.tsv b/dependencies/manifest.tsv
---- a/dependencies/manifest.tsv
-+++ b/dependencies/manifest.tsv
-@@ -26,7 +26,7 @@
- unordered-dense	4.8.1	macos	https://github.com/martinus/unordered_dense.git	3234af2c03549bc85656bfd3a86993bf1cd8aef1	.	-
- nasm	3.02	x86-conformance	https://github.com/netwide-assembler/nasm.git	4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065	.	patches/nasm/series.tsv
- x86-k-semantics	2020-03-04	x86-conformance	https://github.com/kframework/X86-64-semantics.git	592380aea04820ea11cfa5475b343f0257f2474e	.	-
--gawk	5.4.1	kernel-host-tools	https://git.savannah.gnu.org/git/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
-+gawk	5.4.1	kernel-host-tools	https://github.com/sailfishos-mirror/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
- argp-standalone	1.5.0	kernel-host-tools	https://github.com/argp-standalone/argp-standalone.git	b931da3e7e9a999b0d9515c087488e96821845fb	.	-
- musl-obstack	1.2.3	kernel-host-tools	https://github.com/void-linux/musl-obstack.git	f4385255be1615688c6a5f042277304d7ab288b1	.	patches/musl-obstack/series.tsv
- elfutils	0.197	kernel-host-tools	https://sourceware.org/git/elfutils.git	d1e04729ece4d4fa4097a83dbbad541edaf149f7	.	patches/elfutils/series.tsv

@@ -6,16 +6,26 @@ PIN=b14aa9e6da9df15f467d8aad0090888373cc9b21
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 
 fail() { printf 'build-package: %s\n' "$*" >&2; exit 1; }
-[ "$#" -eq 4 ] || fail "Usage: $0 KERNARIUM_DIR BOOT_BASE_DIR GUEST_IMAGE OUTPUT_DIR"
+[ "$#" -eq 4 ] || fail "Usage: $0 KERNARIUM_DIR BOOT_BASE_DIR GUEST_MANIFEST OUTPUT_DIR"
 INPUT_CHECKOUT=$(cd "$1" 2>/dev/null && pwd -P) || fail "Kernarium checkout not found: $1"
 BOOT_BASE_DIR=$(cd "$2" 2>/dev/null && pwd -P) || fail "boot base directory not found: $2"
-GUEST_IMAGE=$(cd "$(dirname "$3")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename "$3")") || fail "guest image directory not found: $3"
+GUEST_MANIFEST=$(cd "$(dirname "$3")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename "$3")") || fail "guest manifest directory not found: $3"
 OUTPUT_DIR=$4
 BOOT_BASE=$BOOT_BASE_DIR/uml-boot-base-aarch64.cpio.gz
 [ -f "$BOOT_BASE" ] || fail "missing ARM64 boot base: $BOOT_BASE"
-[ -f "$GUEST_IMAGE" ] || fail "guest image not found: $GUEST_IMAGE"
-case "$GUEST_IMAGE" in *.erofs|*.ext4) ;; *) fail 'guest image must have .erofs or .ext4 suffix' ;; esac
-case "$(basename "$GUEST_IMAGE")" in *[[:space:],:\"]*) fail 'guest image filename cannot contain whitespace, comma, or quote' ;; esac
+[ -f "$GUEST_MANIFEST" ] || fail "guest manifest not found: $GUEST_MANIFEST"
+python3 - "$GUEST_MANIFEST" <<'PY' || fail 'guest manifest is invalid'
+import json, re, sys
+from urllib.parse import urlparse
+manifest = json.load(open(sys.argv[1], encoding='utf-8'))
+assert set(manifest) == {'version', 'url', 'compressedSHA256', 'compressedSize', 'imageSHA256', 'imageSize'}
+assert re.fullmatch(r'[0-9A-Za-z._-]+', manifest['version'])
+assert urlparse(manifest['url']).scheme == 'https'
+for key in ('compressedSHA256', 'imageSHA256'):
+    assert re.fullmatch(r'[0-9a-f]{64}', manifest[key])
+for key in ('compressedSize', 'imageSize'):
+    assert isinstance(manifest[key], int) and manifest[key] > 0
+PY
 [ -n "${BOOT_BASE_SHA256:-}" ] || fail 'BOOT_BASE_SHA256 must be set to the Ubuntu producer checksum'
 BOOT_SHA=$(shasum -a 256 "$BOOT_BASE" | awk '{print $1}')
 [ "$BOOT_SHA" = "$BOOT_BASE_SHA256" ] || fail "boot base SHA-256 mismatch: expected $BOOT_BASE_SHA256, got $BOOT_SHA"
@@ -135,6 +145,8 @@ cmake --preset kernarium-ios-device-android
 cmake --build --preset kernarium-ios-device-android --parallel
 "$KERNARIUM_DIR/Kernarium/scripts/package-ios-frameworks.sh" --sdk device
 
+cp "$GUEST_MANIFEST" "$KERNARIUM_DIR/Kernarium/Kernarium/CoCodeGuest.json"
+
 ARCHIVE="$WORK/CoCode.xcarchive"
 xcodebuild -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" \
     -scheme Kernarium -configuration Release -destination 'generic/platform=iOS' \
@@ -145,6 +157,8 @@ APP="$ARCHIVE/Products/Applications/Kernarium.app"
 EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
 file "$APP/$EXECUTABLE" | grep -E 'Mach-O.*arm64' >/dev/null || fail 'app executable is not Mach-O ARM64'
 if codesign -dv "$APP" >/dev/null 2>&1; then fail 'Xcode archive unexpectedly signed the app'; fi
+cmp -s "$GUEST_MANIFEST" "$APP/CoCodeGuest.json" || fail 'app bundle lacks the guest download manifest'
+[ -d "$APP/zh-Hans.lproj" ] || fail 'app bundle lacks Simplified Chinese resources'
 
 STAGE="$WORK/ipa"
 mkdir -p "$STAGE/Payload"
@@ -153,17 +167,17 @@ IPA="$OUTPUT_DIR/CoCode-unsigned.ipa"
 (cd "$STAGE" && /usr/bin/zip -qry "$IPA" Payload)
 unzip -t "$IPA" >/dev/null || fail 'IPA ZIP structure is invalid'
 unzip -Z1 "$IPA" | grep -Fx Payload/CoCode.app/Info.plist >/dev/null || fail 'IPA lacks Payload/CoCode.app/Info.plist'
-cp "$GUEST_IMAGE" "$OUTPUT_DIR/$(basename "$GUEST_IMAGE")"
+cp "$GUEST_MANIFEST" "$OUTPUT_DIR/CoCodeGuest.json"
 cat > "$OUTPUT_DIR/README.txt" <<EOF
 CoCode unsigned iOS package
 
 Sign CoCode-unsigned.ipa with your Apple development team before installation.
-After installing, copy $(basename "$GUEST_IMAGE") to the app's Documents directory.
-The current app does not import a guest image from its bundle.
+On first launch CoCode downloads its Linux image from the public GitHub Release
+named in CoCodeGuest.json and verifies it before starting.
 
 Kernarium pin: $PIN
 Boot base producer checksum: $BOOT_SHA
 EOF
-(cd "$OUTPUT_DIR" && shasum -a 256 CoCode-unsigned.ipa "$(basename "$GUEST_IMAGE")" README.txt > SHA256SUMS)
+(cd "$OUTPUT_DIR" && shasum -a 256 CoCode-unsigned.ipa CoCodeGuest.json README.txt > SHA256SUMS)
 (cd "$OUTPUT_DIR" && shasum -a 256 -c SHA256SUMS) || fail 'output checksum verification failed'
-printf 'Created %s and guest image %s in %s\n' CoCode-unsigned.ipa "$(basename "$GUEST_IMAGE")" "$OUTPUT_DIR"
+printf 'Created CoCode-unsigned.ipa in %s\n' "$OUTPUT_DIR"
