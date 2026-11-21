@@ -58,6 +58,11 @@ jobs:
           ditto -x -k CoCode.xcarchive.zip .
           # Xcode derives export entitlements from the signature on the archived app.
           archive_app=CoCode.xcarchive/Products/Applications/Kernarium.app
+          if ! plutil -extract NSCameraUsageDescription raw "$archive_app/Info.plist" >/dev/null 2>&1; then
+            plutil -insert NSCameraUsageDescription -string \
+              "The embedded guest runtime can use your camera to provide a video feed to a guest app when you allow camera access." \
+              "$archive_app/Info.plist"
+          fi
           plutil -create xml1 memory.plist
           /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.kernel.extended-virtual-addressing bool true' memory.plist
           /usr/libexec/PlistBuddy -c 'Add :com.apple.developer.kernel.increased-memory-limit bool true' memory.plist
