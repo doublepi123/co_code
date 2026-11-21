@@ -428,7 +428,7 @@ index 0000000..bd91eb3
 +}
 diff --git a/Kernarium/Kernarium/CoCodeGuestSetup.swift b/Kernarium/Kernarium/CoCodeGuestSetup.swift
 new file mode 100644
-index 0000000..190057b
+index 0000000..8f3df90
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeGuestSetup.swift
 @@ -0,0 +1,54 @@
@@ -464,7 +464,7 @@ index 0000000..190057b
 +                let total = manifest.compressedSize
 +                stage = .downloading(received: 0, total: total)
 +                try await manifest.install { [weak self] bytes in
-+                    Task { @MainActor in
++                    Task { @MainActor [weak self] in
 +                        guard let self, self.attempt == attempt,
 +                              case let .downloading(received, _) = self.stage,
 +                              bytes > received else { return }
@@ -1208,7 +1208,7 @@ index fb5fc1a..214cce7 100644
  
      nonisolated static var documentsDirectory: URL {
 diff --git a/Kernarium/Kernarium/EmulatorSettingsView.swift b/Kernarium/Kernarium/EmulatorSettingsView.swift
-index e722b7d..15ca1e8 100644
+index e722b7d..3a344b2 100644
 --- a/Kernarium/Kernarium/EmulatorSettingsView.swift
 +++ b/Kernarium/Kernarium/EmulatorSettingsView.swift
 @@ -7,6 +7,7 @@ import UIKit
@@ -1244,7 +1244,7 @@ index e722b7d..15ca1e8 100644
          physicalProcessorCount: Int = EmulatorConfiguration.physicalProcessorCount,
 -        documentsDirectory: URL = RootfsImage.documentsDirectory
 +        documentsDirectory: URL = RootfsImage.documentsDirectory,
-+        imageSetup: CoCodeGuestSetup = CoCodeGuestSetup()
++        imageSetup: CoCodeGuestSetup
      ) {
 +        self.imageSetup = imageSetup
          let loaded = EmulatorConfiguration.load(
