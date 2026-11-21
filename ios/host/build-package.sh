@@ -42,7 +42,7 @@ mkdir -p "$MOUNT"
 cleanup() {
     if [ "$mounted" = 1 ]; then
         cd /
-        hdiutil detach -quiet "$MOUNT" || return
+        hdiutil detach -quiet "$MOUNT" || hdiutil detach -force "$MOUNT" || return
     fi
     rm -rf "$WORK"
 }
