@@ -1,5 +1,6 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'status=$?; printf "build-package: line %s failed with status %s: %s\n" "$LINENO" "$status" "$BASH_COMMAND" >&2' ERR
 
 PIN=b14aa9e6da9df15f467d8aad0090888373cc9b21
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -49,8 +50,8 @@ mounted=0
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-hdiutil create -quiet -size 100g -type SPARSE -fs APFSX -volname CoCodeBuild "$SPARSE"
-hdiutil attach -quiet -nobrowse -mountpoint "$MOUNT" "$SPARSE"
+hdiutil create -size 100g -type SPARSE -fs APFSX -volname CoCodeBuild "$SPARSE"
+hdiutil attach -nobrowse -mountpoint "$MOUNT" "$SPARSE"
 mounted=1
 KERNARIUM_DIR="$MOUNT/Kernarium"
 git clone --quiet --no-hardlinks --shared "$INPUT_CHECKOUT" "$KERNARIUM_DIR"
