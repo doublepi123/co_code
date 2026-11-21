@@ -134,6 +134,7 @@ jobs:
           key: ios-darwin-kernels-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
       - name: Build and package CoCode
         env:
+          COCODE_IOS_ARCHIVE_ZIP: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && format('{0}/CoCode.xcarchive.zip', runner.temp) || '' }}
           COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: user.name
@@ -155,3 +156,71 @@ jobs:
           path: build/ios/package/
           if-no-files-found: error
           compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: CoCode-iOS-archive
+          path: ${{ runner.temp }}/CoCode.xcarchive.zip
+          retention-days: 1
+          if-no-files-found: error
+
+  testflight:
+    name: Sign and upload to internal TestFlight
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: ipa
+    runs-on: xcode-27
+    environment: testflight
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CoCode-iOS-archive
+          path: ${{ runner.temp }}
+      - name: Export with Apple-managed signing and upload
+        working-directory: ${{ runner.temp }}
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$API_KEY" > "$key"
+          unset API_KEY
+          ditto -x -k CoCode.xcarchive.zip .
+          plutil -create xml1 ExportOptions.plist
+          plutil -insert method -string app-store-connect ExportOptions.plist
+          plutil -insert destination -string export ExportOptions.plist
+          plutil -insert teamID -string "$TEAM_ID" ExportOptions.plist
+          plutil -insert signingStyle -string automatic ExportOptions.plist
+          plutil -insert testFlightInternalTestingOnly -bool YES ExportOptions.plist
+          export_archive() {
+            xcodebuild -exportArchive -archivePath CoCode.xcarchive \
+              -exportPath "$1" -exportOptionsPlist ExportOptions.plist \
+              -allowProvisioningUpdates -authenticationKeyPath "$key" \
+              -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER"
+          }
+          export_archive signed
+          ditto -x -k signed/*.ipa verified
+          app=(verified/Payload/*.app)
+          codesign --verify --deep --strict "${app[0]}"
+          codesign -d --entitlements :- "${app[0]}" > entitlements.plist
+          security cms -D -i "${app[0]}/embedded.mobileprovision" > profile.plist
+          python3 - <<'PYTHON'
+          import os
+          import plistlib
+          from pathlib import Path
+
+          signature = plistlib.loads(Path("entitlements.plist").read_bytes())
+          profile = plistlib.loads(Path("profile.plist").read_bytes())["Entitlements"]
+          for data in (signature, profile):
+              if data.get("application-identifier") != os.environ["TEAM_ID"] + ".io.cocode.ios":
+                  raise SystemExit("Unexpected signed application identifier")
+              for capability in ("extended-virtual-addressing", "increased-memory-limit"):
+                  if data.get("com.apple.developer.kernel." + capability) is not True:
+                      raise SystemExit("Missing memory entitlement: " + capability)
+          PYTHON
+          plutil -replace destination -string upload ExportOptions.plist
+          export_archive upload
