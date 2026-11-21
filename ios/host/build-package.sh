@@ -35,7 +35,7 @@ BOOT_SHA=$(shasum -a 256 "$BOOT_BASE" | awk '{print $1}')
 for tool in git xcodebuild xcrun cmake ninja python3 shasum hdiutil llvm-objcopy; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing required tool: $tool"
 done
-XCODE_VERSION=$(xcodebuild -version | awk '/^Xcode / {print $2; exit}')
+XCODE_VERSION=$(xcodebuild -version | awk '/^Xcode / && !version {version=$2} END {print version}')
 case "$XCODE_VERSION" in 27|27.*) ;; *) fail "requires Xcode 27; found $XCODE_VERSION" ;; esac
 SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version)
 case "$SDK_VERSION" in 27.*) ;; *) fail "requires iOS 27 SDK; found $SDK_VERSION" ;; esac
