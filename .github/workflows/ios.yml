@@ -187,6 +187,7 @@ jobs:
           GIT_CONFIG_VALUE_1: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
+          if [[ "$GITHUB_REF" == refs/tags/ios-v* ]]; then export COCODE_IOS_VERSION=${GITHUB_REF_NAME#ios-v}; fi
           bash ios/host/build-package.sh kernarium build/ios/boot \
             build/ios/guest/CoCodeGuest.json build/ios/package
       - uses: actions/cache/save@v4
@@ -247,7 +248,7 @@ jobs:
           cmp CoCodeGuest.json <(unzip -p CoCode-unsigned.ipa Payload/CoCode.app/CoCodeGuest.json)
           sha256sum cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json > SHA256SUMS
           prerelease=--prerelease
-          [[ "$TAG" == ios-v* ]] && prerelease=
+          [[ "$TAG" == ios-v* && "$TAG" != ios-v0.* ]] && prerelease=
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
             --title "CoCode iOS $TAG" \
             --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \

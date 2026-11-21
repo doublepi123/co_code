@@ -19,7 +19,7 @@ The result is `build/ios/guest/cocode-linux.erofs`. The image contains Cox 0.2.2
 
 The [CoCode iOS workflow](../.github/workflows/ios.yml) runs on iOS changes to `main`, on `ios-v*` tags, on iOS pull requests, and on manual dispatch. It builds the ARM64 guest and boot ramdisk on Linux, compresses the image with zstd, then packages the iOS app on an Apple silicon Xcode 27 runner.
 
-Pushes to `main`, manual runs and `ios-v*` tags publish a public GitHub Release. An `ios-v*` tag makes a regular release; the other two make an `ios-build-N` prerelease. Each release holds `CoCode-unsigned.ipa`, `cocode-linux.erofs.zst`, `CoCodeGuest.json` and `SHA256SUMS`. Pull requests only upload workflow artifacts.
+Pushes to `main`, manual runs and `ios-v*` tags publish a public GitHub Release. An `ios-vX.Y.Z` tag publishes release `ios-vX.Y.Z` and sets the app version to `X.Y.Z`; `ios-v0.*` tags are prereleases like the project's other 0.x releases. Pushes to `main` and manual runs publish an `ios-build-N` prerelease. Each release holds `CoCode-unsigned.ipa`, `cocode-linux.erofs.zst`, `CoCodeGuest.json` and `SHA256SUMS`. Pull requests only upload workflow artifacts.
 
 The IPA embeds `CoCodeGuest.json`, which names the release URL, sizes and SHA-256 digests of the compressed and the decompressed image. On first launch, or after an update that names a new image, CoCode downloads the image without credentials, checks both digests, and moves it into place before it starts Linux. A failed check keeps Linux from starting and offers a retry. Sign the IPA before installing it on an iPhone; no file has to be copied by hand.
 

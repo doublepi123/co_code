@@ -148,9 +148,15 @@ cmake --build --preset kernarium-ios-device-android --parallel
 cp "$GUEST_MANIFEST" "$KERNARIUM_DIR/Kernarium/Kernarium/CoCodeGuest.json"
 
 ARCHIVE="$WORK/CoCode.xcarchive"
+VERSION_SETTINGS=()
+if [[ -n "${COCODE_IOS_VERSION:-}" ]]; then
+    [[ "$COCODE_IOS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid CoCode iOS version: $COCODE_IOS_VERSION"
+    VERSION_SETTINGS=(MARKETING_VERSION="$COCODE_IOS_VERSION")
+fi
 xcodebuild -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" \
     -scheme Kernarium -configuration Release -destination 'generic/platform=iOS' \
-    -derivedDataPath "$WORK/derived" -archivePath "$ARCHIVE" CODE_SIGNING_ALLOWED=NO archive
+    -derivedDataPath "$WORK/derived" -archivePath "$ARCHIVE" CODE_SIGNING_ALLOWED=NO \
+    ${VERSION_SETTINGS[@]+"${VERSION_SETTINGS[@]}"} archive
 if [[ -n "${COCODE_IOS_ARCHIVE_ZIP:-}" ]]; then
     /usr/bin/ditto -c -k --keepParent "$ARCHIVE" "$COCODE_IOS_ARCHIVE_ZIP"
 fi
@@ -160,6 +166,10 @@ APP="$ARCHIVE/Products/Applications/Kernarium.app"
 EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
 file "$APP/$EXECUTABLE" | grep -E 'Mach-O.*arm64' >/dev/null || fail 'app executable is not Mach-O ARM64'
 if codesign -dv "$APP" >/dev/null 2>&1; then fail 'Xcode archive unexpectedly signed the app'; fi
+if [[ -n "${COCODE_IOS_VERSION:-}" ]]; then
+    APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
+    [ "$APP_VERSION" = "$COCODE_IOS_VERSION" ] || fail "app version is $APP_VERSION, expected $COCODE_IOS_VERSION"
+fi
 cmp -s "$GUEST_MANIFEST" "$APP/CoCodeGuest.json" || fail 'app bundle lacks the guest download manifest'
 [ -d "$APP/zh-Hans.lproj" ] || fail 'app bundle lacks Simplified Chinese resources'
 
