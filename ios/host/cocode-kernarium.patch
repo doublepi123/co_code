@@ -989,3 +989,15 @@ diff --git a/dependencies/build-apple-gpu.sh b/dependencies/build-apple-gpu.sh
  VENUS_PROTOCOL_GENERATED_SHA256=
  if [ "$SOFTWARE" -eq 0 ]; then
  	# The protocol producer runs out of tree against authenticated source, so
+diff --git a/dependencies/manifest.tsv b/dependencies/manifest.tsv
+--- a/dependencies/manifest.tsv
++++ b/dependencies/manifest.tsv
+@@ -26,7 +26,7 @@
+ unordered-dense	4.8.1	macos	https://github.com/martinus/unordered_dense.git	3234af2c03549bc85656bfd3a86993bf1cd8aef1	.	-
+ nasm	3.02	x86-conformance	https://github.com/netwide-assembler/nasm.git	4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065	.	patches/nasm/series.tsv
+ x86-k-semantics	2020-03-04	x86-conformance	https://github.com/kframework/X86-64-semantics.git	592380aea04820ea11cfa5475b343f0257f2474e	.	-
+-gawk	5.4.1	kernel-host-tools	https://git.savannah.gnu.org/git/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
++gawk	5.4.1	kernel-host-tools	https://github.com/sailfishos-mirror/gawk.git	52af7f12758da12db0ddbdb117a84e0685cd2f72	.	-
+ argp-standalone	1.5.0	kernel-host-tools	https://github.com/argp-standalone/argp-standalone.git	b931da3e7e9a999b0d9515c087488e96821845fb	.	-
+ musl-obstack	1.2.3	kernel-host-tools	https://github.com/void-linux/musl-obstack.git	f4385255be1615688c6a5f042277304d7ab288b1	.	patches/musl-obstack/series.tsv
+ elfutils	0.197	kernel-host-tools	https://sourceware.org/git/elfutils.git	d1e04729ece4d4fa4097a83dbbad541edaf149f7	.	patches/elfutils/series.tsv
