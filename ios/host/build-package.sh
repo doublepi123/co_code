@@ -50,9 +50,12 @@ mounted=0
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-hdiutil create -size 100g -type SPARSE -fs APFSX -volname CoCodeBuild "$SPARSE"
+hdiutil create -size 100g -type SPARSE -fs 'Case-sensitive APFS' -volname CoCodeBuild "$SPARSE"
 hdiutil attach -nobrowse -mountpoint "$MOUNT" "$SPARSE"
 mounted=1
+: > "$MOUNT/CoCodeCaseProbe"
+[ ! -e "$MOUNT/cocodecaseprobe" ] || fail 'the build volume is not case-sensitive'
+rm "$MOUNT/CoCodeCaseProbe"
 KERNARIUM_DIR="$MOUNT/Kernarium"
 git clone --quiet --no-hardlinks --shared "$INPUT_CHECKOUT" "$KERNARIUM_DIR"
 git -C "$KERNARIUM_DIR" checkout --quiet --detach "$PIN"
