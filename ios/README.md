@@ -15,6 +15,10 @@ docker buildx build \
 
 The result is `build/ios/guest/cocode-linux.erofs`. The image contains Cox 0.2.22, OMO 5.1.79, and a musl build of `node-pty`. The builder checks the filesystem before exporting it. Exact Cox and OMO versions are pinned; Alpine and npm may resolve newer transitive packages on a later build.
 
+## GitHub Actions build
+
+The [CoCode iOS workflow](../.github/workflows/ios.yml) runs on iOS changes to `main`, on iOS pull requests, and on manual dispatch. It builds the ARM64 guest and boot ramdisk on Linux, then packages the iOS app on an Apple silicon Xcode 27 runner. Download **CoCode-iOS-ARM64-guest** for the EROFS image, or **CoCode-iOS-unsigned** for the IPA, guest image, and checksums together. Sign the IPA before installing it on an iPhone. Then copy `cocode-linux.erofs` into CoCode’s Documents directory.
+
 The guest starts BusyBox init, sets up its terminal devices and network, and runs Cox on guest port `3773`. The iOS host publishes that port on iOS loopback only. CoCode stores projects in `/root/projects`, Cox data in `/root/.cox`, and the generated local login password in a private file under `/root`. Those paths must be backed by the host's persistent disk.
 
 ## Verify on an iPhone

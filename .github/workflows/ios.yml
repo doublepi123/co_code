@@ -1,0 +1,144 @@
+name: CoCode iOS
+
+on:
+  push:
+    branches: [main, 'ios/**']
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KERNARIUM_REV: b14aa9e6da9df15f467d8aad0090888373cc9b21
+
+jobs:
+  guest:
+    name: ARM64 Cox guest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and check guest filesystem
+        run: |
+          docker buildx build --platform linux/arm64 --target bundle \
+            --output type=local,dest=build/ios/guest --progress plain ios/guest
+          cd build/ios/guest
+          sha256sum cocode-linux.erofs > cocode-linux.erofs.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoCode-iOS-ARM64-guest
+          path: build/ios/guest/
+          if-no-files-found: error
+          compression-level: 0
+
+  boot-base:
+    name: ARM64 boot ramdisk
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: imxieyi/Kernarium
+          ref: ${{ env.KERNARIUM_REV }}
+          persist-credentials: false
+      - name: Restore boot ramdisk
+        id: boot-cache
+        uses: actions/cache@v4
+        with:
+          path: boot-output
+          key: ios-boot-base-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}
+      - name: Build boot ramdisk from pinned source
+        if: steps.boot-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio debootstrap file flex gdisk rsync unzip wget
+          tools/rootfs/starter/build-all.sh --product boot-base-aarch64 \
+            --work "$RUNNER_TEMP/kernarium-boot-work" --output "$GITHUB_WORKSPACE/boot-output"
+      - name: Record boot ramdisk checksum
+        working-directory: boot-output
+        run: |
+          gzip -t uml-boot-base-aarch64.cpio.gz
+          sha256sum uml-boot-base-aarch64.cpio.gz > uml-boot-base-aarch64.cpio.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernarium-arm64-boot-base
+          path: |
+            boot-output/uml-boot-base-aarch64.cpio.gz
+            boot-output/uml-boot-base-aarch64.cpio.gz.sha256
+          if-no-files-found: error
+
+  ipa:
+    name: Unsigned iOS IPA
+    needs: [guest, boot-base]
+    runs-on: xcode-27
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: imxieyi/Kernarium
+          ref: ${{ env.KERNARIUM_REV }}
+          path: kernarium
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: CoCode-iOS-ARM64-guest
+          path: build/ios/guest
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernarium-arm64-boot-base
+          path: build/ios/boot
+      - name: Verify build inputs
+        run: |
+          (cd build/ios/guest && shasum -a 256 -c cocode-linux.erofs.sha256)
+          (cd build/ios/boot && shasum -a 256 -c uml-boot-base-aarch64.cpio.gz.sha256)
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          test "$(uname -m)" = arm64
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Apple build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install autoconf automake bison flex gettext groff gperf libtool lld llvm make ninja pkgconf rsync
+          for package in bison flex gettext groff libtool lld llvm; do
+            printf '%s/bin\n' "$(brew --prefix "$package")" >> "$GITHUB_PATH"
+          done
+          python3 -m pip install meson mako pyyaml packaging
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Build and package CoCode
+        env:
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: user.name
+          GIT_CONFIG_VALUE_0: github-actions[bot]
+          GIT_CONFIG_KEY_1: user.email
+          GIT_CONFIG_VALUE_1: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
+          bash ios/host/build-package.sh kernarium build/ios/boot \
+            build/ios/guest/cocode-linux.erofs build/ios/package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoCode-iOS-unsigned
+          path: build/ios/package/
+          if-no-files-found: error
+          compression-level: 0
