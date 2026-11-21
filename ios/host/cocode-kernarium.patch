@@ -1,0 +1,979 @@
+diff --git a/Kernarium/Info.plist b/Kernarium/Info.plist
+index 4dca895..5b52a6f 100644
+--- a/Kernarium/Info.plist
++++ b/Kernarium/Info.plist
+@@ -2,9 +2,22 @@
+ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+ <plist version="1.0">
+ <dict>
++	<key>CFBundleDisplayName</key>
++	<string>CoCode</string>
++	<key>NSAppTransportSecurity</key>
++	<dict>
++		<key>NSExceptionDomains</key>
++		<dict>
++			<key>127.0.0.1</key>
++			<dict>
++				<key>NSExceptionAllowsInsecureHTTPLoads</key>
++				<true/>
++			</dict>
++		</dict>
++	</dict>
+ 	<key>BGTaskSchedulerPermittedIdentifiers</key>
+ 	<array>
+-		<string>com.imxieyi.Kernarium.guest.*</string>
++		<string>io.cocode.ios.guest.*</string>
+ 	</array>
+ 	<key>NSMicrophoneUsageDescription</key>
+ 	<string>Kernarium records from the microphone only when you turn on Microphone in Emulator settings, so that programs in the guest can use it.</string>
+diff --git a/Kernarium/Kernarium.xcodeproj/project.pbxproj b/Kernarium/Kernarium.xcodeproj/project.pbxproj
+index e7648c5..7c381cf 100644
+--- a/Kernarium/Kernarium.xcodeproj/project.pbxproj
++++ b/Kernarium/Kernarium.xcodeproj/project.pbxproj
+@@ -621,7 +621,7 @@
+ 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+ 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+ 				MARKETING_VERSION = 1.0;
+-				PRODUCT_BUNDLE_IDENTIFIER = com.imxieyi.Kernarium;
++				PRODUCT_BUNDLE_IDENTIFIER = io.cocode.ios;
+ 				PRODUCT_NAME = "$(TARGET_NAME)";
+ 				SDKROOT = iphoneos;
+ 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+@@ -669,7 +669,7 @@
+ 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+ 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+ 				MARKETING_VERSION = 1.0;
+-				PRODUCT_BUNDLE_IDENTIFIER = com.imxieyi.Kernarium;
++				PRODUCT_BUNDLE_IDENTIFIER = io.cocode.ios;
+ 				PRODUCT_NAME = "$(TARGET_NAME)";
+ 				SDKROOT = iphoneos;
+ 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+diff --git a/Kernarium/Kernarium/BackgroundJob.swift b/Kernarium/Kernarium/BackgroundJob.swift
+index 434bd5a..7bd661c 100644
+--- a/Kernarium/Kernarium/BackgroundJob.swift
++++ b/Kernarium/Kernarium/BackgroundJob.swift
+@@ -157,7 +157,7 @@ final class BackgroundJob: ObservableObject {
+         case running(BackgroundJobTimeline)
+     }
+ 
+-    static let identifier = "com.imxieyi.Kernarium.guest.job"
++    static let identifier = "io.cocode.ios.guest.job"
+ 
+     @Published private(set) var state = State.idle
+     weak var controller: BackgroundController?
+diff --git a/Kernarium/Kernarium/ContentView.swift b/Kernarium/Kernarium/ContentView.swift
+index 8ee4cfa..7783af5 100644
+--- a/Kernarium/Kernarium/ContentView.swift
++++ b/Kernarium/Kernarium/ContentView.swift
+@@ -52,7 +52,20 @@ struct ContentView: View {
+                     .allowsHitTesting(guestViewMode == .serialConsole)
+                     .accessibilityHidden(guestViewMode != .serialConsole)
+ 
+-                if let refusal = launcher.memoryRefusal {
++                if launcher.phase == .running && serialConsole.cocodeForwardReady {
++                    CoxWebPane()
++                        .opacity(guestViewMode == .cox ? 1 : 0)
++                        .allowsHitTesting(guestViewMode == .cox)
++                        .accessibilityHidden(guestViewMode != .cox)
++                } else if launcher.phase == .running && guestViewMode == .cox {
++                    ProgressView("Starting the CoCode guest…")
++                }
++
++                if let issue = launcher.launchIssue {
++                    ContentUnavailableView(
++                        "CoCode could not start", systemImage: "externaldrive", description: Text(issue)
++                    )
++                } else if let refusal = launcher.memoryRefusal {
+                     MemoryRefusalNotice(reason: refusal)
+                         .padding()
+                 } else if let shortage = launcher.startShortage {
+@@ -97,7 +110,31 @@ struct ContentView: View {
+                 SceneCoverage.cornerOffsetEdges(coversScreen: sceneCoversScreen),
+                 sizeToFit: true
+             )
+-            floatingButtons
++            if guestViewMode != .cox {
++                floatingButtons
++            }
++        }
++        .safeAreaInset(edge: .top, spacing: 0) {
++            HStack {
++                Picker("View", selection: $guestViewMode) {
++                    Text("Cox").tag(GuestViewMode.cox)
++                    Text("Console").tag(GuestViewMode.serialConsole)
++                    Text("Display").tag(GuestViewMode.framebuffer)
++                }
++                .pickerStyle(.segmented)
++                if guestViewMode == .cox {
++                    Button("Emulator settings", systemImage: "gearshape") {
++                        settingsPresented = true
++                    }
++                    .labelStyle(.iconOnly)
++                }
++            }
++            .padding(8)
++            .background(.bar)
++        }
++        .onChange(of: guestViewMode) { _, mode in
++            if mode != .framebuffer { framebufferKeyboardVisible = false }
++            if mode != .serialConsole { serialConsole.resignFirstResponder() }
+         }
+         .ignoresSafeArea(.keyboard)
+         .overlay {
+@@ -191,7 +228,6 @@ struct ContentView: View {
+             if keepRunningChosen && launcher.phase == .running {
+                 keepRunningButton
+             }
+-            displayModeButton
+             keyboardButton
+             specialKeysRow
+         }
+@@ -254,17 +290,6 @@ struct ContentView: View {
+         backgroundJob.reconcile(mode: mode)
+     }
+ 
+-    private var displayModeButton: some View {
+-        floatingIconButton(
+-            systemName: guestViewMode == .framebuffer ? "terminal" : "display",
+-            accessibilityLabel: guestViewMode == .framebuffer
+-                ? "Show serial console"
+-                : "Show framebuffer",
+-            identifier: "displayModeButton",
+-            action: toggleGuestViewMode
+-        )
+-    }
+-
+     private var settingsButton: some View {
+         floatingIconButton(
+             systemName: "gearshape",
+@@ -278,6 +303,7 @@ struct ContentView: View {
+     /// Whether the view on screen holds the keyboard.
+     private var keyboardVisible: Bool {
+         switch guestViewMode {
++        case .cox: false
+         case .framebuffer: framebufferKeyboardVisible
+         case .serialConsole: serialConsole.isFocused
+         }
+@@ -360,6 +386,8 @@ struct ContentView: View {
+     /// text reaches what the user is looking at.
+     private func toggleKeyboard() {
+         switch guestViewMode {
++        case .cox:
++            break
+         case .framebuffer:
+             framebufferKeyboardVisible.toggle()
+         case .serialConsole:
+@@ -370,26 +398,14 @@ struct ContentView: View {
+             }
+         }
+     }
+-
+-    /// A mode switch puts the keyboard away: the view that held it is
+-    /// hidden, and no hidden view keeps keyboard focus.
+-    private func toggleGuestViewMode() {
+-        switch guestViewMode {
+-        case .framebuffer:
+-            framebufferKeyboardVisible = false
+-            guestViewMode = .serialConsole
+-        case .serialConsole:
+-            serialConsole.resignFirstResponder()
+-            guestViewMode = .framebuffer
+-        }
+-    }
+ }
+ 
+ enum GuestViewMode {
++    case cox
+     case framebuffer
+     case serialConsole
+ 
+-    static let defaultMode: Self = .framebuffer
++    static let defaultMode: Self = .cox
+ }
+ 
+ /// How this launch's guest run ended, as the application reports it.
+@@ -696,6 +712,33 @@ enum OverlayDisk {
+         return UInt64(sizeGiB) * 1024 * 1024 * 1024
+     }
+ 
++    static var persistentURL: URL {
++        // The UBD kernel command line cannot carry the space in Application Support.
++        URL.libraryDirectory.appendingPathComponent("CoCode/cocode-state.ext4")
++    }
++
++    static func openPersistent(sizeGiB: Int) throws -> URL {
++        let manager = FileManager.default
++        let disk = persistentURL
++        if manager.fileExists(atPath: disk.path) { return disk }
++
++        let directory = disk.deletingLastPathComponent()
++        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
++        let staging = directory.appendingPathComponent(UUID().uuidString)
++        // The initramfs consumes this one-time marker before it mounts user state.
++        let marker = Data("CoCode-unformatted-overlay-v1\u{0}".utf8)
++        guard manager.createFile(atPath: staging.path, contents: marker, attributes: [.posixPermissions: 0o600]) else {
++            throw CocoaError(.fileWriteUnknown)
++        }
++        defer { try? manager.removeItem(at: staging) }
++        let handle = try FileHandle(forWritingTo: staging)
++        defer { try? handle.close() }
++        try handle.truncate(atOffset: byteCount(forSizeGiB: sizeGiB))
++        try handle.synchronize()
++        try manager.moveItem(at: staging, to: disk)
++        return disk
++    }
++
+     static func recreate(
+         sizeGiB: Int,
+         in directory: URL = FileManager.default.temporaryDirectory
+@@ -892,6 +935,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+     /// Set while the device has too little free space for the guest to start.
+     /// Nothing started: the guest starts once there is room and the person
+     /// asks again.
++    @Published private(set) var launchIssue: String?
+     @Published private(set) var startShortage: StartSpace?
+     /// Set when the memory this launch states is a size the runtime refuses
+     /// (`MemoryRefusal`): nothing started, and a relaunch is what starts it.
+@@ -954,16 +998,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+         geometry: GuestDisplayGeometry
+     ) {
+         guard phase == .idle else { return }
+-        guard let rootfsFilename = RootfsImage.selectedFilename(
+-            configuredFilename: configuration.rootfsFilename
+-        ) else {
+-            print("Kernarium: invalid rootfs filename")
+-            return
+-        }
++        let rootfsFilename = RootfsImage.defaultFilename
+         guard let selection = RootfsImage.selection(named: rootfsFilename) else {
+-            print("Kernarium: Documents/\(rootfsFilename) is missing")
++            launchIssue = "Copy cocode-linux.erofs to CoCode’s Documents folder, then reopen the app."
+             return
+         }
++        launchIssue = nil
+         // The runtime refuses a size this host does not admit; the settings
+         // never offer one, so this says why rather than end on its bare result.
+         guard kernarium_runtime_loader_guest_memory_admitted(
+@@ -1003,7 +1043,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+         guard kernarium_runtime_loader_select(
+             selection.flavor.rawValue
+         ) == 0 else {
+-            print("Kernarium: cannot load the runtime")
++            launchIssue = "The Linux runtime framework could not load."
+             return
+         }
+         // A guest that restarts itself is booted again inside the run; the
+@@ -1115,30 +1155,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+         return run()
+     }
+ 
+-    /// A plain image boots read-only under a disposable overlay disk, which is
+-    /// recreated every launch and holds no state worth keeping.
++    /// A CoCode image stays read-only under a persistent overlay disk.
+     private func prepareImageBoot(rootfs: URL) -> PreparedBoot? {
+-        if rootfs.pathExtension.lowercased() == "ext4" {
+-            do {
+-                try FileManager.default.setAttributes(
+-                    [.posixPermissions: 0o444],
+-                    ofItemAtPath: rootfs.path
+-                )
+-            } catch {
+-                print("Kernarium: cannot seal the ext4 rootfs read-only")
+-                return nil
+-            }
+-        }
+         do {
+-            let overlay = try OverlayDisk.recreate(
+-                sizeGiB: configuration.overlaySizeGiB
+-            )
++            let overlay = try OverlayDisk.openPersistent(sizeGiB: configuration.overlaySizeGiB)
+             return PreparedBoot(rootfs: rootfs, overlay: overlay)
+         } catch {
+-            print(
+-                "Kernarium: cannot create " +
+-                "\(configuration.overlaySizeGiB) GiB overlay disk: \(error)"
+-            )
++            launchIssue = "The persistent guest disk could not be opened. Check available storage."
++            print("CoCode: cannot prepare guest disk: \(error)")
+             return nil
+         }
+     }
+@@ -1175,6 +1199,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+         stopThermalObservation()
+         restartIndicator.runEnded()
+         restarting = false
++        if result == Int32(KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED) {
++            launchIssue = "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode."
++        }
+         phase = .ended(result: result)
+         UIApplication.shared.isIdleTimerDisabled = false
+         print("Kernarium: runtime returned \(result)")
+@@ -1208,7 +1235,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+                 atPath: bundle.dataDisk.path
+             )
+         } else {
+-            firstStart = false
++            firstStart = !FileManager.default.fileExists(atPath: OverlayDisk.persistentURL.path)
+         }
+         return StartSpace(freeBytes: freeBytes, firstStart: firstStart)
+     }
+diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
+new file mode 100644
+index 0000000..6b8ff56
+--- /dev/null
++++ b/Kernarium/Kernarium/CoxWebPane.swift
+@@ -0,0 +1,175 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++import Foundation
++import SwiftUI
++import WebKit
++
++/// Cox owns its password form and session. Native code probes without cookies
++/// and the browser confines both navigations and network resources to Cox.
++struct CoxWebPane: View {
++    @State private var rules: WKContentRuleList?
++    @State private var failure: String?
++    @State private var attempt = 0
++
++    var body: some View {
++        Group {
++            if let failure {
++                ContentUnavailableView {
++                    Label("Cox is unavailable", systemImage: "wifi.exclamationmark")
++                } description: {
++                    Text(failure)
++                } actions: {
++                    Button("Retry") {
++                        self.failure = nil
++                        rules = nil
++                        attempt += 1
++                    }
++                }
++            } else if let rules {
++                CoxWebView(rules: rules) {
++                    failure = "The Cox page could not load. Check the guest console."
++                }
++            } else {
++                ProgressView("Waiting for Cox…")
++            }
++        }
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
++        .task(id: attempt) {
++            let compiled: WKContentRuleList?
++            do {
++                compiled = try await WKContentRuleListStore.default().compileContentRuleList(
++                    forIdentifier: "CoCode-Cox-v1",
++                    encodedContentRuleList: CoxOrigin.contentRules
++                )
++            } catch {
++                if !Task.isCancelled {
++                    failure = "WebKit could not install the Cox origin policy."
++                }
++                return
++            }
++            guard let compiled else {
++                if !Task.isCancelled {
++                    failure = "WebKit could not install the Cox origin policy."
++                }
++                return
++            }
++            let configuration = URLSessionConfiguration.ephemeral
++            configuration.timeoutIntervalForRequest = 2
++            configuration.timeoutIntervalForResource = 2
++            configuration.httpShouldSetCookies = false
++            configuration.httpCookieStorage = nil
++            let session = URLSession(configuration: configuration, delegate: CoxProbe(), delegateQueue: nil)
++            defer { session.invalidateAndCancel() }
++            let deadline = ContinuousClock.now + .seconds(90)
++            while !Task.isCancelled && ContinuousClock.now < deadline {
++                if let (_, response) = try? await session.data(from: CoxOrigin.discovery),
++                   (response as? HTTPURLResponse)?.statusCode == 200,
++                   CoxOrigin.contains(response.url) {
++                    if !Task.isCancelled { rules = compiled }
++                    return
++                }
++                try? await Task.sleep(for: .seconds(1))
++            }
++            if !Task.isCancelled {
++                failure = "Cox did not answer. Check the guest console for startup errors."
++            }
++        }
++    }
++}
++
++private enum CoxOrigin {
++    static let address = "http://127.0.0.1:3773"
++    static let page = URL(string: address + "/")!
++    static let discovery = URL(string: address + "/.well-known/t3/environment")!
++
++    static func contains(_ url: URL?) -> Bool {
++        guard let url else { return false }
++        return url.scheme == "http" && url.host == "127.0.0.1" && url.port == 3773 &&
++            url.user == nil && url.password == nil
++    }
++
++    // Cookie scope is host-based, so a request to another loopback port is
++    // blocked even when it is a subresource. Cox's same-origin WebSocket stays.
++    static let contentRules = #"""
++        [
++          {"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
++          {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
++          {"trigger":{"url-filter":"^http://127[.]0[.]0[.]1:3773/"},
++           "action":{"type":"ignore-previous-rules"}},
++          {"trigger":{"url-filter":"^ws://127[.]0[.]0[.]1:3773/"},
++           "action":{"type":"ignore-previous-rules"}}
++        ]
++        """#
++}
++
++private nonisolated final class CoxProbe: NSObject, URLSessionTaskDelegate {
++    func urlSession(
++        _ session: URLSession,
++        task: URLSessionTask,
++        willPerformHTTPRedirection response: HTTPURLResponse,
++        newRequest request: URLRequest,
++        completionHandler: @escaping @Sendable (URLRequest?) -> Void
++    ) {
++        completionHandler(nil)
++    }
++}
++
++private struct CoxWebView: UIViewRepresentable {
++    let rules: WKContentRuleList
++    let failed: () -> Void
++
++    func makeCoordinator() -> Coordinator { Coordinator(failed: failed) }
++
++    func makeUIView(context: Context) -> WKWebView {
++        let configuration = WKWebViewConfiguration()
++        configuration.websiteDataStore = .nonPersistent()
++        configuration.userContentController.add(rules)
++        let webView = WKWebView(frame: .zero, configuration: configuration)
++        webView.navigationDelegate = context.coordinator
++        webView.load(URLRequest(url: CoxOrigin.page))
++        return webView
++    }
++
++    func updateUIView(_ webView: WKWebView, context: Context) {}
++
++    final class Coordinator: NSObject, WKNavigationDelegate {
++        let failed: () -> Void
++
++        init(failed: @escaping () -> Void) { self.failed = failed }
++
++        func webView(
++            _ webView: WKWebView,
++            decidePolicyFor navigationAction: WKNavigationAction
++        ) async -> WKNavigationActionPolicy {
++            navigationAction.targetFrame != nil && CoxOrigin.contains(navigationAction.request.url)
++                ? .allow : .cancel
++        }
++
++        func webView(
++            _ webView: WKWebView,
++            decidePolicyFor navigationResponse: WKNavigationResponse
++        ) async -> WKNavigationResponsePolicy {
++            CoxOrigin.contains(navigationResponse.response.url) ? .allow : .cancel
++        }
++
++        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
++            reportFailure(error)
++        }
++
++        func webView(
++            _ webView: WKWebView,
++            didFailProvisionalNavigation navigation: WKNavigation!,
++            withError error: Error
++        ) {
++            reportFailure(error)
++        }
++
++        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { failed() }
++
++        private func reportFailure(_ error: Error) {
++            let error = error as NSError
++            if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return }
++            failed()
++        }
++    }
++}
+diff --git a/Kernarium/Kernarium/EmulatorConfiguration.swift b/Kernarium/Kernarium/EmulatorConfiguration.swift
+index fb5fc1a..d66537e 100644
+--- a/Kernarium/Kernarium/EmulatorConfiguration.swift
++++ b/Kernarium/Kernarium/EmulatorConfiguration.swift
+@@ -398,10 +398,7 @@ enum GuestSelection {
+ }
+ 
+ enum RootfsImage {
+-    /// The accepted KDE desktop image (tools/rootfs/desktop/images.json),
+-    /// which carries its own session setup. It applies only while the
+-    /// settings store no name: a stored name, `rootfs.erofs` included, is kept.
+-    static let defaultFilename = "kde-20260929-r2.erofs"
++    static let defaultFilename = "cocode-linux.erofs"
+     static let environmentKey = "KERNARIUM_ROOTFS"
+ 
+     nonisolated static var documentsDirectory: URL {
+diff --git a/Kernarium/Kernarium/EmulatorSettingsView.swift b/Kernarium/Kernarium/EmulatorSettingsView.swift
+index e722b7d..854803e 100644
+--- a/Kernarium/Kernarium/EmulatorSettingsView.swift
++++ b/Kernarium/Kernarium/EmulatorSettingsView.swift
+@@ -14,8 +14,6 @@ struct EmulatorSettingsView: View {
+ 
+     private let maximumVCPUCount: Int
+     private let defaults: UserDefaults
+-    private let rootfsFilenames: [String]
+-    private let documentsDirectory: URL
+ 
+     /// The most guest RAM the memory limit leaves at the chosen vCPU count.
+     private var maximumGuestMemoryMiB: Int {
+@@ -24,13 +22,6 @@ struct EmulatorSettingsView: View {
+         )
+     }
+ 
+-    private var androidBundleSelected: Bool {
+-        RootfsImage.selection(
+-            named: configuration.rootfsFilename,
+-            in: documentsDirectory
+-        )?.flavor == .android
+-    }
+-
+     init(
+         defaults: UserDefaults = .standard,
+         physicalProcessorCount: Int = EmulatorConfiguration.physicalProcessorCount,
+@@ -45,14 +36,6 @@ struct EmulatorSettingsView: View {
+             physicalProcessorCount: physicalProcessorCount
+         )
+         self.defaults = defaults
+-        self.documentsDirectory = documentsDirectory
+-        let availableRootfsFilenames = RootfsImage.availableFilenames(
+-            in: documentsDirectory
+-        )
+-        self.rootfsFilenames = availableRootfsFilenames.contains(
+-            loaded.rootfsFilename
+-        ) ? availableRootfsFilenames : [loaded.rootfsFilename] +
+-            availableRootfsFilenames
+         _configuration = State(initialValue: loaded)
+         let background = BackgroundSettings(defaults: defaults)
+         _backgroundMode = State(
+@@ -137,12 +120,14 @@ struct EmulatorSettingsView: View {
+                         .accessibilityIdentifier("guestMemoryLimitNote")
+                     }
+ 
+-                    Stepper(
+-                        "Overlay FS: \(configuration.overlaySizeGiB) GiB",
+-                        value: $configuration.overlaySizeGiB,
+-                        in: EmulatorConfiguration.overlaySizeRangeGiB
+-                    )
+-                    .accessibilityIdentifier("overlaySizeStepper")
++                    if !FileManager.default.fileExists(atPath: OverlayDisk.persistentURL.path) {
++                        Stepper(
++                            "Guest disk: \(configuration.overlaySizeGiB) GiB",
++                            value: $configuration.overlaySizeGiB,
++                            in: EmulatorConfiguration.overlaySizeRangeGiB
++                        )
++                        .accessibilityIdentifier("overlaySizeStepper")
++                    }
+                 }
+ 
+                 // Unlike the rest of the form this applies at once, whatever
+@@ -180,44 +165,12 @@ struct EmulatorSettingsView: View {
+                 }
+ 
+                 Section("Storage") {
+-                    Picker(
+-                        "Root filesystem",
+-                        selection: $configuration.rootfsFilename
+-                    ) {
+-                        ForEach(rootfsFilenames, id: \.self) { filename in
+-                            Text(filename).tag(filename)
+-                        }
+-                    }
+-                    .accessibilityIdentifier("rootfsPicker")
+-
+-                    if androidBundleSelected {
+-                        Stepper(
+-                            "Android disk: \(configuration.androidDiskSizeGiB) GiB",
+-                            value: $configuration.androidDiskSizeGiB,
+-                            in: EmulatorConfiguration.androidDiskSizeRangeGiB
+-                        )
+-                        .accessibilityIdentifier("androidDiskSizeStepper")
+-
+-                        Picker(
+-                            "Android boot",
+-                            selection: $configuration.androidBootMode
+-                        ) {
+-                            ForEach(AndroidBootMode.allCases) { mode in
+-                                Text(mode.title).tag(mode)
+-                            }
+-                        }
+-                        .accessibilityIdentifier("androidBootModePicker")
+-                    }
+-
+-                    Text(
+-                        "EROFS images and .\(GuestBundle.pathExtension) " +
+-                        "guest bundles are loaded from Documents."
+-                    )
++                    Text("CoCode boots cocode-linux.erofs from Documents.")
+                 }
+ 
+                 Section("Background") {
+                     Picker(
+-                        "When Kernarium is in the background",
++                        "When CoCode is in the background",
+                         selection: $backgroundMode
+                     ) {
+                         ForEach(offeredBackgroundModes) { mode in
+@@ -245,13 +198,6 @@ struct EmulatorSettingsView: View {
+                         .font(.footnote)
+                         .foregroundStyle(.secondary)
+                 }
+-                .onChange(of: configuration.rootfsFilename) { _, filename in
+-                    let background = BackgroundSettings(defaults: defaults)
+-                    backgroundMode = background.mode(forGuest: filename)
+-                    backgroundLimitMinutes = background.limitMinutes(
+-                        forGuest: filename
+-                    )
+-                }
+ 
+                 Section {
+                     Text("Changes take effect the next time the app launches.")
+diff --git a/Kernarium/Kernarium/SerialConsoleView.swift b/Kernarium/Kernarium/SerialConsoleView.swift
+index af65dd1..8179c49 100644
+--- a/Kernarium/Kernarium/SerialConsoleView.swift
++++ b/Kernarium/Kernarium/SerialConsoleView.swift
+@@ -48,6 +48,7 @@ final class SerialConsoleController: ObservableObject {
+     /// any software keyboard. A tap on the terminal changes it as well as
+     /// the application's keyboard button.
+     @Published private(set) var isFocused = false
++    @Published private(set) var cocodeForwardReady = false
+ 
+     convenience init() {
+         self.init(input: { SerialConsoleController.sendToGuest($0) })
+@@ -118,6 +119,16 @@ final class SerialConsoleController: ObservableObject {
+ 
+     func receive(_ data: Data) {
+         guard !data.isEmpty else { return }
++        // The release runtime sends this framed event directly to the relay
++        // when it acquires or releases the forward's listening socket.
++        if data == Data([0, 67, 111, 67, 111, 100, 101, 1]) {
++            cocodeForwardReady = true
++            return
++        }
++        if data == Data([0, 67, 111, 67, 111, 100, 101, 0]) {
++            cocodeForwardReady = false
++            return
++        }
+         guard terminalView?.surface != nil else {
+             pendingOutput.append(data)
+             return
+diff --git a/Kernarium/Runtime/KernariumRuntime.h b/Kernarium/Runtime/KernariumRuntime.h
+index c3484e0..db3700c 100644
+--- a/Kernarium/Runtime/KernariumRuntime.h
++++ b/Kernarium/Runtime/KernariumRuntime.h
+@@ -238,7 +238,7 @@ typedef struct kernarium_runtime_gpu_budget {
+  * call returns only when the guest powers off, the application stops it, a run
+  * fails, or the restart-loop guard ends the loop. It returns the guest's own
+  * status (0 for a power-off or a stop), a negated uml_emulator error constant
+- * for a run or start-up that failed, or KERNARIUM_RUNTIME_RESULT_RESTART_LOOP.
++ * for a run or start-up that failed, or one of the special results below.
+  * For Android, 0 means the guest powered off cleanly and all its resources have
+  * been released: another run may start in this process. A host stop or an
+  * unreported shutdown returns an error. */
+@@ -255,6 +255,8 @@ enum {
+      * after a finished boot that lasted 15 seconds or more never counts. It is
+      * outside the range of the negated uml_emulator errors (-1 through -4). */
+     KERNARIUM_RUNTIME_RESULT_RESTART_LOOP = -100,
++    /* CoCode could not open the required loopback forward. */
++    KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED = -101,
+ };
+ 
+ /* Evaluates the host GPU's budget for a guest of `guest_memory_mib` and
+diff --git a/Kernarium/Runtime/KernariumRuntime.mm b/Kernarium/Runtime/KernariumRuntime.mm
+index 3aebcb7..32f4587 100644
+--- a/Kernarium/Runtime/KernariumRuntime.mm
++++ b/Kernarium/Runtime/KernariumRuntime.mm
+@@ -437,11 +437,17 @@ void publishConsoleOutput(const void* buffer, std::size_t length)
+ class AppNetwork final {
+ public:
+     AppNetwork()
++#if KERNARIUM_RUNTIME_ANDROID_GUEST
+         : context_(uml_slirp_net_create())
++#else
++        : context_(uml_slirp_net_create_required_forwards())
++#endif
+     {
+         if (context_ == nullptr)
+             throw std::bad_alloc {};
+-#ifndef UML_APP_STORE_RUNTIME
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++        const char* forwarding = "tcp:127.0.0.1:3773-10.0.2.15:3773";
++#elif !defined(UML_APP_STORE_RUNTIME)
+         const char* forwarding = std::getenv("KERNARIUM_HOST_FORWARD");
+ #else
+         /* An App Store runtime reads no environment knob. */
+@@ -462,6 +468,9 @@ public:
+     ~AppNetwork()
+     {
+         if (context_ != nullptr) {
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++            publishForwardState(false);
++#endif
+             uml_slirp_net_stop(context_);
+             uml_slirp_net_destroy(context_);
+         }
+@@ -470,6 +479,34 @@ public:
+     AppNetwork(const AppNetwork&) = delete;
+     AppNetwork& operator=(const AppNetwork&) = delete;
+ 
++private:
++    int openLink() noexcept
++    {
++        unsigned char mac[6] {};
++        unsigned int mtu {};
++        return uml_slirp_net_open(context_, mac, &mtu);
++    }
++
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++    static void publishForwardState(bool ready)
++    {
++        const char event[] {0, 'C', 'o', 'C', 'o', 'd', 'e',
++                            static_cast<char>(ready)};
++        publishConsoleOutput(event, sizeof(event));
++    }
++#endif
++
++public:
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++    [[nodiscard]] int startCoCodeForward()
++    {
++        const int result = openLink();
++        if (result == 0)
++            publishForwardState(true);
++        return result;
++    }
++#endif
++
+     [[nodiscard]] uml_emulator_network_callbacks callbacks() noexcept
+     {
+         return {
+@@ -491,10 +528,15 @@ public:
+      * the guest's IRQ registration borrows. */
+     void resetLink() noexcept
+     {
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++        publishForwardState(false);
++#endif
+         uml_slirp_net_stop(context_);
+-        unsigned char mac[6] {};
+-        unsigned int mtu {};
+-        const int opened = uml_slirp_net_open(context_, mac, &mtu);
++        const int opened = openLink();
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++        if (opened >= 0)
++            publishForwardState(true);
++#endif
+         if (opened < 0) {
+             std::fprintf(
+                 stderr,
+@@ -1064,6 +1106,7 @@ public:
+                     if (received > 0) {
+                         publishConsoleOutput(
+                             buffer, static_cast<std::size_t>(received));
++#if KERNARIUM_RUNTIME_ANDROID_GUEST
+                         std::lock_guard outputLock(
+                             kernarium::console::output().stdoutMutex());
+                         std::string_view output(
+@@ -1082,6 +1125,7 @@ public:
+                                 break;
+                             }
+                         }
++#endif
+                         continue;
+                     }
+                     if (received < 0 && errno == EINTR)
+@@ -1366,15 +1410,14 @@ std::string fbconFontArgument(uint32_t dotsPerInch)
+ 
+ /* A Linux guest boots the embedded base archive and a segment holding the
+  * generic per-run /init and these parameters: the image read-only beneath an
+- * overlay whose writable layer is a fresh ext4 filesystem on the overlay
+- * disk, ubd1, and then the image's own init. Kernarium/README.md and
+- * tools/rootfs/boot-ramdisk/README.md own the contract. */
++ * overlay whose writable layer is CoCode's persistent ext4 disk on ubd1,
++ * and then the image's own init. */
+ std::string bootParameters(bool ext4Image)
+ {
+     std::string parameters {"UML_BOOT_ROOT=/dev/ubda\nUML_BOOT_ROOT_TYPE="};
+     parameters.append(ext4Image ? "ext4" : "erofs");
+     parameters.append(
+-        "\nUML_BOOT_UPPER=ext4\n"
++        "\nUML_BOOT_UPPER=ext4-persistent\n"
+         "UML_BOOT_UPPER_DEVICE=/dev/ubdb\n"
+         "UML_BOOT_ENTRY=/sbin/init\n");
+     return parameters;
+@@ -2543,7 +2586,12 @@ int runtimeRun(
+             guestProcessorCount);
+ 
+         AppNetwork network;
+-#if KERNARIUM_RUNTIME_ANDROID_GUEST
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++        if (const int error = network.startCoCodeForward(); error < 0) {
++            std::fprintf(stderr, "CoCode: loopback forward on port 3773 failed: %d\n", error);
++            return KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED;
++        }
++#else
+         if (request.identity.ethernetMac &&
+             !network.setEthernetAddress(*request.identity.ethernetMac)) {
+             std::fputs(
+diff --git a/darwin/device/network/slirp/include/uml_slirp_net.h b/darwin/device/network/slirp/include/uml_slirp_net.h
+index 07ff933..45b9714 100644
+--- a/darwin/device/network/slirp/include/uml_slirp_net.h
++++ b/darwin/device/network/slirp/include/uml_slirp_net.h
+@@ -14,6 +14,8 @@ extern "C" {
+  * and is released by uml_slirp_net_destroy, after uml_slirp_net_stop. The
+  * other calls return a negative value on failure. */
+ void *uml_slirp_net_create(void);
++/* A context whose open fails if any registered forward cannot bind. */
++void *uml_slirp_net_create_required_forwards(void);
+ void uml_slirp_net_destroy(void *context);
+ int uml_slirp_net_add_forward(void *context, const char *specification);
+ int uml_slirp_net_open(void *context, unsigned char mac[6], unsigned int *mtu);
+diff --git a/darwin/device/network/slirp/provider.cpp b/darwin/device/network/slirp/provider.cpp
+index fb88ab2..43dff6a 100644
+--- a/darwin/device/network/slirp/provider.cpp
++++ b/darwin/device/network/slirp/provider.cpp
+@@ -184,11 +184,11 @@ int SlirpProvider::open(std::span<unsigned char, 6> mac,
+ 		/* Replay the recorded forwards onto the SLiRP instance this open
+ 		 * created, before its worker exists. libslirp takes no lock: a
+ 		 * forward links a listening socket into the lists the worker walks,
+-		 * and frees it again when the host port is taken. A refused forward
+-		 * is reported but never fails the guest network: losing one
+-		 * convenience port must not cost every guest its only interface. */
++		 * and frees it again when the host port is taken. A launcher that
++		 * depends on its forwards can require them to bind before open. */
+ 		for (const auto &forward : forwards_) {
+-			if (install_forward(forward) == 0)
++			const int result = install_forward(forward);
++			if (result == 0)
+ 				continue;
+ 			std::fprintf(stderr,
+ 				"Unable to forward host %s:%u to guest %s:%u\n",
+@@ -196,6 +196,10 @@ int SlirpProvider::open(std::span<unsigned char, 6> mac,
+ 				static_cast<unsigned int>(forward.host_port),
+ 				forward.guest_address.c_str(),
+ 				static_cast<unsigned int>(forward.guest_port));
++			if (require_forwards_) {
++				slirp_.reset();
++				return result;
++			}
+ 		}
+ 		try {
+ 			/*
+@@ -834,6 +838,11 @@ extern "C" void *uml_slirp_net_create(void)
+ 	return new (std::nothrow) uml::network::SlirpProvider;
+ }
+ 
++extern "C" void *uml_slirp_net_create_required_forwards(void)
++{
++	return new (std::nothrow) uml::network::SlirpProvider{true};
++}
++
+ extern "C" void uml_slirp_net_destroy(void *context)
+ {
+ 	delete static_cast<uml::network::SlirpProvider *>(context);
+diff --git a/darwin/device/network/slirp/provider.hpp b/darwin/device/network/slirp/provider.hpp
+index 47cfba7..99fe04b 100644
+--- a/darwin/device/network/slirp/provider.hpp
++++ b/darwin/device/network/slirp/provider.hpp
+@@ -118,7 +118,8 @@ struct SlirpDeleter final {
+ 
+ class SlirpProvider final {
+ public:
+-	SlirpProvider() = default;
++	explicit SlirpProvider(bool require_forwards = false)
++		: require_forwards_(require_forwards) {}
+ 
+ 	SlirpProvider(const SlirpProvider &) = delete;
+ 	SlirpProvider &operator=(const SlirpProvider &) = delete;
+@@ -442,6 +443,7 @@ private:
+ 	std::size_t transmit_head_{};
+ 	std::size_t transmit_tail_{};
+ 	std::list<std::unique_ptr<Timer>> timers_;
++	const bool require_forwards_;
+ 	std::vector<HostForward> forwards_;
+ 	/* Guarded by start_mutex_. */
+ 	std::array<unsigned char, 6> mac_{default_guest_mac};
+diff --git a/tools/rootfs/boot-ramdisk/init b/tools/rootfs/boot-ramdisk/init
+index 5f54778..1e2e0fa 100755
+--- a/tools/rootfs/boot-ramdisk/init
++++ b/tools/rootfs/boot-ramdisk/init
+@@ -45,11 +45,11 @@ read_parameters()
+ 		esac
+ 	done < /boot.env
+ 	case "$root_type" in erofs|ext4) ;; *) fail "unsupported root type: $root_type" ;; esac
+-	case "$upper" in tmpfs|ext4|none) ;; *) fail "unsupported upper layer: $upper" ;; esac
++	case "$upper" in tmpfs|ext4|ext4-persistent|none) ;; *) fail "unsupported upper layer: $upper" ;; esac
+ 	case "$upper:$upper_device" in
+-	ext4:/dev/*|tmpfs:|none:) ;;
+-	ext4:*) fail "UML_BOOT_UPPER=ext4 needs UML_BOOT_UPPER_DEVICE=/dev/..." ;;
+-	*) fail "UML_BOOT_UPPER_DEVICE needs UML_BOOT_UPPER=ext4" ;;
++	ext4:/dev/*|ext4-persistent:/dev/*|tmpfs:|none:) ;;
++	ext4:*|ext4-persistent:*) fail "UML_BOOT_UPPER=$upper needs UML_BOOT_UPPER_DEVICE=/dev/..." ;;
++	*) fail "UML_BOOT_UPPER_DEVICE needs an ext4 upper layer" ;;
+ 	esac
+ 	case "$grow" in 0|1) ;; *) fail "UML_BOOT_GROW must be 0 or 1" ;; esac
+ 	case "$entry" in /*) ;; *) fail "UML_BOOT_ENTRY must be absolute: $entry" ;; esac
+@@ -167,11 +167,8 @@ mount_direct_root()
+ 		fail "cannot mount $root"
+ }
+ 
+-# The image read-only beneath a writable layer that ends with the run. Both
+-# layers stay visible in the new root, at /.uml-lower and /.uml-state, so a
+-# guest can check what it runs on and keep bulky state beside the overlay.
+-# The layer is a tmpfs, or an ext4 filesystem formatted afresh on a block
+-# device. Docker's overlay2 and containerd's overlay snapshotter refuse an
++# The image read-only beneath a writable layer. Both layers stay visible at
++# /.uml-lower and /.uml-state. Docker's overlay2 and containerd's snapshotter refuse an
+ # overlayfs backing, so on ext4 their state directories are bound from the
+ # same filesystem beside the overlay rather than kept in its upper layer.
+ mount_overlay_root()
+@@ -183,11 +180,23 @@ mount_overlay_root()
+ 		mount -t tmpfs -o mode=0755 tmpfs /state || \
+ 			fail "cannot mount the writable layer"
+ 		;;
+-	ext4)
++	ext4|ext4-persistent)
+ 		wait_for_device "$upper_device"
+-		mkfs.ext4 -F -q -m 0 \
+-			-E nodiscard,lazy_itable_init=1,lazy_journal_init=1 \
+-			"$upper_device" || fail "cannot format $upper_device"
++		# The host atomically creates a sparse disk headed by this marker.
++		# A missing filesystem alone never authorizes formatting an old disk.
++		if [ "$upper" = ext4 ] || {
++			IFS= read -r -d '' -n 30 marker < "$upper_device" &&
++			[ "$marker" = CoCode-unformatted-overlay-v1 ];
++		}; then
++			mkfs.ext4 -F -q -m 0 \
++				-E nodiscard,lazy_itable_init=1,lazy_journal_init=1 \
++				"$upper_device" || fail "cannot format $upper_device"
++			if [ "$upper" = ext4-persistent ]; then
++				# Retire the marker in the reserved boot area before switch_root.
++				printf '\000' 1<> "$upper_device" || fail "cannot clear the disk marker"
++				sync
++			fi
++		fi
+ 		mount -t ext4 -o noatime,nosuid,nodev "$upper_device" /state || \
+ 			fail "cannot mount $upper_device"
+ 		;;
+@@ -197,9 +206,9 @@ mount_overlay_root()
+ 	mount -t overlay \
+ 		-o lowerdir=/lower,upperdir=/state/upper,workdir=/state/work \
+ 		overlay /newroot || fail "cannot mount the overlay"
+-	[ "$upper" = ext4 ] || return 0
++	[ "$upper" != tmpfs ] || return 0
+ 	for name in docker containerd; do
+-		mkdir -m 0711 "/state/$name" && \
++		mkdir -p -m 0711 "/state/$name" && \
+ 			mkdir -p "/newroot/var/lib/$name" && \
+ 			mount -o bind "/state/$name" "/newroot/var/lib/$name" || \
+ 			fail "cannot bind the $name state"
