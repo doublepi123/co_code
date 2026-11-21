@@ -106,11 +106,13 @@ jobs:
           name: kernarium-arm64-boot-base
           path: build/ios/boot
       - name: Verify build inputs
+        id: toolchain
         run: |
           (cd build/ios/guest && shasum -a 256 -c cocode-linux.erofs.sha256)
           (cd build/ios/boot && shasum -a 256 -c uml-boot-base-aarch64.cpio.gz.sha256)
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          printf 'sdk=%s\n' "$sdk" >> "$GITHUB_OUTPUT"
           test "$(uname -m)" = arm64
       - uses: actions/setup-python@v5
         with:
@@ -125,8 +127,14 @@ jobs:
           done
           python3 -m pip install meson mako pyyaml packaging
           xcodebuild -downloadComponent MetalToolchain
+      - uses: actions/cache/restore@v4
+        id: kernels
+        with:
+          path: build/ios/host-kernels
+          key: ios-darwin-kernels-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
       - name: Build and package CoCode
         env:
+          COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: user.name
           GIT_CONFIG_VALUE_0: github-actions[bot]
@@ -136,6 +144,11 @@ jobs:
           export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
           bash ios/host/build-package.sh kernarium build/ios/boot \
             build/ios/guest/cocode-linux.erofs build/ios/package
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.kernels.outputs.cache-hit != 'true' && hashFiles('build/ios/host-kernels/*/kernel-artifact.json') != '' }}
+        with:
+          path: build/ios/host-kernels
+          key: ${{ steps.kernels.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
           name: CoCode-iOS-unsigned

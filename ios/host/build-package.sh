@@ -77,32 +77,49 @@ python3 -B "$KERNARIUM_DIR/tools/rootfs/boot-ramdisk/verify_base.py" --descripto
 mkdir -p "$KERNARIUM_DIR/.build/rootfs/$BOOT_RELEASE"
 cp "$BOOT_BASE" "$KERNARIUM_DIR/.build/rootfs/$BOOT_RELEASE/uml-boot-base-aarch64.cpio.gz"
 
-# Configure the maintained Linux source inside the case-sensitive volume. The
-# bootstrap fetches the pinned kernel revision into this path and applies the
-# shared and Darwin patch series before compilation.
 LINE="$KERNARIUM_DIR/kernel/mainline-6.18"
-KERNEL_SOURCE="$MOUNT/linux"
-cat > "$LINE/source-location.conf" <<EOF
-UML_KERNEL_SOURCE_DIR=$KERNEL_SOURCE
-EOF
-"$LINE/scripts/prepare-source.sh"
-"$KERNARIUM_DIR/dependencies/prepare.sh" --product kernel-host-tools
-"$KERNARIUM_DIR/dependencies/prepare.sh" --archive-manifest "$KERNARIUM_DIR/dependencies/kernel-host-tools/archives.tsv"
-"$KERNARIUM_DIR/dependencies/build-kernel-host-tools.sh"
-# Both embedded runtimes require the bridge ABI from the pinned source.
-for product in linux android; do
-    if [ "$product" = linux ]; then
-        descriptor="$LINE/artifacts/accepted-4k.env"
-    else
-        descriptor="$LINE/artifacts/accepted-android-4k.env"
+KERNEL_ARTIFACTS="$KERNARIUM_DIR/.build/kernel/artifacts"
+if [ -n "${COCODE_IOS_KERNEL_CACHE_DIR:-}" ] && [ -d "$COCODE_IOS_KERNEL_CACHE_DIR" ]; then
+    mkdir -p "$(dirname "$KERNEL_ARTIFACTS")"
+    cp -R "$COCODE_IOS_KERNEL_CACHE_DIR" "$KERNEL_ARTIFACTS"
+else
+    KERNEL_SOURCE="$MOUNT/linux"
+    printf 'UML_KERNEL_SOURCE_DIR=%s\n' "$KERNEL_SOURCE" > "$LINE/source-location.conf"
+    "$LINE/scripts/prepare-source.sh"
+    "$KERNARIUM_DIR/dependencies/prepare.sh" --product kernel-host-tools
+    "$KERNARIUM_DIR/dependencies/prepare.sh" --archive-manifest "$KERNARIUM_DIR/dependencies/kernel-host-tools/archives.tsv"
+    "$KERNARIUM_DIR/dependencies/build-kernel-host-tools.sh"
+    for product in linux android; do
+        if [ "$product" = linux ]; then
+            descriptor="$LINE/artifacts/accepted-4k.env"
+        else
+            descriptor="$LINE/artifacts/accepted-android-4k.env"
+        fi
+        (
+            . "$descriptor"
+            kernel_build="$MOUNT/build-kernel-$product"
+            "$LINE/build/build-kernel.sh" --slice arm64 --product "$product" --build "$kernel_build"
+            "$LINE/build/publish-artifact.py" --source "$KERNEL_SOURCE" --build "$kernel_build" \
+                --product "$product" --output-root "$KERNEL_ARTIFACTS" \
+                --release-id "$UML_KERNEL_ARTIFACT_RELEASE_ID" --objcopy "$(command -v llvm-objcopy)"
+        )
+    done
+    if [ -n "${COCODE_IOS_KERNEL_CACHE_DIR:-}" ]; then
+        cp -R "$KERNEL_ARTIFACTS" "$COCODE_IOS_KERNEL_CACHE_DIR"
     fi
+fi
+
+# Replaying the pinned kernel tree can produce a different Git commit ID.
+# CMake still checks the descriptor's final tree, ABI and artifact inventory.
+for descriptor in "$LINE/artifacts/accepted-4k.env" "$LINE/artifacts/accepted-android-4k.env"; do
     (
         . "$descriptor"
-        kernel_build="$MOUNT/build-kernel-$product"
-        "$LINE/build/build-kernel.sh" --slice arm64 --product "$product" --build "$kernel_build"
-        "$LINE/build/publish-artifact.py" --source "$KERNEL_SOURCE" --build "$kernel_build" \
-            --product "$product" --output-root "$KERNARIUM_DIR/.build/kernel/artifacts" \
-            --release-id "$UML_KERNEL_ARTIFACT_RELEASE_ID" --objcopy "$(command -v llvm-objcopy)"
+        release=$(< "$KERNEL_ARTIFACTS/$UML_KERNEL_ARTIFACT_DIRECTORY_NAME/kernel/kernel.release")
+        expected_series=${UML_KERNEL_ARTIFACT_RELEASE%-g*}
+        [[ "$release" =~ ^6[.]18[.][0-9]+-g[0-9a-f]+$ && "$release" = "$expected_series"-g* ]] ||
+            fail "unexpected rebuilt kernel release: $release"
+        sed "s/^UML_KERNEL_ARTIFACT_RELEASE=.*/UML_KERNEL_ARTIFACT_RELEASE='$release'/" "$descriptor" > "$descriptor.local"
+        mv "$descriptor.local" "$descriptor"
     )
 done
 
