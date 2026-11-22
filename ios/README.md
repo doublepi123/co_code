@@ -13,7 +13,7 @@ docker buildx build \
   ios/guest
 ```
 
-The result is `build/ios/guest/cocode-linux.erofs`. The image contains Cox 0.2.22, OMO 5.1.79, and a musl build of `node-pty`. The builder checks the filesystem before exporting it. Exact Cox and OMO versions are pinned; Alpine and npm may resolve newer transitive packages on a later build.
+The result is `build/ios/guest/cocode-linux.erofs`. The image contains Cox 0.2.27, OMO 5.1.79, and a musl build of `node-pty`. The builder checks the filesystem before exporting it. Exact Cox and OMO versions are pinned; Alpine and npm may resolve newer transitive packages on a later build.
 
 ## GitHub Actions build
 

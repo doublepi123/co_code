@@ -1,6 +1,6 @@
 FROM alpine:3.24.1 AS runtime
 
-ARG COX_VERSION=0.2.22
+ARG COX_VERSION=0.2.27
 ARG OMO_VERSION=5.1.79
 
 RUN apk add --no-cache nodejs npm bash git curl ripgrep openssh-client ca-certificates python3 e2fsprogs \
