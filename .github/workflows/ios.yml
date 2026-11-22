@@ -31,6 +31,8 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       publish: ${{ steps.release.outputs.publish }}
+      version: ${{ steps.release.outputs.version }}
+      build: ${{ steps.release.outputs.build }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,7 +47,20 @@ jobs:
           else
             tag=ios-preview-$GITHUB_RUN_NUMBER publish=false
           fi
-          printf 'tag=%s\npublish=%s\n' "$tag" "$publish" >> "$GITHUB_OUTPUT"
+          # A tag names its own version. Every other build is the next patch after the newest
+          # ios-vX.Y.Z tag; the run number is the build number, so each build is distinct.
+          tags=$(git ls-remote --tags --refs "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" 'refs/tags/ios-v*')
+          latest=$(printf '%s\n' "$tags" | sed -n 's#^.*refs/tags/ios-v\([0-9]*\.[0-9]*\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
+          if [[ "$GITHUB_REF" == refs/tags/ios-v* ]]; then
+            version=${GITHUB_REF_NAME#ios-v}
+          elif [[ -n "$latest" ]]; then
+            IFS=. read -r major minor patch <<< "$latest"
+            version=$major.$minor.$((patch + 1))
+          else
+            version=0.1.0
+          fi
+          printf 'tag=%s\npublish=%s\nversion=%s\nbuild=%s\n' "$tag" "$publish" "$version" "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "CoCode iOS $version ($GITHUB_RUN_NUMBER), release $tag"
       - uses: docker/setup-buildx-action@v3
       - name: Build and check guest filesystem
         run: |
@@ -179,6 +194,8 @@ jobs:
       - name: Build and package CoCode
         env:
           COCODE_IOS_ARCHIVE_ZIP: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && format('{0}/CoCode.xcarchive.zip', runner.temp) || '' }}
+          COCODE_IOS_VERSION: ${{ needs.guest.outputs.version }}
+          COCODE_IOS_BUILD_NUMBER: ${{ needs.guest.outputs.build }}
           COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
           GIT_CONFIG_COUNT: '2'
           GIT_CONFIG_KEY_0: user.name
@@ -187,7 +204,6 @@ jobs:
           GIT_CONFIG_VALUE_1: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
           export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
-          if [[ "$GITHUB_REF" == refs/tags/ios-v* ]]; then export COCODE_IOS_VERSION=${GITHUB_REF_NAME#ios-v}; fi
           bash ios/host/build-package.sh kernarium build/ios/boot \
             build/ios/guest/CoCodeGuest.json build/ios/package
       - uses: actions/cache/save@v4
@@ -231,6 +247,8 @@ jobs:
       contents: write
     env:
       TAG: ${{ needs.guest.outputs.tag }}
+      VERSION: ${{ needs.guest.outputs.version }}
+      BUILD: ${{ needs.guest.outputs.build }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
@@ -251,7 +269,7 @@ jobs:
           prerelease=--prerelease
           [[ "$TAG" == ios-v* && "$TAG" != ios-v0.* ]] && prerelease=
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
-            --title "CoCode iOS $TAG" \
+            --title "CoCode iOS $VERSION ($BUILD)" \
             --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \
             cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS
       - name: Verify the image downloads without credentials

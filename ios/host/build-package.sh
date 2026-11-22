@@ -151,7 +151,11 @@ ARCHIVE="$WORK/CoCode.xcarchive"
 VERSION_SETTINGS=()
 if [[ -n "${COCODE_IOS_VERSION:-}" ]]; then
     [[ "$COCODE_IOS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid CoCode iOS version: $COCODE_IOS_VERSION"
-    VERSION_SETTINGS=(MARKETING_VERSION="$COCODE_IOS_VERSION")
+    VERSION_SETTINGS+=(MARKETING_VERSION="$COCODE_IOS_VERSION")
+fi
+if [[ -n "${COCODE_IOS_BUILD_NUMBER:-}" ]]; then
+    [[ "$COCODE_IOS_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail "invalid CoCode iOS build number: $COCODE_IOS_BUILD_NUMBER"
+    VERSION_SETTINGS+=(CURRENT_PROJECT_VERSION="$COCODE_IOS_BUILD_NUMBER")
 fi
 xcodebuild -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" \
     -scheme Kernarium -configuration Release -destination 'generic/platform=iOS' \
@@ -169,6 +173,10 @@ if codesign -dv "$APP" >/dev/null 2>&1; then fail 'Xcode archive unexpectedly si
 if [[ -n "${COCODE_IOS_VERSION:-}" ]]; then
     APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
     [ "$APP_VERSION" = "$COCODE_IOS_VERSION" ] || fail "app version is $APP_VERSION, expected $COCODE_IOS_VERSION"
+fi
+if [[ -n "${COCODE_IOS_BUILD_NUMBER:-}" ]]; then
+    APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")
+    [ "$APP_BUILD" = "$COCODE_IOS_BUILD_NUMBER" ] || fail "app build is $APP_BUILD, expected $COCODE_IOS_BUILD_NUMBER"
 fi
 cmp -s "$GUEST_MANIFEST" "$APP/CoCodeGuest.json" || fail 'app bundle lacks the guest download manifest'
 [ -d "$APP/zh-Hans.lproj" ] || fail 'app bundle lacks Simplified Chinese resources'
