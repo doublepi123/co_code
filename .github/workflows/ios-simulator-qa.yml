@@ -188,9 +188,9 @@ jobs:
           echo 'dummynet in proto tcp from any port 443 to any pipe 1' | sudo pfctl -q -f -
           sudo pfctl -q -E
           capture_appearance light 600
+          capture_appearance dark 120
           sudo pfctl -q -d || true
           sudo dnctl -q flush || true
-          capture_appearance dark 120
       - name: Collect test results
         if: always()
         run: |
