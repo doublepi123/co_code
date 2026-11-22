@@ -1763,10 +1763,10 @@ index 0000000..90f55e3
 +}
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..986ee8e
+index 0000000..7488e84
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,224 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -1862,7 +1862,8 @@ index 0000000..986ee8e
 +        configuration.httpCookieStorage = nil
 +        let session = URLSession(configuration: configuration, delegate: CoxNoRedirects(), delegateQueue: nil)
 +        defer { session.invalidateAndCancel() }
-+        let deadline = ContinuousClock.now + .seconds(90)
++        // A cold Cox start in the emulated guest can take minutes on a slow device.
++        let deadline = ContinuousClock.now + .seconds(600)
 +        while !Task.isCancelled && ContinuousClock.now < deadline {
 +            if let (_, response) = try? await session.data(from: CoxOrigin.discovery),
 +               (response as? HTTPURLResponse)?.statusCode == 200,
@@ -4046,10 +4047,10 @@ index 2e58947..7fcd94b 100644
      }
 diff --git a/Kernarium/KernariumUITests/CoCodeHomeUITests.swift b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
 new file mode 100644
-index 0000000..5754bb6
+index 0000000..6216ca5
 --- /dev/null
 +++ b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,78 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import XCTest
 +
@@ -4089,7 +4090,18 @@ index 0000000..5754bb6
 +        let toggle = web.buttons.matching(
 +            NSPredicate(format: "label IN %@", ["切换主侧边栏", "Toggle main sidebar"])
 +        ).firstMatch
-+        XCTAssertTrue(toggle.waitForExistence(timeout: 900), "Cox did not open signed in")
++        guard toggle.waitForExistence(timeout: 900) else {
++            attachScreenshot(of: app, named: "cox-not-open")
++            let logs = app.buttons.matching(
++                NSPredicate(format: "label IN %@", ["查看日志", "View logs"])
++            ).firstMatch
++            if logs.exists {
++                logs.tap()
++                attachScreenshot(of: app, named: "cox-not-open-logs")
++            }
++            XCTFail("Cox did not open signed in")
++            return
++        }
 +        attachScreenshot(of: app, named: "cox-signed-in")
 +        toggle.tap()
 +
