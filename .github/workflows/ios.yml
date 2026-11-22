@@ -268,10 +268,22 @@ jobs:
           sha256sum cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json > SHA256SUMS
           prerelease=--prerelease
           [[ "$TAG" == ios-v* && "$TAG" != ios-v0.* ]] && prerelease=
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
-            --title "CoCode iOS $VERSION ($BUILD)" \
-            --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \
-            cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS
+          assets=(cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS)
+          # The releases API intermittently answers 403 to this token; retry, and finish a
+          # release an earlier attempt created by uploading its assets again.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}" && exit 0
+            elif gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
+                --title "CoCode iOS $VERSION ($BUILD)" \
+                --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \
+                "${assets[@]}"; then
+              exit 0
+            fi
+            echo "Release attempt $attempt failed; retrying"
+            sleep $(( attempt * 20 ))
+          done
+          exit 1
       - name: Verify the image downloads without credentials
         working-directory: release
         run: |
