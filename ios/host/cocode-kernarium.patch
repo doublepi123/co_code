@@ -4047,10 +4047,10 @@ index 2e58947..7fcd94b 100644
      }
 diff --git a/Kernarium/KernariumUITests/CoCodeHomeUITests.swift b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
 new file mode 100644
-index 0000000..6216ca5
+index 0000000..8b339f9
 --- /dev/null
 +++ b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,79 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import XCTest
 +
@@ -4087,7 +4087,8 @@ index 0000000..6216ca5
 +        let app = XCUIApplication()
 +        app.launch()
 +        let web = app.webViews.firstMatch
-+        let toggle = web.buttons.matching(
++        // Cox renders its sidebar toggle as a switch, not a button.
++        let toggle = web.descendants(matching: .any).matching(
 +            NSPredicate(format: "label IN %@", ["切换主侧边栏", "Toggle main sidebar"])
 +        ).firstMatch
 +        guard toggle.waitForExistence(timeout: 900) else {
@@ -4105,7 +4106,7 @@ index 0000000..6216ca5
 +        attachScreenshot(of: app, named: "cox-signed-in")
 +        toggle.tap()
 +
-+        let settings = web.buttons.matching(
++        let settings = web.descendants(matching: .any).matching(
 +            NSPredicate(format: "label IN %@", ["设置", "Settings"])
 +        ).firstMatch
 +        XCTAssertTrue(settings.waitForExistence(timeout: 15))
