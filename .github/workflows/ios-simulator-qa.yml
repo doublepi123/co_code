@@ -125,19 +125,19 @@ jobs:
           key: ios-sim-gpu-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
       - name: Select and boot iPhone simulator
         run: |
-          device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Booted/ {print $2; exit}')
-          if [[ -z "$device" ]]; then
-            device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
-            xcrun simctl boot "$device"
-          fi
+          set -euo pipefail
+          device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
           echo "SIMULATOR_UDID=$device" >> "$GITHUB_ENV"
+          # Start from a known state: a preinstalled simulator may report booted while shutting down.
+          xcrun simctl shutdown all || true
+          xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
-          xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
           xcrun simctl spawn "$device" defaults write .GlobalPreferences AppleLanguages -array zh-Hans en
           xcrun simctl spawn "$device" defaults write .GlobalPreferences AppleLocale -string zh_CN
           xcrun simctl shutdown "$device"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+          xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
       - name: Build simulator app and run selected tests
         env:
           COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
