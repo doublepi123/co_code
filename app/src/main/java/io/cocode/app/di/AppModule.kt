@@ -32,9 +32,13 @@ import io.cocode.app.runtime.RemoteServerStore
 import io.cocode.app.runtime.RuntimePaths
 import io.cocode.app.runtime.RuntimeSecrets
 import io.cocode.app.runtime.WebSessionAuthenticator
+import io.cocode.app.runtime.install.AgentVersionResolvers
 import io.cocode.app.runtime.install.DefaultPackageVersionSource
+import io.cocode.app.runtime.install.GithubReleaseVersionSource
+import io.cocode.app.runtime.install.InstalledComponents
 import io.cocode.app.runtime.install.NpmPackageVersionSource
 import io.cocode.app.runtime.install.RuntimeInstallerImpl
+import io.cocode.app.runtime.install.VersionSourceCatalog
 import io.cocode.app.runtime.network.AndroidNetworkEvents
 import io.cocode.app.runtime.network.AndroidSystemDnsProvider
 import io.cocode.app.runtime.network.DnsRefresher
@@ -199,9 +203,17 @@ val appModule =
                 versionSource =
                     DefaultPackageVersionSource(
                         npm = NpmPackageVersionSource(get<OkHttpClient>()),
-                        agents = manifest.agents,
-                        fallbackT3Version = manifest.t3.version,
-                        coxPackage = manifest.t3.npmPackage,
+                        catalog =
+                            VersionSourceCatalog(
+                                agents = manifest.agents,
+                                fallbackT3Version = manifest.t3.version,
+                                coxPackage = manifest.t3.npmPackage,
+                            ),
+                        resolvers =
+                            AgentVersionResolvers(
+                                github = GithubReleaseVersionSource(get<OkHttpClient>()),
+                                coxOmoVersion = { InstalledComponents.coxSupportedOmoVersion(paths.rootfs) },
+                            ),
                     ),
             ).also { it.initialize() }
         }

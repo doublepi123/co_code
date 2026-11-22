@@ -9,9 +9,9 @@ Static runtime inputs packaged into the APK:
 
 ## Design And Flow
 
-`RuntimeManifestReader` validates the manifest supplied by DI. Runtime `2026.11.04.1` uses Cox fallback `0.1.29`; setup resolves npm latest and pins the result. Architectures remain arm64-v8a and x86_64 with verified Alpine 3.24.1 archives.
+`RuntimeManifestReader` validates the manifest supplied by DI. Runtime `2026.11.16.1` uses Cox fallback `0.1.96`; setup resolves npm latest and pins the result. Architectures remain arm64-v8a and x86_64 with verified Alpine 3.24.1 archives.
 
-Selectable npm agents are Codex, Claude Code, OpenCode, Grok (`@xai-official/grok`) and Pi (`@earendil-works/pi-coding-agent`). Cursor is explicitly `installation=bundled`, with no npm package/bin; its SDK is installed and verified as part of Cox. Other Cox providers remain opt-in provider instances in Cox settings, with their actual managed/manual installation methods rather than fake npm agent entries.
+Selectable agents are OMO Native (`omo-ai`, `versionPolicy=cox`, fallback `5.1.69`, placed first), Oh My Pi (`installation=github-release`, `can1357/oh-my-pi` standalone musl binaries verified against `SHA256SUMS.txt`, fallback `18.20.3`), and unpinned npm CLIs Codex, Claude Code, OpenCode, Grok (`@xai-official/grok`) and Pi (`@earendil-works/pi-coding-agent`). Cursor is explicitly `installation=bundled`, with no npm package/bin; its SDK is installed and verified as part of Cox. Other Cox providers remain opt-in provider instances in Cox settings, with their actual managed/manual installation methods rather than fake npm agent entries.
 
 The installer stages rootfs/packages, writes the shim at `/opt/cocode/android-shim.cjs`, verifies native modules, PTY and offline Cursor SDK prewarm, then atomically activates. Launch sets `NODE_OPTIONS` to preload the shim. Persistent home and workspace are separate from the replaceable environment. Manifest changes take effect on install/repair/update, not by deleting user data.
 

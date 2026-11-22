@@ -108,4 +108,44 @@ class RuntimeManifestTest {
         assertThrows(IllegalArgumentException::class.java) { cursor.copy(installation = "shell").validate() }
     }
 
+    @Test
+    fun `release and cox-coupled agent specs enforce architecture coverage and safe coordinates`() {
+        val omp =
+            AgentSpec(
+                id = "omp",
+                bin = "omp",
+                displayName = "Oh My Pi",
+                installation = "github-release",
+                fallbackVersion = "18.20.3",
+                githubRepo = "can1357/oh-my-pi",
+                assets = mapOf("arm64-v8a" to "omp-linux-musl-arm64", "x86_64" to "omp-linux-musl-x64"),
+            )
+        val omo =
+            AgentSpec(
+                id = "omo",
+                npmPackage = "omo-ai",
+                bin = "omo",
+                displayName = "OMO Native",
+                versionPolicy = "cox",
+                fallbackVersion = "5.1.69",
+            )
+        manifest().copy(agents = listOf(omo, omp)).validate()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            manifest().copy(agents = listOf(omp.copy(assets = mapOf("arm64-v8a" to "omp-linux-musl-arm64")))).validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            omp.copy(githubRepo = "can1357/../../bad").validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            omp.copy(assets = mapOf("arm64-v8a" to "../omp", "x86_64" to "omp")).validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            omo.copy(fallbackVersion = "latest").validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            omo.copy(id = "codex").validate()
+        }
+    }
+
 }

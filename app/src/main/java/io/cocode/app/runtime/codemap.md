@@ -12,7 +12,7 @@ Runs Cox and its selected agents inside a shared Alpine/Node environment under P
 - `ServerKind.kt` contains only `T3` (Cox). `ServersState`, selection stores and controller selection APIs remain for compatibility. Saved unknown/retired server choices sanitize to Cox, never to an unsupported enum.
 - `RuntimePaths.kt` keeps `environment/rootfs` and metadata together for atomic activation. `environment.staging` and `environment.rollback` implement the swap protocol. `home`, `workspace`, logs, cache, secrets and command-suite directories live outside the replaceable environment.
 - `RuntimeSecrets.kt` preserves the existing app-private `ui-password`. The Cox log retains the historical `t3.log` name.
-- `RestartPolicy.kt` and `WorkCounter.kt` are pure helpers. Terminal state publication clears running intent where required; DNS has separate generation guards.
+- `RestartPolicy.kt`, `UpdateAvailability.kt` and `WorkCounter.kt` are pure helpers. Terminal state publication clears running intent where required; DNS has separate generation guards.
 
 ## Flow
 

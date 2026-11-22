@@ -19,6 +19,8 @@ object T3ProviderDefaults {
     /** Installed agent id to Cox's provider driver and default instance identity. */
     private val AGENT_DRIVERS =
         mapOf(
+            "omo" to "omo",
+            "omp" to "omp",
             "codex" to "codex",
             "claude" to "claudeAgent",
             "opencode" to "opencode",

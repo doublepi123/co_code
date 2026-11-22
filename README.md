@@ -10,7 +10,7 @@
 
 CoCode 由 AndChamber（MIT）派生而来，在 Alpine Linux（PRoot，无 root）环境中专门运行 **Cox**。本机安装、更新、页面认证和模型配置都围绕 Cox；不再安装或连接 OpenChamber。Cox 沿用 T3 Code 协议，已有兼容服务器记录仍可使用。
 
-- **代理任选**：可安装 Codex、Claude Code、OpenCode、Grok、Pi；Cursor 使用 Cox 内置 SDK。追加安装保留已有代理；卸载需要确认，项目与主目录配置保留。
+- **代理任选**：可安装 OMO Native、Oh My Pi、Codex、Claude Code、OpenCode、Grok、Pi；Cursor 使用 Cox 内置 SDK。追加安装保留已有代理；卸载需要确认，项目与主目录配置保留。
 - **模型中心**：首页可直接打开 Cox 的模型中心，配置服务地址、API 密钥、协议和模型，并绑定到 Agent。Cox 停止时会先自动启动，配置与密钥由 Cox 管理。
 - **Agent 设置**：首页进入 Cox 设置，管理认证、Antigravity 和 ACP 注册表安装。Fx、Muse 需要在 Cox 中配置上游可执行文件；不提供虚构的 npm 安装包。CoCode 不再提供 Codex 登录，也不查询或展示 Codex 登录态。
 - **App 更新提示**：打开 App 时检查本项目的 GitHub Releases（包括 0.x 预发布版），有新版时提示前往下载；不会自动安装或中断任务。
@@ -25,8 +25,8 @@ CoCode 由 AndChamber（MIT）派生而来，在 Alpine Linux（PRoot，无 root
 |---|---|
 | Alpine Linux | 3.24.1（每个 ABI 固定 URL 与 SHA-256） |
 | Node.js | Alpine 24.x |
-| Cox 服务器 | npm `@doublepi123/cox`，安装时解析 latest，内置回退版本 0.1.29（兼容 T3 Code 协议）；在 Alpine 内重编译 node-pty |
-| 编码代理 CLI | `@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode）、`@xai-official/grok`（Grok）、`@earendil-works/pi-coding-agent`（Pi），安装时取最新版 |
+| Cox 服务器 | npm `@doublepi123/cox`，安装时解析 latest，内置回退版本 0.1.96（兼容 T3 Code 协议）；在 Alpine 内重编译 node-pty |
+| 编码代理 CLI | `omo-ai`（OMO Native，随所安装 Cox 支持的 `OMO_VERSION` 同步锁定）、`can1357/oh-my-pi` 官方 musl 独立二进制（Oh My Pi，校验 `SHA256SUMS.txt`）、`@openai/codex`（Codex）、`@anthropic-ai/claude-code`（Claude Code）、`@opencode/cli`（OpenCode）、`@xai-official/grok`（Grok）、`@earendil-works/pi-coding-agent`（Pi） |
 | PRoot | 本地编译的 5.1.107.98 |
 | 端口 | Cox 3773（仅回环） |
 

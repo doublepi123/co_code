@@ -682,52 +682,18 @@ class DefaultLocalRuntimeController(
     private fun availableFor(
         installed: PackageVersions,
         registry: PackageVersions?,
-    ): RuntimeUpdate? {
-        val t3Current = installed.servers[ServerKind.T3] ?: installed.t3
-        val t3Installed = ServerKind.T3 in installed.servers
-        val replacesLegacyT3 = t3Installed && installedT3IsLegacy
-        val targetT3 =
-            if (replacesLegacyT3) {
-                // Never compare a legacy T3 Code version with a Cox version: the latest Cox release
-                // (or the manifest's pinned Cox version) replaces any legacy bundle, even when the
-                // legacy version string sorts higher.
-                registry?.t3 ?: pinnedT3Version ?: t3Current
-            } else if (t3Installed) {
-                newestOf(registry?.servers?.get(ServerKind.T3), registry?.t3, pinnedT3Version, t3Current)
-                    ?: t3Current
-            } else {
-                t3Current
-            }
-        val t3 = VersionChange(current = t3Current, target = targetT3)
-        val effectiveAgents = mutableAgents.value.selected + mutableAgents.value.required
-        val agents =
-            effectiveAgents.mapNotNull { id ->
-                val current = installed.agents[id] ?: return@mapNotNull null
-                val target = newestOf(registry?.agents?.get(id), current) ?: return@mapNotNull null
-                AgentChange(id = id, displayName = displayNameOf(id), change = VersionChange(current, target))
-            }
-        val servers =
-            installed.servers
-                .filterKeys { it != ServerKind.T3 }
-                .mapValues { (kind, current) ->
-                    VersionChange(current, newestOf(registry?.servers?.get(kind), current) ?: current)
-                }
-        val update =
-            RuntimeUpdate(
-                t3 = t3,
-                agents = agents,
-                servers = servers,
-                replacesLegacyT3 = replacesLegacyT3,
-                migratesCoxToNpm = t3Installed && installedCoxNeedsNpmMigration &&
-                    newestOf(registry?.t3, pinnedT3Version)?.let {
-                        RuntimeEnvironmentInstaller.compareVersions(it, t3Current) >= 0
-                    } == true,
-            )
-        return update.takeIf { it.hasChanges }
-    }
-
-    private fun newestOf(vararg versions: String?): String? =
-        versions.filterNotNull().maxWithOrNull { a, b -> RuntimeEnvironmentInstaller.compareVersions(a, b) }
+    ): RuntimeUpdate? =
+        UpdateAvailability.resolve(
+            state =
+                InstalledRuntimeState(
+                    installed = installed,
+                    effectiveAgents = mutableAgents.value.selected + mutableAgents.value.required,
+                    installedT3IsLegacy = installedT3IsLegacy,
+                    installedCoxNeedsNpmMigration = installedCoxNeedsNpmMigration,
+                ),
+            registry = registry,
+            manifest = pinnedT3Version to manifestAgents,
+        )
 
     /** An automatic check, throttled by [updateCheckIntervalMillis] since the last one. */
     private fun maybeCheckForUpdates() {

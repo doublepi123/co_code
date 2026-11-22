@@ -125,7 +125,7 @@ class RuntimeEnvironmentInstaller(
                 }
 
                 report.step(InstallStep.InstallAgents, null, wantedAgents.joinToString(" "), MessageKey.ProgressInstallingAgents)
-                installAgentPackages(runner, wantedAgents)
+                installAgentPackages(runner, rootfs, wantedAgents)
                 val agentVersions = verifyAgents(runner, wantedAgents, rootfs)
 
                 report.step(InstallStep.Verify, null, "node, servers, agents", MessageKey.ProgressVerifying)
@@ -410,10 +410,11 @@ class RuntimeEnvironmentInstaller(
         expectedServers: Map<ServerKind, String> = installedServerVersions(rootfs, current),
         prepare: () -> Unit = {},
     ): RuntimeMetadata {
+        val resolvedTargets = AgentPackages.resolveInstallVersions(rootfs, wanted.map(::spec), targetVersions)
         val removals = agentSelectionChange(wanted, current.agents.keys).removals
         val install =
             wanted.filter { id ->
-                current.agents[id] == null || current.agents[id] != targetVersions[id]
+                current.agents[id] == null || current.agents[id] != resolvedTargets[id]
             }.toSet()
         prepare()
 
@@ -422,7 +423,7 @@ class RuntimeEnvironmentInstaller(
         // selected at the same version are never touched.
         removeAgentPackages(rootfs, (install + removals).sorted().mapNotNull(manifest::agent))
         report.step(InstallStep.InstallAgents, null, null, MessageKey.ProgressInstallingAgents)
-        installAgentPackages(runner, install, targetVersions)
+        installAgentPackages(runner, rootfs, install, resolvedTargets)
 
         // Defensive check: an agent that stays selected is not ours to lose. If its package or bin
         // link is missing after the package work above (for any reason, e.g. an interrupted
@@ -435,7 +436,7 @@ class RuntimeEnvironmentInstaller(
         if (lost.isNotEmpty()) {
             report.log("Agent packages are missing after install; restoring ${lost.joinToString(" ")}")
             removeAgentPackages(rootfs, lost.mapNotNull(manifest::agent))
-            installAgentPackages(runner, lost.toSet(), current.agents)
+            installAgentPackages(runner, rootfs, lost.toSet(), current.agents)
         }
 
         report.step(InstallStep.Verify, null, null, MessageKey.ProgressVerifying)
@@ -581,22 +582,33 @@ class RuntimeEnvironmentInstaller(
         return selected
     }
 
-    /** Installs [ids] from npm at their latest versions, or at [versions] when a version is known. */
     private fun installAgentPackages(
         runner: AgentCommandRunner,
+        rootfs: File,
         ids: Set<String>,
         versions: Map<String, String> = emptyMap(),
     ) {
         if (ids.isEmpty()) return
-        val specs = ids.map(::spec).filter { it.installation == "npm" }
+        val specs = ids.map(::spec).filter { it.installation != AgentSpec.INSTALLATION_BUNDLED }
         if (specs.isEmpty()) return
-        val script = agentInstallScript(specs, versions)
-        runner.mustSucceed(
-            script,
-            MessageKey.AgentInstallFailed,
-            "Unable to install the selected agent CLIs from npm.",
-            timeoutMinutes = NPM_TIMEOUT_MINUTES,
-        )
+        val resolved = AgentPackages.resolveInstallVersions(rootfs, specs, versions)
+        val npmSpecs = specs.filter { it.installation == AgentSpec.INSTALLATION_NPM }
+        if (npmSpecs.isNotEmpty()) {
+            runner.mustSucceed(
+                agentInstallScript(npmSpecs, resolved),
+                MessageKey.AgentInstallFailed,
+                "Unable to install the selected agent CLIs from npm.",
+                timeoutMinutes = NPM_TIMEOUT_MINUTES,
+            )
+        }
+        for (releaseSpec in specs.filter { it.installation == AgentSpec.INSTALLATION_GITHUB_RELEASE }) {
+            runner.mustSucceed(
+                AgentPackages.githubReleaseInstallScript(releaseSpec, abi, resolved[releaseSpec.id]),
+                MessageKey.AgentInstallFailed,
+                "Unable to install ${releaseSpec.displayName}.",
+                timeoutMinutes = NPM_TIMEOUT_MINUTES,
+            )
+        }
     }
 
     private fun verifyAgents(
@@ -955,7 +967,7 @@ class RuntimeEnvironmentInstaller(
         const val PTY_SMOKE_TIMEOUT_MINUTES = 2L
         const val VERIFY_TIMEOUT_MINUTES = 2L
 
-        const val BUNDLED_AGENT_VERSION = "bundled"
+        const val BUNDLED_AGENT_VERSION = AgentPackages.BUNDLED_AGENT_VERSION
 
         /** Free space an update needs beyond the copy: extracted bundles and agent packages grow the tree. */
         const val UPDATE_FREE_SPACE_MARGIN_BYTES = 512L * 1024 * 1024
@@ -1011,64 +1023,23 @@ class RuntimeEnvironmentInstaller(
             });
             """.trimIndent() + "\n"
 
-        private val VERSION_PATTERN = Regex("""\d+(?:\.\d+)+""")
+        fun extractVersion(output: String): String = AgentPackages.extractVersion(output)
 
-        /** First dotted version in a tool's output: `opencode v2.2.5` -> `2.2.5`, `v24.18.1` -> `24.18.1`. */
-        fun extractVersion(output: String): String = VERSION_PATTERN.find(output)?.value ?: output.trim().removePrefix("v")
-
-        /** Dotted numeric comparison of the versions found in each string; missing segments count as 0. */
         fun compareVersions(
             left: String,
             right: String,
-        ): Int {
-            val a = extractVersion(left).split('.').map { it.toIntOrNull() ?: 0 }
-            val b = extractVersion(right).split('.').map { it.toIntOrNull() ?: 0 }
-            for (index in 0 until maxOf(a.size, b.size)) {
-                val diff = a.getOrElse(index) { 0 }.compareTo(b.getOrElse(index) { 0 })
-                if (diff != 0) return diff
-            }
-            return 0
-        }
+        ): Int = AgentPackages.compareVersions(left, right)
 
-        /**
-         * `npm i -g` line for [specs]. [versions] pins an agent when an update knows its target;
-         * otherwise npm takes the latest.
-         */
         fun agentInstallScript(
             specs: List<AgentSpec>,
             versions: Map<String, String> = emptyMap(),
-        ): String {
-            val packages =
-                specs.filter { it.installation == "npm" }.map { spec ->
-                    spec.validate()
-                    versions[spec.id]?.takeIf(String::isNotBlank)?.let {
-                        require(Regex("""^\d+(?:\.\d+)+(?:-[a-zA-Z0-9.-]+)?$""").matches(it)) { "Invalid agent version: $it" }
-                        "${spec.npmPackage}@$it"
-                    } ?: spec.npmPackage
-                }
-            if (packages.isEmpty()) return "true"
-            return "set -e; npm i -g --no-fund --no-audit ${packages.joinToString(" ")}"
-        }
+        ): String = AgentPackages.npmInstallScript(specs, versions)
 
-        /** Bin link names an agent package owns. OpenCode ships a second compatibility binary. */
-        fun agentBinNames(spec: AgentSpec): List<String> =
-            buildList {
-                if (spec.installation != "npm") return@buildList
-                add(spec.bin)
-                if (spec.id == "opencode") add("opencode2")
-            }
+        fun agentBinNames(spec: AgentSpec): List<String> = AgentPackages.agentBinNames(spec)
 
-        /** Removes the given agents' packages and bin links from [rootfs] (see the instance method). */
         internal fun removeAgentPackages(
             rootfs: File,
             specs: List<AgentSpec>,
-        ) {
-            for (spec in specs) {
-                if (spec.installation != "npm") continue
-                spec.validate()
-                deleteTreeOrThrow(File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}"))
-                for (bin in agentBinNames(spec)) deleteTreeOrThrow(File(rootfs, "usr/local/bin/$bin"))
-            }
-        }
+        ) = AgentPackages.removePackages(rootfs, specs)
     }
 }

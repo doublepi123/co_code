@@ -16,12 +16,14 @@ by Cox, without a second native credential store.
 
 The model center requires Cox 0.1.21 or newer. An older installed runtime keeps
 Agent settings available and receives an update hint instead of an invalid
-model-center link. The bundled setup fallback is Cox 0.1.29.
+model-center link. The bundled setup fallback is Cox 0.1.96.
 
 ## Agent installation coverage
 
 | Agent | Installation and configuration |
 |---|---|
+| OMO Native | npm `omo-ai` coupled to the installed Cox server's `OMO_VERSION` (fallback `5.1.69`); Cox driver `omo` |
+| Oh My Pi | GitHub Release `can1357/oh-my-pi` standalone musl binary (`omp-linux-musl-arm64` / `omp-linux-musl-x64`) verified against `SHA256SUMS.txt` (fallback `18.20.3`); Cox driver `omp` |
 | Codex | npm `@openai/codex`; authentication in Cox |
 | Claude Code | npm `@anthropic-ai/claude-code`; Cox driver `claudeAgent` |
 | OpenCode | npm `@opencode/cli` |

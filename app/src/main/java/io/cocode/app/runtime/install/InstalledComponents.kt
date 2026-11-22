@@ -19,6 +19,9 @@ object InstalledComponents {
     const val T3_BUNDLE_INFO = "opt/t3/ANDROID-BUNDLE.json"
     /** `server` value of a Cox bundle; a legacy T3 Code bundle lacks it. */
     const val COX_SERVER = "cox"
+    const val RELEASE_AGENT_ROOT = "usr/local/lib/cocode-agents"
+
+    private val OMO_VERSION_PATTERN = Regex("\\bOMO_VERSION\\s*=\\s*\"(\\d+\\.\\d+\\.\\d+)\"")
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -93,15 +96,37 @@ object InstalledComponents {
     private fun JsonObject.text(key: String): String? =
         (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
 
+    fun releaseAgentDirectory(spec: AgentSpec): String = "$RELEASE_AGENT_ROOT/${spec.id}"
+
+    fun releaseAgentBinary(spec: AgentSpec): String = "${releaseAgentDirectory(spec)}/${spec.bin}"
+
+    fun coxSupportedOmoVersion(rootfs: File): String? {
+        val dist = File(rootfs, "${coxModuleGuest(rootfs)}/dist".removePrefix("/"))
+        if (!dist.isDirectory) return null
+        val candidates =
+            dist.listFiles { file -> file.isFile && file.name.endsWith(".mjs") }
+                ?.sortedBy { file -> if (file.name.startsWith("binCli")) 0 else 1 }
+                ?: return null
+        for (file in candidates) {
+            val match = runCatching { OMO_VERSION_PATTERN.find(file.readText())?.groupValues?.getOrNull(1) }.getOrNull()
+            if (match != null && T3Spec.VERSION.matches(match)) return match
+        }
+        return null
+    }
+
     fun agentFilesPresent(
         rootfs: File,
         spec: AgentSpec,
     ): Boolean =
-        if (spec.installation == "bundled") {
-            File(rootfs, "${coxModuleGuest(rootfs)}/node_modules/@cursor/sdk/package.json".removePrefix("/")).isFile
-        } else {
-            File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}").isDirectory &&
-                File(rootfs, "usr/local/bin/${spec.bin}").exists()
+        when (spec.installation) {
+            AgentSpec.INSTALLATION_BUNDLED ->
+                File(rootfs, "${coxModuleGuest(rootfs)}/node_modules/@cursor/sdk/package.json".removePrefix("/")).isFile
+            AgentSpec.INSTALLATION_GITHUB_RELEASE ->
+                File(rootfs, releaseAgentBinary(spec)).isFile &&
+                    File(rootfs, "usr/local/bin/${spec.bin}").exists()
+            else ->
+                File(rootfs, "usr/local/lib/node_modules/${spec.npmPackage}").isDirectory &&
+                    File(rootfs, "usr/local/bin/${spec.bin}").exists()
         }
 }
 

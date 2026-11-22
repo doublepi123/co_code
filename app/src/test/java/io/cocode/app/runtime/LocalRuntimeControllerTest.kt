@@ -31,6 +31,14 @@ import java.io.File
 
 private val agents =
     listOf(
+        AgentSpec(
+            id = "omo",
+            npmPackage = "omo-ai",
+            bin = "omo",
+            displayName = "OMO Native",
+            versionPolicy = "cox",
+            fallbackVersion = "5.1.69",
+        ),
         AgentSpec("codex", "@openai/codex", "codex", "Codex"),
         AgentSpec("claude", "@anthropic-ai/claude-code", "claude", "Claude Code"),
         AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode"),
@@ -932,5 +940,31 @@ class LocalRuntimeControllerTest {
             assertFalse("a maintenance operation must not restart after Stop", controller.state.value is RuntimeState.Running)
             assertFalse(controller.state.value is RuntimeState.Starting)
             assertEquals(RuntimeState.Stopped, controller.state.value)
+        }
+
+    @Test
+    fun `cox-coupled omo repairs a mismatched higher npm version back to the Cox supported pin`() =
+        controllerTest {
+            val runtime = runtimeWith(folder.root, PackageVersions("0.1.96", mapOf("omo" to "5.1.72")))
+            val rootfs = runtime.rootfs
+            val module = File(rootfs, "usr/local/lib/node_modules/@doublepi123/cox")
+            File(module, "dist/client").mkdirs()
+            File(module, "node_modules/node-pty").mkdirs()
+            File(module, "dist/bin.mjs").writeText("")
+            File(module, "dist/client/index.html").writeText("")
+            File(module, "package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.96"}""")
+            val controller =
+                controller(
+                    FakeInstaller(folder.root, installed = runtime),
+                    FakeServer(),
+                    selection = InMemoryAgentSelectionStore(setOf("omo")),
+                    versionSource = FixedSource(PackageVersions("0.1.96", mapOf("omo" to "5.1.69"))),
+                    pinnedT3Version = "0.1.96",
+                )
+            controller.initialize()
+            step()
+
+            val update = controller.updates.value.available!!
+            assertEquals(VersionChange("5.1.72", "5.1.69"), update.agents.single().change)
         }
 }

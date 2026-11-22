@@ -150,4 +150,68 @@ class NpmPackageVersionSourceTest {
             assertEquals("/@doublepi123%2fcox", server.takeRequest().path)
         }
 
+    @Test
+    fun `omo stays coupled to Cox OMO_VERSION without querying unverified npm releases while omp queries GitHub Releases`() =
+        runBlocking {
+            val omo =
+                AgentSpec(
+                    id = "omo",
+                    npmPackage = "omo-ai",
+                    bin = "omo",
+                    displayName = "OMO Native",
+                    versionPolicy = "cox",
+                    fallbackVersion = "5.1.69",
+                )
+            val omp =
+                AgentSpec(
+                    id = "omp",
+                    bin = "omp",
+                    displayName = "Oh My Pi",
+                    installation = "github-release",
+                    fallbackVersion = "18.20.3",
+                    githubRepo = "can1357/oh-my-pi",
+                    assets = mapOf("x86_64" to "omp-linux-musl-x64"),
+                )
+            server.enqueue(MockResponse().setBody(metadata("0.1.96")))
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v18.21.0","draft":false,"prerelease":false}"""))
+
+            val combined =
+                DefaultPackageVersionSource(
+                    npm = source(),
+                    catalog = VersionSourceCatalog(listOf(omo, omp), fallbackT3Version = "0.1.96"),
+                    resolvers =
+                        AgentVersionResolvers(
+                            github = GithubReleaseVersionSource(client, apiBaseUrl = server.url("/").toString()),
+                            coxOmoVersion = { "5.1.69" },
+                        ),
+                )
+
+            val latest =
+                combined.latest(
+                    PackageVersions(
+                        t3 = "0.1.96",
+                        agents = mapOf("omo" to "5.1.69", "omp" to "18.20.2"),
+                    ),
+                )
+
+            assertEquals("0.1.96", latest.t3)
+            assertEquals(mapOf("omo" to "5.1.69", "omp" to "18.21.0"), latest.agents)
+            assertEquals(2, server.requestCount)
+            assertEquals("/@doublepi123%2fcox", server.takeRequest().path)
+            val ghReq = server.takeRequest()
+            assertEquals("/repos/can1357/oh-my-pi/releases/latest", ghReq.path)
+            assertEquals("application/vnd.github+json", ghReq.getHeader("Accept"))
+        }
+
+    @Test
+    fun `GitHub release source skips prereleases and never downgrades below the installed or fallback version`() =
+        runBlocking {
+            val github = GithubReleaseVersionSource(client, apiBaseUrl = server.url("/").toString())
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v19.0.0","draft":false,"prerelease":true}"""))
+            assertEquals("18.20.3", github.latest("can1357/oh-my-pi", pinned = "18.20.3"))
+
+            server.enqueue(MockResponse().setBody("""{"tag_name":"v18.20.1","draft":false,"prerelease":false}"""))
+            assertEquals("18.20.3", github.latest("can1357/oh-my-pi", pinned = "18.20.3"))
+        }
+
 }

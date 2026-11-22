@@ -32,7 +32,13 @@ data class RuntimeManifest(
         t3.validate()
         require(agents.isNotEmpty()) { "Runtime manifest has no agents" }
         require(agents.map(AgentSpec::id).distinct().size == agents.size) { "Agent ids must be unique" }
-        agents.forEach(AgentSpec::validate)
+        agents.forEach { agent ->
+            agent.validate()
+            if (agent.installation == AgentSpec.INSTALLATION_GITHUB_RELEASE) {
+                val missing = architectures.keys - agent.assets.keys
+                require(missing.isEmpty()) { "Agent ${agent.id} has no release asset for ${missing.sorted().joinToString()}" }
+            }
+        }
     }
 }
 
@@ -51,30 +57,79 @@ data class T3Spec(
     }
 }
 
-/** A user-selectable npm CLI or an SDK bundled with Cox. */
+/** A user-selectable npm CLI, a GitHub-released musl CLI, or an SDK bundled with Cox. */
 @Serializable
 data class AgentSpec(
     val id: String,
     val npmPackage: String = "",
     val bin: String,
     val displayName: String,
-    val installation: String = "npm",
+    val installation: String = INSTALLATION_NPM,
+    val versionPolicy: String = VERSION_POLICY_LATEST,
+    val fallbackVersion: String = "",
+    val githubRepo: String = "",
+    val assets: Map<String, String> = emptyMap(),
 ) {
+    fun assetFor(abi: String): String =
+        requireNotNull(assets[abi]) { "Agent $id does not support ABI $abi" }
+
     fun validate() {
         require(ID.matches(id)) { "Invalid agent id: $id" }
-        require(installation in setOf("npm", "bundled")) { "Unknown installation method for $id" }
-        if (installation == "npm") {
-            require(PACKAGE.matches(npmPackage)) { "Agent $id has an invalid npm package" }
-            require(ID.matches(bin)) { "Agent $id has an invalid binary" }
-        } else {
-            require(id == "cursor" && npmPackage.isEmpty() && bin.isEmpty()) { "Unsupported bundled agent: $id" }
-        }
         require(displayName.isNotBlank()) { "Agent $id has no display name" }
+        when (installation) {
+            INSTALLATION_NPM -> {
+                require(PACKAGE.matches(npmPackage)) { "Agent $id has an invalid npm package" }
+                require(ID.matches(bin)) { "Agent $id has an invalid binary" }
+                require(githubRepo.isEmpty() && assets.isEmpty()) { "Npm agent $id cannot declare release assets" }
+                when (versionPolicy) {
+                    VERSION_POLICY_LATEST ->
+                        require(fallbackVersion.isEmpty()) { "Unpinned npm agent $id cannot set a fallback version" }
+                    VERSION_POLICY_COX ->
+                        require(id == "omo" && T3Spec.VERSION.matches(fallbackVersion)) {
+                            "Cox-coupled agent $id requires a valid fallback version"
+                        }
+                    else -> throw IllegalArgumentException("Unknown version policy for $id: $versionPolicy")
+                }
+            }
+            INSTALLATION_GITHUB_RELEASE -> {
+                require(npmPackage.isEmpty() && versionPolicy == VERSION_POLICY_LATEST) {
+                    "Release agent $id cannot set npm package fields"
+                }
+                require(ID.matches(bin)) { "Agent $id has an invalid binary" }
+                require(REPO.matches(githubRepo)) { "Agent $id has an invalid GitHub repository" }
+                require(T3Spec.VERSION.matches(fallbackVersion)) { "Agent $id has an invalid fallback version" }
+                require(assets.isNotEmpty()) { "Agent $id has no release assets" }
+                assets.forEach { (abi, asset) ->
+                    require(ABI.matches(abi) && ASSET.matches(asset)) { "Agent $id has an invalid asset for $abi" }
+                }
+            }
+            INSTALLATION_BUNDLED -> {
+                require(
+                    id == "cursor" &&
+                        npmPackage.isEmpty() &&
+                        bin.isEmpty() &&
+                        versionPolicy == VERSION_POLICY_LATEST &&
+                        fallbackVersion.isEmpty() &&
+                        githubRepo.isEmpty() &&
+                        assets.isEmpty(),
+                ) { "Unsupported bundled agent: $id" }
+            }
+            else -> throw IllegalArgumentException("Unknown installation method for $id")
+        }
     }
 
-    private companion object {
-        val ID = Regex("""^[a-z][a-z0-9-]*$""")
-        val PACKAGE = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
+    companion object {
+        const val INSTALLATION_NPM = "npm"
+        const val INSTALLATION_GITHUB_RELEASE = "github-release"
+        const val INSTALLATION_BUNDLED = "bundled"
+        const val VERSION_POLICY_LATEST = "latest"
+        const val VERSION_POLICY_COX = "cox"
+
+        private val ID = Regex("""^[a-z][a-z0-9-]*$""")
+        private val ABI = Regex("""^[a-z0-9_-]+$""")
+        private val PACKAGE = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
+        private val REPO = Regex("""^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$""")
+        private val ASSET = Regex("""^[A-Za-z0-9._-]+$""")
     }
 }
 

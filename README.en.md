@@ -10,7 +10,7 @@
 
 CoCode is derived from AndChamber (MIT) and runs **Cox** in an Alpine Linux environment under PRoot (no root). Local installation, updates, page authentication and model configuration are dedicated to Cox. OpenChamber installation and remote connections are retired. Cox retains the T3 Code protocol, so existing compatible server records continue to work.
 
-- **Pick your agents**: install Codex, Claude Code, OpenCode, Grok and Pi; Cursor uses Cox's bundled SDK. Adding one preserves the others; removal requires confirmation and retains projects and home configuration.
+- **Pick your agents**: install OMO Native, Oh My Pi, Codex, Claude Code, OpenCode, Grok and Pi; Cursor uses Cox's bundled SDK. Adding one preserves the others; removal requires confirmation and retains projects and home configuration.
 - **Model center**: open Cox's model center from Home to configure service URLs, API keys, protocols, models and agent bindings. Cox starts automatically when needed and owns the saved configuration and secrets.
 - **Agent settings**: manage authentication, Antigravity and ACP registry installers in Cox. Fx and Muse require an upstream executable configured in Cox. CoCode no longer signs into Codex or reads/displays its login status.
 - **App update prompt**: checks this project's GitHub Releases on opening, including 0.x prereleases, and offers the download page. No automatic installation or task interruption.
@@ -25,8 +25,8 @@ Runtime errors are notified natively; agent notifications from the web UI are no
 |---|---|
 | Alpine Linux | 3.24.1 (pinned URL and SHA-256 per ABI) |
 | Node.js | Alpine 24.x |
-| Cox server | npm `@doublepi123/cox`, resolves latest on install, bundled fallback 0.1.29 (T3 Code protocol); node-pty rebuilt inside Alpine |
-| Coding-agent CLIs | `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode), `@xai-official/grok` (Grok), `@earendil-works/pi-coding-agent` (Pi); latest at install time |
+| Cox server | npm `@doublepi123/cox`, resolves latest on install, bundled fallback 0.1.96 (T3 Code protocol); node-pty rebuilt inside Alpine |
+| Coding-agent CLIs | `omo-ai` (OMO Native, coupled to the installed Cox server's `OMO_VERSION`), `can1357/oh-my-pi` standalone musl release binary (Oh My Pi, verified against `SHA256SUMS.txt`), `@openai/codex` (Codex), `@anthropic-ai/claude-code` (Claude Code), `@opencode/cli` (OpenCode), `@xai-official/grok` (Grok), `@earendil-works/pi-coding-agent` (Pi) |
 | PRoot | locally built 5.1.107.98 |
 | Ports | Cox 3773 (loopback only) |
 

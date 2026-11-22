@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -22,6 +24,8 @@ class NpmPackageVersionSource(
     private val client: OkHttpClient,
     private val registryBaseUrl: String = DEFAULT_REGISTRY,
 ) {
+    internal val httpClient: OkHttpClient get() = client
+
     /** The newest stable version of [packageName], or [pinned] when the registry has nothing newer. */
     suspend fun latest(
         packageName: String,
@@ -86,32 +90,115 @@ class NpmPackageVersionSource(
     }
 }
 
+class GithubReleaseVersionSource(
+    private val client: OkHttpClient,
+    private val apiBaseUrl: String = DEFAULT_GITHUB_API,
+) {
+    suspend fun latest(
+        repository: String,
+        pinned: String?,
+    ): String? =
+        withContext(Dispatchers.IO) {
+            NpmPackageVersionSource.selectLatest(fetchLatestRelease(repository), pinned)
+        }
+
+    private fun fetchLatestRelease(repository: String): Collection<String> {
+        val request =
+            Request.Builder()
+                .url("${apiBaseUrl.trimEnd('/')}/repos/$repository/releases/latest")
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "CoCode-Android")
+                .build()
+        val bounded =
+            client.newBuilder()
+                .callTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+        bounded.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "GitHub API answered ${response.code} for $repository" }
+            val body = response.body?.string() ?: error("GitHub API sent no body for $repository")
+            return parseReleaseTag(body)
+        }
+    }
+
+    companion object {
+        const val DEFAULT_GITHUB_API = "https://api.github.com"
+        private const val TIMEOUT_SECONDS = 15L
+        private val json = Json { ignoreUnknownKeys = true }
+
+        internal fun parseReleaseTag(body: String): List<String> {
+            val root = json.parseToJsonElement(body).jsonObject
+            val draft = (root["draft"] as? JsonPrimitive)?.booleanOrNull == true
+            val prerelease = (root["prerelease"] as? JsonPrimitive)?.booleanOrNull == true
+            if (draft || prerelease) return emptyList()
+            val tag =
+                (root["tag_name"] as? JsonPrimitive)?.content?.trim()?.removePrefix("v")
+                    ?.takeIf(String::isNotBlank)
+                    ?: error("GitHub release metadata has no tag_name")
+            return listOf(tag)
+        }
+    }
+}
+
+data class VersionSourceCatalog(
+    val agents: List<AgentSpec>,
+    val fallbackT3Version: String,
+    val coxPackage: String = "@doublepi123/cox",
+)
+
+data class AgentVersionResolvers(
+    val github: GithubReleaseVersionSource? = null,
+    val coxOmoVersion: () -> String? = { null },
+)
+
 class DefaultPackageVersionSource(
     private val npm: NpmPackageVersionSource,
-    private val agents: List<AgentSpec>,
-    private val fallbackT3Version: String,
-    private val coxPackage: String = "@doublepi123/cox",
+    private val catalog: VersionSourceCatalog,
+    private val resolvers: AgentVersionResolvers = AgentVersionResolvers(),
 ) : PackageVersionSource {
+    constructor(
+        npm: NpmPackageVersionSource,
+        agents: List<AgentSpec>,
+        fallbackT3Version: String,
+        coxPackage: String = "@doublepi123/cox",
+    ) : this(npm, VersionSourceCatalog(agents, fallbackT3Version, coxPackage))
+
     override suspend fun latest(pinned: PackageVersions): PackageVersions {
         val t3Version =
             if (pinned.servers.isEmpty() || ServerKind.T3 in pinned.servers) {
                 val current = pinned.servers[ServerKind.T3] ?: pinned.t3
                 val minimum = current.takeUnless { it.contains("-pw.") }
-                    ?.let { NpmPackageVersionSource.selectLatest(listOf(it, fallbackT3Version), null) }
-                    ?: fallbackT3Version
-                npm.latest(coxPackage, minimum) ?: minimum
+                    ?.let { NpmPackageVersionSource.selectLatest(listOf(it, catalog.fallbackT3Version), null) }
+                    ?: catalog.fallbackT3Version
+                npm.latest(catalog.coxPackage, minimum) ?: minimum
             } else {
                 pinned.t3
             }
+        val github = resolvers.github ?: GithubReleaseVersionSource(npm.httpClient)
         val installedAgents =
-            agents
+            catalog.agents
                 .filter { it.id in pinned.agents }
                 .map { spec ->
-                    spec.id to if (spec.installation == "bundled") {
-                        RuntimeEnvironmentInstaller.BUNDLED_AGENT_VERSION
-                    } else {
-                        npm.latest(spec.npmPackage, pinned.agents[spec.id])
-                    }
+                    val resolved =
+                        when (spec.installation) {
+                            AgentSpec.INSTALLATION_BUNDLED -> RuntimeEnvironmentInstaller.BUNDLED_AGENT_VERSION
+                            AgentSpec.INSTALLATION_GITHUB_RELEASE -> {
+                                val minimum =
+                                    NpmPackageVersionSource.selectLatest(
+                                        listOfNotNull(pinned.agents[spec.id], spec.fallbackVersion.takeIf(String::isNotBlank)),
+                                        null,
+                                    )
+                                github.latest(spec.githubRepo, minimum) ?: minimum
+                            }
+                            else ->
+                                if (spec.versionPolicy == AgentSpec.VERSION_POLICY_COX) {
+                                    resolvers.coxOmoVersion()
+                                        ?: spec.fallbackVersion.takeIf(String::isNotBlank)
+                                        ?: pinned.agents[spec.id]
+                                } else {
+                                    npm.latest(spec.npmPackage, pinned.agents[spec.id])
+                                }
+                        }
+                    spec.id to resolved
                 }
                 .filter { (_, version) -> !version.isNullOrBlank() }
                 .associate { (id, version) -> id to version!! }

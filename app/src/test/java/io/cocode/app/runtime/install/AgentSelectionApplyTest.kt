@@ -29,6 +29,25 @@ class AgentSelectionApplyTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
+    private val omo =
+        AgentSpec(
+            id = "omo",
+            npmPackage = "omo-ai",
+            bin = "omo",
+            displayName = "OMO Native",
+            versionPolicy = "cox",
+            fallbackVersion = "5.1.69",
+        )
+    private val omp =
+        AgentSpec(
+            id = "omp",
+            bin = "omp",
+            displayName = "Oh My Pi",
+            installation = "github-release",
+            fallbackVersion = "18.20.3",
+            githubRepo = "can1357/oh-my-pi",
+            assets = mapOf("arm64-v8a" to "omp-linux-musl-arm64"),
+        )
     private val codex = AgentSpec("codex", "@openai/codex", "codex", "Codex")
     private val opencode = AgentSpec("opencode", "@opencode/cli", "opencode", "OpenCode")
     private val cursor = AgentSpec("cursor", bin = "", displayName = "Cursor SDK", installation = "bundled")
@@ -43,7 +62,7 @@ class AgentSelectionApplyTest {
                 T3Spec(
                     version = "0.1.14",
                 ),
-            agents = listOf(codex, opencode, cursor),
+            agents = listOf(omo, omp, codex, opencode, cursor),
             architectures =
                 mapOf(
                     "arm64-v8a" to
@@ -160,8 +179,15 @@ class AgentSelectionApplyTest {
             failInstall?.let { throw it }
             packages.forEach { (packageName, spec) ->
                 if (script.contains(packageName)) {
-                    rootfs.resolve("usr/local/lib/node_modules/${spec.npmPackage}/bin").mkdirs()
-                    rootfs.resolve("usr/local/lib/node_modules/${spec.npmPackage}/bin/${spec.bin}").writeText("new")
+                    if (spec.installation == AgentSpec.INSTALLATION_GITHUB_RELEASE) {
+                        rootfs.resolve(InstalledComponents.releaseAgentBinary(spec)).apply {
+                            parentFile?.mkdirs()
+                            writeText("elf")
+                        }
+                    } else {
+                        rootfs.resolve("usr/local/lib/node_modules/${spec.npmPackage}/bin").mkdirs()
+                        rootfs.resolve("usr/local/lib/node_modules/${spec.npmPackage}/bin/${spec.bin}").writeText("new")
+                    }
                     rootfs.resolve("usr/local/bin").mkdirs()
                     RuntimeEnvironmentInstaller.agentBinNames(spec).forEach { bin ->
                         rootfs.resolve("usr/local/bin/$bin").writeText("link")
@@ -368,5 +394,56 @@ class AgentSelectionApplyTest {
                 runner = runner(),
             )
         }
+    }
+
+    @Test
+    fun `staged Cox upgrade advances omo to the new Cox OMO_VERSION and installs omp release binary`() {
+        seedInstalled(omo)
+        val coxModule = rootfs.resolve("usr/local/lib/node_modules/@doublepi123/cox")
+        coxModule.resolve("dist/client").mkdirs()
+        coxModule.resolve("node_modules/node-pty").mkdirs()
+        coxModule.resolve("package.json").writeText("""{"name":"@doublepi123/cox","version":"0.1.99"}""")
+        coxModule.resolve("dist/bin.mjs").writeText("")
+        coxModule.resolve("dist/client/index.html").writeText("")
+        coxModule.resolve("dist/binCli-next.mjs").writeText("""const OMO_VERSION = "5.2.0";""")
+
+        val runner =
+            FakeRunner(
+                outputs = mapOf("omo" to "omo 5.2.0 (engine: senpi)\n", "omp" to "omp/18.20.3\n"),
+                rootfs = rootfs,
+                packages = mapOf("omo-ai@5.2.0" to omo, "omp-linux-musl-arm64" to omp),
+            )
+
+        val metadata =
+            installer.applyAgentSelection(
+                report = report,
+                environment = environment,
+                rootfs = rootfs,
+                current = current(mapOf("omo" to "5.1.69"), mapOf(ServerKind.T3 to "0.1.99")),
+                wanted = setOf("omo", "omp"),
+                runner = runner,
+                targetVersions = mapOf("omo" to "5.1.69"),
+                expectedServers = mapOf(ServerKind.T3 to "0.1.99"),
+            )
+
+        assertEquals(mapOf("omo" to "5.2.0", "omp" to "18.20.3"), metadata.agents)
+        assertTrue(InstalledComponents.agentFilesPresent(rootfs, omo))
+        assertTrue(InstalledComponents.agentFilesPresent(rootfs, omp))
+
+        val afterDeselectOmp =
+            installer.applyAgentSelection(
+                report = report,
+                environment = environment,
+                rootfs = rootfs,
+                current = metadata,
+                wanted = setOf("omo"),
+                runner = runner,
+                targetVersions = mapOf("omo" to "5.2.0"),
+                expectedServers = mapOf(ServerKind.T3 to "0.1.99"),
+            )
+
+        assertEquals(mapOf("omo" to "5.2.0"), afterDeselectOmp.agents)
+        assertFalse(InstalledComponents.agentFilesPresent(rootfs, omp))
+        assertFalse(binExists("omp"))
     }
 }

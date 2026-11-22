@@ -27,7 +27,7 @@ Koin graph (`single` declarations, all process-wide):
 - `LocalRuntimeController` → `DefaultLocalRuntimeController`:
   - `installer = RuntimeInstallerImpl(paths, abi, manifest from assets, suite, VerifiedRuntimeDownloader(okHttp), shim asset "android-shim.cjs", dnsProvider)`. Cox installs from npm inside the guest; no GitHub bundle source remains.
   - `manifestAgents = manifest.agents`, `selectionStore = PrefsAgentSelectionStore` (`cocode_agents`), `pinnedT3Version = manifest.t3.version`.
-  - `versionSource = DefaultPackageVersionSource(NpmPackageVersionSource(okHttp), agents, fallbackT3Version, coxPackage, openChamberPackage)` checks npm for installed servers and agents.
+  - `versionSource = DefaultPackageVersionSource(NpmPackageVersionSource(okHttp), VersionSourceCatalog(...), AgentVersionResolvers(GithubReleaseVersionSource(okHttp), coxOmoVersion))` checks npm, GitHub Releases (`omp`), and the installed Cox bundle's `OMO_VERSION` (`omo`).
   - `foregroundStarter = { RuntimeService.request(context, op) }`.
   - `killOwned = killOwnedRuntime(scanner, prootPath, rootfs)`.
   - Calls `.also { it.initialize() }`.

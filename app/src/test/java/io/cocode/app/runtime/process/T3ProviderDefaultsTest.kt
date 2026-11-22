@@ -68,9 +68,9 @@ class T3ProviderDefaultsTest {
 
     @Test
     fun `installed agents use modern provider envelopes and managed entries stay opt in`() {
-        val installed = setOf("codex", "claude", "opencode", "grok", "pi", "cursor")
+        val installed = setOf("omo", "omp", "codex", "claude", "opencode", "grok", "pi", "cursor")
         val result = instances(T3ProviderDefaults.merge(null, installed)!!)
-        for (id in setOf("codex", "claudeAgent", "opencode", "grok", "pi", "cursor")) {
+        for (id in setOf("omo", "omp", "codex", "claudeAgent", "opencode", "grok", "pi", "cursor")) {
             val instance = result[id]!!.jsonObject
             assertEquals(id, instance["driver"]!!.jsonPrimitive.content)
             assertEquals("true", instance["enabled"]!!.jsonPrimitive.content)
@@ -84,15 +84,19 @@ class T3ProviderDefaultsTest {
 
     @Test
     fun `a renamed provider instance is preserved without adding a duplicate`() {
-        val current = """{"providerInstances":{"custom-pi":{"driver":"pi","enabled":false,"config":{"model":"custom"}}}}"""
-        val result = instances(T3ProviderDefaults.merge(current, setOf("pi"))!!)
+        val current =
+            """{"providerInstances":{"custom-pi":{"driver":"pi","enabled":false,"config":{"model":"custom"}},"my-omo":{"driver":"omo","enabled":false,"config":{}},"my-omp":{"driver":"omp","enabled":true,"config":{}}}}"""
+        val result = instances(T3ProviderDefaults.merge(current, setOf("pi", "omo", "omp"))!!)
         assertNull(result["pi"])
+        assertNull(result["omo"])
+        assertNull(result["omp"])
         assertEquals("custom", result["custom-pi"]!!.jsonObject["config"]!!.jsonObject["model"]!!.jsonPrimitive.content)
+        assertEquals("false", result["my-omo"]!!.jsonObject["enabled"]!!.jsonPrimitive.content)
     }
 
     @Test
     fun `legacy T3 defaults do not introduce unsupported Cox drivers`() {
-        val result = instances(T3ProviderDefaults.merge(null, setOf("codex", "opencode", "grok"), cox = false)!!)
+        val result = instances(T3ProviderDefaults.merge(null, setOf("omo", "omp", "codex", "opencode", "grok"), cox = false)!!)
         assertEquals(setOf("opencode"), result.keys)
     }
 }
