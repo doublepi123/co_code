@@ -64,8 +64,39 @@ class AppReleaseCheckerTest {
             assertEquals("new in 0.10.0", update.notes)
 
             val request = server.takeRequest()
-            assertEquals("/repos/doublepi123/co_code/releases?per_page=30", request.path)
+            assertEquals("/repos/doublepi123/co_code/releases?per_page=100&page=1", request.path)
             assertNull(request.getHeader("Authorization"))
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun `reads later pages until a short page when ios releases fill the first`() =
+        runBlocking {
+            server.enqueue(MockResponse().setBody(releases(*Array(100) { iosRelease(200 - it) })))
+            server.enqueue(MockResponse().setBody(releases(iosRelease(100), release("0.10.0"))))
+            val checker = checker(currentVersion = "0.9.0")
+
+            checker.check()
+
+            assertEquals("0.10.0", checker.available.value?.version)
+            assertEquals("/repos/doublepi123/co_code/releases?per_page=100&page=1", server.takeRequest().path)
+            assertEquals("/repos/doublepi123/co_code/releases?per_page=100&page=2", server.takeRequest().path)
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun `a failed later page offers nothing from the earlier pages`() =
+        runBlocking {
+            server.enqueue(
+                MockResponse().setBody(releases(release("0.10.0"), *Array(99) { iosRelease(200 - it) })),
+            )
+            server.enqueue(MockResponse().setResponseCode(503))
+            val checker = checker(currentVersion = "0.9.0")
+
+            checker.check()
+
+            assertNull(checker.available.value)
+            assertEquals(2, server.requestCount)
         }
 
     @Test
@@ -211,6 +242,12 @@ class AppReleaseCheckerTest {
 
     private fun releases(vararg items: String): String =
         items.joinToString(prefix = "[", postfix = "]", separator = ",")
+
+    private fun iosRelease(run: Int): String =
+        """{"tag_name":"ios-build-$run","draft":false,"prerelease":true,""" +
+            """"html_url":"$PAGE/releases/tag/ios-build-$run","body":"ios",""" +
+            """"assets":[{"name":"CoCode-unsigned.ipa",""" +
+            """"browser_download_url":"$PAGE/releases/download/ios-build-$run/CoCode-unsigned.ipa"}]}"""
 
     companion object {
         private const val PAGE = "https://github.com/doublepi123/co_code"

@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -35,7 +36,8 @@ data class AppReleaseUpdate(
  * Checks the CoCode GitHub releases for a newer published APK.
  *
  * The release list is used instead of `/releases/latest` because the project publishes `0.x`
- * releases as prereleases. The check is best-effort: network, HTTP, malformed JSON and unexpected
+ * releases as prereleases, and every page of it is read because iOS builds publish releases of
+ * their own. The check is best-effort: network, HTTP, malformed JSON and unexpected
  * payloads are all reported as "no update" so a launch never fails because GitHub is unreachable.
  * A previously found update is kept until [dismiss] is called for that version.
  *
@@ -107,13 +109,19 @@ class AppReleaseChecker private constructor(
     }
 
     private suspend fun fetchUpdate(): AppReleaseUpdate? {
-        val body = fetchReleases() ?: return null
-        return withContext(Dispatchers.IO) { selectNewest(body) }
+        val releases = mutableListOf<JsonElement>()
+        for (page in 1..MAX_RELEASE_PAGES) {
+            val body = fetchReleasePage(page) ?: return null
+            val items = withContext(Dispatchers.IO) { parseReleases(body) } ?: return null
+            releases += items
+            if (items.size < RELEASE_PAGE_SIZE) break
+        }
+        return withContext(Dispatchers.IO) { selectNewest(releases) }
     }
 
-    private suspend fun fetchReleases(): String? =
+    private suspend fun fetchReleasePage(page: Int): String? =
         suspendCancellableCoroutine { continuation ->
-            val request = buildRequest()
+            val request = buildRequest(page)
             if (request == null) {
                 continuation.resume(null)
                 return@suspendCancellableCoroutine
@@ -139,12 +147,13 @@ class AppReleaseChecker private constructor(
             )
         }
 
-    private fun buildRequest(): Request? {
+    private fun buildRequest(page: Int): Request? {
         val url =
             (apiBase + "/repos/" + REPOSITORY + "/releases")
                 .toHttpUrlOrNull()
                 ?.newBuilder()
                 ?.addQueryParameter("per_page", RELEASE_PAGE_SIZE.toString())
+                ?.addQueryParameter("page", page.toString())
                 ?.build()
                 ?: return null
         if (!url.isHttps && url.host !in LOOPBACK_HOSTS) return null
@@ -172,12 +181,15 @@ class AppReleaseChecker private constructor(
         return buffer.readUtf8()
     }
 
-    internal fun selectNewest(body: String): AppReleaseUpdate? {
+    internal fun selectNewest(body: String): AppReleaseUpdate? = parseReleases(body)?.let(::selectNewest)
+
+    private fun parseReleases(body: String): JsonArray? =
+        runCatching {
+            Json.parseToJsonElement(body) as? JsonArray
+        }.getOrNull()
+
+    private fun selectNewest(releases: List<JsonElement>): AppReleaseUpdate? {
         val current = parseCurrentVersion(currentVersion) ?: return null
-        val releases =
-            runCatching {
-                Json.parseToJsonElement(body) as? JsonArray
-            }.getOrNull() ?: return null
 
         var best: Candidate? = null
         for (element in releases) {
@@ -259,7 +271,10 @@ class AppReleaseChecker private constructor(
         internal const val MAX_NOTES_CHARS = 4_000
 
         private const val REPOSITORY = "doublepi123/co_code"
-        private const val RELEASE_PAGE_SIZE = 30
+        private const val RELEASE_PAGE_SIZE = 100
+
+        /** Bounds the walk only against a server that never returns a short page. */
+        private const val MAX_RELEASE_PAGES = 100
         private const val USER_AGENT = "CoCode-Android"
         private const val REQUEST_TIMEOUT_SECONDS = 10L
         private const val MAX_BODY_BYTES = 1_000_000L
