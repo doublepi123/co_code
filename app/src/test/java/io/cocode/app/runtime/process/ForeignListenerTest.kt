@@ -5,6 +5,7 @@ import io.cocode.app.runtime.ServerKind
 import io.cocode.app.runtime.install.InstalledRuntime
 import io.cocode.app.runtime.install.RuntimeMetadata
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -176,6 +177,38 @@ class ForeignListenerTest {
 
         assertTrue(launchId > 0)
     }
+
+    @Test
+    fun `a run record left by a killed server is removed before our server starts`() {
+        val record = staleRunRecord()
+        val child = FakeChild(output = "Listening on http://127.0.0.1:$port\n", exitCode = 0, lifetimeMillis = 10_000L)
+
+        server(child, RecordingHealth(foreignOk()), mutableListOf()).start(runtime(), "ui-secret", {}, { false })
+
+        assertFalse("the stale record would make Cox refuse to start", record.exists())
+    }
+
+    @Test
+    fun `the run record is kept when a foreign listener holds the port`() {
+        val record = staleRunRecord()
+        val spawned = mutableListOf<Boolean>()
+
+        val error =
+            runCatching {
+                server(FakeChild(output = "", exitCode = 0), RecordingHealth(null), spawned, precheckFree = false)
+                    .start(runtime(), "ui-secret", {}, { false })
+            }.exceptionOrNull()
+
+        assertTrue("expected PortInUseException, got $error", error is PortInUseException)
+        assertTrue(record.exists())
+        assertEquals(0, spawned.size)
+    }
+
+    private fun staleRunRecord(): File =
+        File(RuntimePaths(folder.root).home, "${T3ProviderDefaults.T3_HOME_DIR}/userdata/server-runtime.json").apply {
+            parentFile?.mkdirs()
+            writeText("""{"pid":17190,"origin":"http://127.0.0.1:$port"}""")
+        }
 
     @Test
     fun `readyLaunchId is null as soon as our child is dead, without any watchdog tick`() {

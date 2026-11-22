@@ -30,4 +30,7 @@ if [ ! -e "$settings" ]; then
 fi
 
 cd "$cocode_home"
+# The guest has just booted, so no Cox runs: a run record from the last boot is
+# stale, and its pid may now belong to another process, which Cox would refuse.
+rm -f "$COX_HOME/userdata/server-runtime.json"
 exec env HOME="$cocode_home" /usr/local/bin/cox

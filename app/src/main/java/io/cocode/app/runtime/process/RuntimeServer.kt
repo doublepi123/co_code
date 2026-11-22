@@ -138,6 +138,10 @@ class ProotRuntimeServer(
             // Installed agents whose provider is off until configured become usable. Never fails a start.
             runCatching { T3ProviderDefaults.apply(paths.home, runtime.metadata.agents.keys, homeDir) }
                 .onFailure { onLog("Could not enable installed agent providers: ${it.message}") }
+            // The cleanup above proved no server of ours runs and the port is free, so a run record
+            // left by a killed server is stale. Cox refuses to start while the record's pid looks
+            // alive, and Android soon reuses that pid for another app's process.
+            File(paths.home, "$homeDir/userdata/server-runtime.json").delete()
         }
         val resolved = suite()
 
