@@ -1,6 +1,8 @@
 name: CoCode iOS Simulator QA
 
 on:
+  push:
+    branches: ['ios/simulator-qa']
   workflow_dispatch:
     inputs:
       manifest_tag:
@@ -23,6 +25,8 @@ concurrency:
 
 env:
   KERNARIUM_REV: b14aa9e6da9df15f467d8aad0090888373cc9b21
+  MANIFEST_TAG: ${{ inputs.manifest_tag || 'ios-v1.0.1' }}
+  ONLY_TESTING: ${{ github.event_name == 'push' && 'KernariumTests/CoCodeSessionTests KernariumUITests/CoCodeHomeUITests' || inputs.only_testing }}
 
 jobs:
   boot-base:
@@ -82,8 +86,6 @@ jobs:
           name: kernarium-arm64-boot-base
           path: build/ios/boot
       - name: Fetch public guest manifest
-        env:
-          MANIFEST_TAG: ${{ inputs.manifest_tag }}
         run: |
           [[ "$MANIFEST_TAG" =~ ^[0-9A-Za-z._-]+$ ]]
           curl --fail --location --silent --show-error \
@@ -173,19 +175,23 @@ jobs:
           capture_appearance light
           capture_appearance dark
       - name: Run selected Kernarium tests
-        if: ${{ inputs.only_testing != '' }}
-        env:
-          ONLY_TESTING: ${{ inputs.only_testing }}
+        if: ${{ env.ONLY_TESTING != '' }}
         run: |
           set -o pipefail
           result=build/ios/qa/KernariumTests.xcresult
+          selected=()
+          for test in $ONLY_TESTING; do selected+=(-only-testing:"$test"); done
+          status=0
           xcodebuild test -project kernarium/Kernarium/Kernarium.xcodeproj \
             -scheme Kernarium -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build/ios/test-derived -resultBundlePath "$result" \
-            -only-testing:"$ONLY_TESTING" CODE_SIGNING_ALLOWED=NO | tee build/ios/qa/logs/KernariumTests-xcodebuild.log
-          xcrun xcresulttool get test-results summary --path "$result" --format json | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt
+            "${selected[@]}" CODE_SIGNING_ALLOWED=NO | tee build/ios/qa/logs/KernariumTests-xcodebuild.log || status=$?
+          xcrun xcresulttool get test-results summary --path "$result" --format json | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt || true
+          mkdir -p build/ios/qa/test-attachments
+          xcrun xcresulttool export attachments --path "$result" --output-path build/ios/qa/test-attachments || true
+          exit "$status"
       - name: Save test skip summary
-        if: ${{ inputs.only_testing == '' }}
+        if: ${{ env.ONLY_TESTING == '' }}
         run: |
           printf 'Skipped: only_testing input was empty.\\n' > build/ios/qa/logs/KernariumTests-summary.txt
       - uses: actions/upload-artifact@v4
