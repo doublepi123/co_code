@@ -123,24 +123,6 @@ jobs:
         with:
           path: build/ios/sim-gpu
           key: ios-sim-gpu-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
-      - name: Build simulator app
-        env:
-          COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
-          COCODE_IOS_SIM_GPU_CACHE_DIR: ${{ github.workspace }}/build/ios/sim-gpu
-        run: |
-          export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
-          bash ios/host/build-simulator.sh kernarium build/ios/boot \
-            build/ios/CoCodeGuest.json build/ios/app
-      - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && steps.kernels.outputs.cache-hit != 'true' && hashFiles('build/ios/host-kernels/*/kernel-artifact.json') != '' }}
-        with:
-          path: build/ios/host-kernels
-          key: ${{ steps.kernels.outputs.cache-primary-key }}
-      - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && steps.sim-gpu.outputs.cache-hit != 'true' && hashFiles('build/ios/sim-gpu/prefix/lib/libepoxy.a') != '' }}
-        with:
-          path: build/ios/sim-gpu
-          key: ${{ steps.sim-gpu.outputs.cache-primary-key }}
       - name: Select and boot iPhone simulator
         run: |
           device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Booted/ {print $2; exit}')
@@ -156,55 +138,63 @@ jobs:
           xcrun simctl shutdown "$device"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+      - name: Build simulator app and run selected tests
+        env:
+          COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
+          COCODE_IOS_SIM_GPU_CACHE_DIR: ${{ github.workspace }}/build/ios/sim-gpu
+          COCODE_IOS_TEST_ONLY: ${{ env.ONLY_TESTING }}
+        run: |
+          export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
+          export COCODE_IOS_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_UDID"
+          bash ios/host/build-simulator.sh kernarium build/ios/boot \
+            build/ios/CoCodeGuest.json build/ios/app
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.kernels.outputs.cache-hit != 'true' && hashFiles('build/ios/host-kernels/*/kernel-artifact.json') != '' }}
+        with:
+          path: build/ios/host-kernels
+          key: ${{ steps.kernels.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.sim-gpu.outputs.cache-hit != 'true' && hashFiles('build/ios/sim-gpu/prefix/lib/libepoxy.a') != '' }}
+        with:
+          path: build/ios/sim-gpu
+          key: ${{ steps.sim-gpu.outputs.cache-primary-key }}
       - name: Capture light and dark first-launch screens
         run: |
           set -euo pipefail
           mkdir -p build/ios/qa/screenshots build/ios/qa/logs
+          shot() { xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/$1-$(printf '%03d' "$2")s.png" >/dev/null; }
+          wait_until() { local left=$(( $1 - (SECONDS - started) )); (( left > 0 )) && sleep "$left" || true; }
           capture_appearance() {
-            local appearance="$1"
+            local appearance="$1" until="$2" elapsed
+            xcrun simctl uninstall "$SIMULATOR_UDID" io.cocode.ios || true
             xcrun simctl ui "$SIMULATOR_UDID" appearance "$appearance"
             xcrun simctl install "$SIMULATOR_UDID" build/ios/app/Kernarium.app
-            xcrun simctl launch "$SIMULATOR_UDID" io.cocode.ios
-            sleep 5
-            xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-005s.png"
-            sleep 15
-            xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-020s.png"
-            local elapsed=20
-            while (( elapsed < 720 )); do
-              local pid
-              pid=$(xcrun simctl spawn "$SIMULATOR_UDID" launchctl list | awk '$3 == "io.cocode.ios" {print $1; exit}')
-              [[ -n "$pid" ]] || break
-              sleep 60
-              elapsed=$((elapsed + 60))
-              printf -v stamp '%03d' "$elapsed"
-              xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-${stamp}s.png"
-            done
-            xcrun simctl spawn "$SIMULATOR_UDID" log show --predicate 'process == "Kernarium"' --last 15m > "build/ios/qa/logs/${appearance}-Kernarium.log" || true
+            xcrun simctl launch --terminate-running-process \
+              --stdout="$PWD/build/ios/qa/logs/$appearance-app-stdout.log" \
+              --stderr="$PWD/build/ios/qa/logs/$appearance-app-stderr.log" \
+              "$SIMULATOR_UDID" io.cocode.ios
+            started=$SECONDS
+            # The first seconds show the download and install panels, then Cox opening.
+            for elapsed in 1 2 3 4 5 6 7 8 12 20 40; do wait_until "$elapsed"; shot "$appearance" "$elapsed"; done
+            for (( elapsed = 60; elapsed <= until; elapsed += 60 )); do wait_until "$elapsed"; shot "$appearance" "$elapsed"; done
             xcrun simctl terminate "$SIMULATOR_UDID" io.cocode.ios || true
-            xcrun simctl uninstall "$SIMULATOR_UDID" io.cocode.ios
           }
-          capture_appearance light
-          capture_appearance dark
-      - name: Run selected Kernarium tests
-        if: ${{ env.ONLY_TESTING != '' }}
+          capture_appearance light 600
+          capture_appearance dark 120
+      - name: Collect test results
+        if: always()
         run: |
-          set -o pipefail
-          result=build/ios/qa/KernariumTests.xcresult
-          selected=()
-          for test in $ONLY_TESTING; do selected+=(-only-testing:"$test"); done
-          status=0
-          xcodebuild test -project kernarium/Kernarium/Kernarium.xcodeproj \
-            -scheme Kernarium -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath build/ios/test-derived -resultBundlePath "$result" \
-            "${selected[@]}" CODE_SIGNING_ALLOWED=NO | tee build/ios/qa/logs/KernariumTests-xcodebuild.log || status=$?
-          xcrun xcresulttool get test-results summary --path "$result" --format json | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt || true
-          mkdir -p build/ios/qa/test-attachments
-          xcrun xcresulttool export attachments --path "$result" --output-path build/ios/qa/test-attachments || true
-          exit "$status"
-      - name: Save test skip summary
-        if: ${{ env.ONLY_TESTING == '' }}
-        run: |
-          printf 'Skipped: only_testing input was empty.\\n' > build/ios/qa/logs/KernariumTests-summary.txt
+          mkdir -p build/ios/qa/logs build/ios/qa/test-attachments
+          if [[ -d build/ios/app/KernariumTests.xcresult ]]; then
+            mv build/ios/app/KernariumTests.xcresult build/ios/qa/
+            cp build/ios/app/KernariumTests-xcodebuild.log build/ios/qa/logs/ || true
+            xcrun xcresulttool get test-results summary --path build/ios/qa/KernariumTests.xcresult --format json \
+              | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt || true
+            xcrun xcresulttool export attachments --path build/ios/qa/KernariumTests.xcresult \
+              --output-path build/ios/qa/test-attachments || true
+          else
+            printf 'No test results: no tests were selected or the build failed.\n' > build/ios/qa/logs/KernariumTests-summary.txt
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -212,3 +202,8 @@ jobs:
           path: build/ios/qa/
           if-no-files-found: error
           retention-days: 14
+      - name: Fail when the selected tests failed
+        if: ${{ env.ONLY_TESTING != '' }}
+        run: |
+          status=$(cat build/ios/app/KernariumTests.status)
+          [[ "$status" == 0 ]] || { echo "Selected Kernarium tests failed with status $status"; exit 1; }

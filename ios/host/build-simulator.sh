@@ -159,3 +159,18 @@ cmp -s "$GUEST_MANIFEST" "$APP/CoCodeGuest.json" || fail 'app bundle lacks the g
 [ -d "$APP/zh-Hans.lproj" ] || fail 'app bundle lacks Simplified Chinese resources'
 /usr/bin/ditto "$APP" "$OUTPUT_DIR/Kernarium.app"
 printf 'Built unsigned simulator app: %s\n' "$OUTPUT_DIR/Kernarium.app"
+
+# Tests need the frameworks built above, which go with the work directory, so
+# they run here. Their status is left for the caller, which still wants the app.
+if [[ -n "${COCODE_IOS_TEST_ONLY:-}" ]]; then
+    [[ -n "${COCODE_IOS_TEST_DESTINATION:-}" ]] || fail 'COCODE_IOS_TEST_DESTINATION must name the simulator for the tests'
+    selected=()
+    for test in $COCODE_IOS_TEST_ONLY; do selected+=(-only-testing:"$test"); done
+    test_status=0
+    xcodebuild test -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" -scheme Kernarium \
+        -destination "$COCODE_IOS_TEST_DESTINATION" -derivedDataPath "$WORK/test-derived" \
+        -resultBundlePath "$OUTPUT_DIR/KernariumTests.xcresult" "${selected[@]}" CODE_SIGNING_ALLOWED=NO \
+        > "$OUTPUT_DIR/KernariumTests-xcodebuild.log" 2>&1 || test_status=$?
+    printf '%s\n' "$test_status" > "$OUTPUT_DIR/KernariumTests.status"
+    printf 'Selected Kernarium tests finished with status %s\n' "$test_status"
+fi
