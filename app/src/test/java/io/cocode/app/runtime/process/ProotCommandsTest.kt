@@ -93,7 +93,22 @@ class ProotCommandsTest {
         assertEquals("/root/.t3", env["T3CODE_HOME"])
         assertFalse(env.containsKey("COX_HOME"))
         assertFalse(env.containsKey("COX_AUTH_PASSWORD"))
+        assertFalse(env.containsKey("COX_UPDATES_MANAGED_BY"))
         assertEquals("secret-password", env["T3CODE_AUTH_PASSWORD"])
+    }
+
+    @Test
+    fun `cox is told that CoCode manages its updates`() {
+        val env =
+            ProotCommands.serverEnvironment(
+                suiteEnvironment = emptyMap(),
+                prootTmp = prootTmp,
+                port = 3773,
+                uiPassword = "secret-password",
+                kind = ServerKind.T3,
+            )
+
+        assertEquals("CoCode", env["COX_UPDATES_MANAGED_BY"])
     }
 
     @Test

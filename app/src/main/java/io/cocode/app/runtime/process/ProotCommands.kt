@@ -140,6 +140,8 @@ object ProotCommands {
                     if (coxBundle) {
                         put("COX_HOME", COX_HOME)
                         put("COX_AUTH_PASSWORD", uiPassword)
+                        // CoCode installs and updates Cox itself, so Cox hides its own update check.
+                        put("COX_UPDATES_MANAGED_BY", "CoCode")
                     } else {
                         put("T3CODE_HOME", T3_HOME)
                     }
