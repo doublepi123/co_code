@@ -3605,10 +3605,33 @@ index ded12cd..af8faa3 100644
      }
  }
 diff --git a/Kernarium/Kernarium/SerialConsoleView.swift b/Kernarium/Kernarium/SerialConsoleView.swift
-index af65dd1..c0e9b7d 100644
+index af65dd1..2190c1f 100644
 --- a/Kernarium/Kernarium/SerialConsoleView.swift
 +++ b/Kernarium/Kernarium/SerialConsoleView.swift
-@@ -48,6 +48,10 @@ final class SerialConsoleController: ObservableObject {
+@@ -34,7 +34,21 @@ final class SerialConsoleController: ObservableObject {
+     }
+ 
+     /// One colour scheme regardless of the system appearance.
+-    static let terminalTheme = TerminalTheme(light: .afterglow, dark: .afterglow)
++    /// The Android app's log terminal colours, following the system appearance.
++    static let terminalTheme = TerminalTheme(
++        light: TerminalConfiguration(startingFrom: .alabaster) { builder in
++            builder.withBackground("F1EBE2")
++            builder.withForeground("3B332E")
++            builder.withCursorColor("8F5A00")
++            builder.withSelectionBackground("E2D8CA")
++        },
++        dark: TerminalConfiguration(startingFrom: .afterglow) { builder in
++            builder.withBackground("0F0D0C")
++            builder.withForeground("D6CFC3")
++            builder.withCursorColor("EDB449")
++            builder.withSelectionBackground("26221F")
++        }
++    )
+ 
+     let session: InMemoryTerminalSession
+     let terminal: TerminalController
+@@ -48,6 +62,13 @@ final class SerialConsoleController: ObservableObject {
      /// any software keyboard. A tap on the terminal changes it as well as
      /// the application's keyboard button.
      @Published private(set) var isFocused = false
@@ -3616,10 +3639,13 @@ index af65dd1..c0e9b7d 100644
 +    /// The local Cox password, once the guest has printed it on its console.
 +    @Published private(set) var coxPassword: String?
 +    private var passwordScanner = CoCodePasswordScanner()
++    /// Whether the last byte shown was a carriage return, for line endings
++    /// split across chunks.
++    private var lastByteWasCarriageReturn = false
  
      convenience init() {
          self.init(input: { SerialConsoleController.sendToGuest($0) })
-@@ -118,6 +122,19 @@ final class SerialConsoleController: ObservableObject {
+@@ -118,6 +139,20 @@ final class SerialConsoleController: ObservableObject {
  
      func receive(_ data: Data) {
          guard !data.isEmpty else { return }
@@ -3636,9 +3662,35 @@ index af65dd1..c0e9b7d 100644
 +        if let password = passwordScanner.consume(data), password != coxPassword {
 +            coxPassword = password
 +        }
++        let data = Self.withCarriageReturns(data, afterCarriageReturn: &lastByteWasCarriageReturn)
          guard terminalView?.surface != nil else {
              pendingOutput.append(data)
              return
+@@ -125,6 +160,24 @@ final class SerialConsoleController: ObservableObject {
+         session.receive(data)
+     }
+ 
++    /// The kernel's console writes bare line feeds, which a terminal treats
++    /// as "down one row" and so staircases the log. Each bare LF becomes CRLF;
++    /// a CRLF already sent, also across chunks, is left alone.
++    nonisolated static func withCarriageReturns(
++        _ data: Data,
++        afterCarriageReturn: inout Bool
++    ) -> Data {
++        var result = Data(capacity: data.count + data.count / 16)
++        for byte in data {
++            if byte == 0x0A && !afterCarriageReturn {
++                result.append(0x0D)
++            }
++            result.append(byte)
++            afterCarriageReturn = byte == 0x0D
++        }
++        return result
++    }
++
+     nonisolated static func sendToGuest(_ data: Data) {
+         let result = data.withUnsafeBytes { buffer -> Int32 in
+             guard let baseAddress = buffer.baseAddress else { return 0 }
 diff --git a/Kernarium/Kernarium/SpacePauseOverlay.swift b/Kernarium/Kernarium/SpacePauseOverlay.swift
 index 1d4f5b1..4851659 100644
 --- a/Kernarium/Kernarium/SpacePauseOverlay.swift
@@ -3727,6 +3779,35 @@ index dc271ba..dc3fce4 100644
          #expect(relaunched.restart?.message.contains("closed") == true)
  
          // Reported once: the launch after it starts clean.
+diff --git a/Kernarium/KernariumTests/CoCodeConsoleTests.swift b/Kernarium/KernariumTests/CoCodeConsoleTests.swift
+new file mode 100644
+index 0000000..f375015
+--- /dev/null
++++ b/Kernarium/KernariumTests/CoCodeConsoleTests.swift
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++import Foundation
++import Testing
++@testable import Kernarium
++
++@MainActor
++struct CoCodeConsoleTests {
++    @Test func bareLineFeedsStartTheNextLineAtTheLeftEdge() {
++        var afterCR = false
++        let shown = SerialConsoleController.withCarriageReturns(
++            Data("[ 40.5] PM: suspend\n[ 218.5] PM: resume\n".utf8),
++            afterCarriageReturn: &afterCR
++        )
++        #expect(shown == Data("[ 40.5] PM: suspend\r\n[ 218.5] PM: resume\r\n".utf8))
++    }
++
++    @Test func lineEndingsAlreadyCRLFAreKeptAcrossChunks() {
++        var afterCR = false
++        let first = SerialConsoleController.withCarriageReturns(Data("$ ls\r".utf8), afterCarriageReturn: &afterCR)
++        let second = SerialConsoleController.withCarriageReturns(Data("\nbin\r\n".utf8), afterCarriageReturn: &afterCR)
++        #expect(first + second == Data("$ ls\r\nbin\r\n".utf8))
++    }
++}
 diff --git a/Kernarium/KernariumTests/CoCodeSessionTests.swift b/Kernarium/KernariumTests/CoCodeSessionTests.swift
 new file mode 100644
 index 0000000..acf8207
