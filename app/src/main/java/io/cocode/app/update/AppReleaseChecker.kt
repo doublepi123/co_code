@@ -113,7 +113,7 @@ class AppReleaseChecker private constructor(
         for (page in 1..MAX_RELEASE_PAGES) {
             val body = fetchReleasePage(page) ?: return null
             val items = withContext(Dispatchers.IO) { parseReleases(body) } ?: return null
-            releases += items
+            releases.addAll(items)
             if (items.size < RELEASE_PAGE_SIZE) break
         }
         return withContext(Dispatchers.IO) { selectNewest(releases) }
