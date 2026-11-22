@@ -183,7 +183,13 @@ jobs:
             for (( elapsed = 60; elapsed <= until; elapsed += 60 )); do wait_until "$elapsed"; shot "$appearance" "$elapsed"; done
             xcrun simctl terminate "$SIMULATOR_UDID" io.cocode.ios || true
           }
+          # CI fetches the image within a second; a slower link keeps the download panel on screen.
+          sudo dnctl pipe 1 config bw 40Mbit/s
+          echo 'dummynet in proto tcp from any port 443 to any pipe 1' | sudo pfctl -q -f -
+          sudo pfctl -q -E
           capture_appearance light 600
+          sudo pfctl -q -d || true
+          sudo dnctl -q flush || true
           capture_appearance dark 120
       - name: Collect test results
         if: always()
