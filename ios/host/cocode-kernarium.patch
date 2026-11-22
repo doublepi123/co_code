@@ -1763,10 +1763,10 @@ index 0000000..90f55e3
 +}
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..7488e84
+index 0000000..d33aaef
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,220 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -1841,12 +1841,8 @@ index 0000000..7488e84
 +            }
 +            return
 +        }
-+        guard await waitForCox() else {
-+            if !Task.isCancelled {
-+                failure = String(localized: "Cox did not answer. Check the logs for startup errors.")
-+            }
-+            return
-+        }
++        await waitForCox()
++        guard !Task.isCancelled else { return }
 +        let cookies = await signIn() ?? []
 +        print(cookies.isEmpty
 +            ? "CoCode: opening Cox without a native sign-in"
@@ -1854,7 +1850,10 @@ index 0000000..7488e84
 +        if !Task.isCancelled { ready = Ready(rules: compiled, cookies: cookies) }
 +    }
 +
-+    private func waitForCox() async -> Bool {
++    /// Waits until Cox answers. A cold start in the emulated guest can take
++    /// many minutes on a slow device, so there is no deadline: the opening
++    /// panel stays up with its log button until Cox answers or the pane goes away.
++    private func waitForCox() async {
 +        let configuration = URLSessionConfiguration.ephemeral
 +        configuration.timeoutIntervalForRequest = 2
 +        configuration.timeoutIntervalForResource = 2
@@ -1862,17 +1861,14 @@ index 0000000..7488e84
 +        configuration.httpCookieStorage = nil
 +        let session = URLSession(configuration: configuration, delegate: CoxNoRedirects(), delegateQueue: nil)
 +        defer { session.invalidateAndCancel() }
-+        // A cold Cox start in the emulated guest can take minutes on a slow device.
-+        let deadline = ContinuousClock.now + .seconds(600)
-+        while !Task.isCancelled && ContinuousClock.now < deadline {
++        while !Task.isCancelled {
 +            if let (_, response) = try? await session.data(from: CoxOrigin.discovery),
 +               (response as? HTTPURLResponse)?.statusCode == 200,
 +               CoxOrigin.contains(response.url) {
-+                return true
++                return
 +            }
 +            try? await Task.sleep(for: .seconds(1))
 +        }
-+        return false
 +    }
 +
 +    /// The guest prints the password before it starts Cox, so it is normally
@@ -2236,10 +2232,10 @@ index 0000000..9f552bd
 +}
 diff --git a/Kernarium/Kernarium/Localizable.xcstrings b/Kernarium/Kernarium/Localizable.xcstrings
 new file mode 100644
-index 0000000..4021170
+index 0000000..22ee782
 --- /dev/null
 +++ b/Kernarium/Kernarium/Localizable.xcstrings
-@@ -0,0 +1,1336 @@
+@@ -0,0 +1,1326 @@
 +{
 +  "sourceLanguage": "en",
 +  "strings": {
@@ -2509,16 +2505,6 @@ index 0000000..4021170
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "CoCode 会在首次启动以及应用要求的版本变更时下载 Linux 镜像。你的 Linux 文件保存在单独的数据磁盘中。"
-+          }
-+        }
-+      }
-+    },
-+    "Cox did not answer. Check the logs for startup errors.": {
-+      "localizations": {
-+        "zh-Hans": {
-+          "stringUnit": {
-+            "state": "translated",
-+            "value": "Cox 没有响应，请在日志中查看启动错误。"
 +          }
 +        }
 +      }
@@ -4047,10 +4033,10 @@ index 2e58947..7fcd94b 100644
      }
 diff --git a/Kernarium/KernariumUITests/CoCodeHomeUITests.swift b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
 new file mode 100644
-index 0000000..8b339f9
+index 0000000..fc204f1
 --- /dev/null
 +++ b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,81 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import XCTest
 +
@@ -4091,7 +4077,9 @@ index 0000000..8b339f9
 +        let toggle = web.descendants(matching: .any).matching(
 +            NSPredicate(format: "label IN %@", ["切换主侧边栏", "Toggle main sidebar"])
 +        ).firstMatch
-+        guard toggle.waitForExistence(timeout: 900) else {
++        // The first launch downloads the image and cold-starts Cox in an
++        // emulated guest, which takes well over ten minutes on CI.
++        guard toggle.waitForExistence(timeout: 1800) else {
 +            attachScreenshot(of: app, named: "cox-not-open")
 +            let logs = app.buttons.matching(
 +                NSPredicate(format: "label IN %@", ["查看日志", "View logs"])
