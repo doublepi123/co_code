@@ -50,7 +50,17 @@ mkdir -p "$MOUNT"
 cleanup() {
     if [ "$mounted" = 1 ]; then
         cd /
-        hdiutil detach -quiet "$MOUNT" || hdiutil detach -force "$MOUNT" || return
+        # Simulator processes can hold the volume briefly after the tests end, and a
+        # detach that fails can still unmount it, so judge by what remains mounted.
+        for _ in 1 2 3 4 5; do
+            hdiutil detach -quiet "$MOUNT" 2>/dev/null || hdiutil detach -force -quiet "$MOUNT" 2>/dev/null || true
+            [ -z "$(ls -A "$MOUNT" 2>/dev/null)" ] && break
+            sleep 2
+        done
+        if [ -n "$(ls -A "$MOUNT" 2>/dev/null)" ]; then
+            printf 'build-simulator: could not detach %s\n' "$MOUNT" >&2
+            return 1
+        fi
     fi
     rm -rf "$WORK"
 }
