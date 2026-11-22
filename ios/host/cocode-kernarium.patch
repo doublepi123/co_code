@@ -1759,10 +1759,10 @@ index 0000000..90f55e3
 +}
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..c117cc9
+index 0000000..d6fa84f
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
-@@ -0,0 +1,217 @@
+@@ -0,0 +1,220 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -1841,6 +1841,9 @@ index 0000000..c117cc9
 +            return
 +        }
 +        let cookies = await signIn() ?? []
++        print(cookies.isEmpty
++            ? "CoCode: opening Cox without a native sign-in"
++            : "CoCode: signed in to Cox")
 +        if !Task.isCancelled { ready = Ready(rules: compiled, cookies: cookies) }
 +    }
 +
