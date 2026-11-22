@@ -123,8 +123,20 @@ done
 for product in apple-gpu-vulkan-experiment ios-network ios-storage ios-compression; do
     "$KERNARIUM_DIR/dependencies/prepare.sh" --product "$product"
 done
-"$KERNARIUM_DIR/dependencies/build-apple-gpu.sh" --platform ios
-"$KERNARIUM_DIR/dependencies/build-ios-network.sh" --platform ios
+"$KERNARIUM_DIR/dependencies/prepare.sh" --archive-manifest "$KERNARIUM_DIR/dependencies/llvm/archives.tsv"
+# The Simulator's software GPU prefix links an LLVM built from source, so a
+# cached copy from an earlier run is reused when the caller provides one.
+SIM_GPU_PREFIX="$KERNARIUM_DIR/.build/dependencies/apple-gpu-vulkan-experiment/ios-simulator-arm64"
+if [ -n "${COCODE_IOS_SIM_GPU_CACHE_DIR:-}" ] && [ -d "$COCODE_IOS_SIM_GPU_CACHE_DIR/prefix" ]; then
+    mkdir -p "$(dirname "$SIM_GPU_PREFIX")"
+    cp -R "$COCODE_IOS_SIM_GPU_CACHE_DIR/prefix" "$SIM_GPU_PREFIX"
+fi
+"$KERNARIUM_DIR/dependencies/build-apple-gpu.sh" --platform ios-simulator
+if [ -n "${COCODE_IOS_SIM_GPU_CACHE_DIR:-}" ] && [ ! -d "$COCODE_IOS_SIM_GPU_CACHE_DIR/prefix" ]; then
+    mkdir -p "$COCODE_IOS_SIM_GPU_CACHE_DIR"
+    cp -R "$SIM_GPU_PREFIX" "$COCODE_IOS_SIM_GPU_CACHE_DIR/prefix"
+fi
+"$KERNARIUM_DIR/dependencies/build-ios-network.sh" --platform ios-simulator
 cd "$KERNARIUM_DIR"
 cmake --preset kernarium-ios-simulator
 cmake --build --preset kernarium-ios-simulator --parallel

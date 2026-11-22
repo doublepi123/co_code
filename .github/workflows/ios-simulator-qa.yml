@@ -118,9 +118,15 @@ jobs:
         with:
           path: build/ios/host-kernels
           key: ios-darwin-kernels-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
+      - uses: actions/cache/restore@v4
+        id: sim-gpu
+        with:
+          path: build/ios/sim-gpu
+          key: ios-sim-gpu-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
       - name: Build simulator app
         env:
           COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
+          COCODE_IOS_SIM_GPU_CACHE_DIR: ${{ github.workspace }}/build/ios/sim-gpu
         run: |
           export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
           bash ios/host/build-simulator.sh kernarium build/ios/boot \
@@ -130,6 +136,11 @@ jobs:
         with:
           path: build/ios/host-kernels
           key: ${{ steps.kernels.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.sim-gpu.outputs.cache-hit != 'true' && hashFiles('build/ios/sim-gpu/prefix/lib/libepoxy.a') != '' }}
+        with:
+          path: build/ios/sim-gpu
+          key: ${{ steps.sim-gpu.outputs.cache-primary-key }}
       - name: Select and boot iPhone simulator
         run: |
           device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Booted/ {print $2; exit}')
