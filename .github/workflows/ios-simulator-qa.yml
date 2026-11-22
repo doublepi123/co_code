@@ -1,0 +1,197 @@
+name: CoCode iOS Simulator QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_tag:
+        description: Public iOS release tag containing CoCodeGuest.json
+        required: true
+        default: ios-v1.0.1
+        type: string
+      only_testing:
+        description: Optional xcodebuild -only-testing value (empty skips tests)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-qa-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  KERNARIUM_REV: b14aa9e6da9df15f467d8aad0090888373cc9b21
+
+jobs:
+  boot-base:
+    name: ARM64 boot ramdisk
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: imxieyi/Kernarium
+          ref: ${{ env.KERNARIUM_REV }}
+          persist-credentials: false
+      - name: Restore boot ramdisk
+        id: boot-cache
+        uses: actions/cache@v4
+        with:
+          path: boot-output
+          key: ios-boot-base-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}
+      - name: Build boot ramdisk from pinned source
+        if: steps.boot-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio debootstrap file flex gdisk rsync unzip wget
+          tools/rootfs/starter/build-all.sh --product boot-base-aarch64 \
+            --work "$RUNNER_TEMP/kernarium-boot-work" --output "$GITHUB_WORKSPACE/boot-output"
+      - name: Record boot ramdisk checksum
+        working-directory: boot-output
+        run: |
+          gzip -t uml-boot-base-aarch64.cpio.gz
+          sha256sum uml-boot-base-aarch64.cpio.gz > uml-boot-base-aarch64.cpio.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernarium-arm64-boot-base
+          path: |
+            boot-output/uml-boot-base-aarch64.cpio.gz
+            boot-output/uml-boot-base-aarch64.cpio.gz.sha256
+          if-no-files-found: error
+
+  simulator:
+    name: Build and inspect iOS Simulator app
+    needs: boot-base
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: imxieyi/Kernarium
+          ref: ${{ env.KERNARIUM_REV }}
+          path: kernarium
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernarium-arm64-boot-base
+          path: build/ios/boot
+      - name: Fetch public guest manifest
+        env:
+          MANIFEST_TAG: ${{ inputs.manifest_tag }}
+        run: |
+          [[ "$MANIFEST_TAG" =~ ^[0-9A-Za-z._-]+$ ]]
+          curl --fail --location --silent --show-error \
+            "https://github.com/doublepi123/co_code/releases/download/$MANIFEST_TAG/CoCodeGuest.json" \
+            --output build/ios/CoCodeGuest.json
+          python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["compressedSize"] > 0 and m["url"].startswith("https://")' build/ios/CoCodeGuest.json
+      - name: Verify build inputs
+        id: toolchain
+        run: |
+          (cd build/ios/boot && shasum -a 256 -c uml-boot-base-aarch64.cpio.gz.sha256)
+          xcodebuild -version
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          printf 'sdk=%s\n' "$sdk" >> "$GITHUB_OUTPUT"
+          test "$(uname -m)" = arm64
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Apple build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew install autoconf automake bison flex gettext groff gperf libtool lld llvm make ninja pkgconf rsync
+          for package in bison flex gettext groff libtool lld llvm; do
+            printf '%s/bin\n' "$(brew --prefix "$package")" >> "$GITHUB_PATH"
+          done
+          python3 -m pip install meson mako pyyaml packaging
+          xcodebuild -downloadComponent MetalToolchain
+      - uses: actions/cache/restore@v4
+        id: kernels
+        with:
+          path: build/ios/host-kernels
+          key: ios-darwin-kernels-v1-${{ env.KERNARIUM_REV }}-${{ runner.arch }}-${{ steps.toolchain.outputs.sdk }}
+      - name: Build simulator app
+        env:
+          COCODE_IOS_KERNEL_CACHE_DIR: ${{ github.workspace }}/build/ios/host-kernels
+        run: |
+          export BOOT_BASE_SHA256=$(awk 'NR == 1 {print $1}' build/ios/boot/uml-boot-base-aarch64.cpio.gz.sha256)
+          bash ios/host/build-simulator.sh kernarium build/ios/boot \
+            build/ios/CoCodeGuest.json build/ios/app
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && steps.kernels.outputs.cache-hit != 'true' && hashFiles('build/ios/host-kernels/*/kernel-artifact.json') != '' }}
+        with:
+          path: build/ios/host-kernels
+          key: ${{ steps.kernels.outputs.cache-primary-key }}
+      - name: Select and boot iPhone simulator
+        run: |
+          device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Booted/ {print $2; exit}')
+          if [[ -z "$device" ]]; then
+            device=$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')
+            xcrun simctl boot "$device"
+          fi
+          echo "SIMULATOR_UDID=$device" >> "$GITHUB_ENV"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+          xcrun simctl spawn "$device" defaults write .GlobalPreferences AppleLanguages -array zh-Hans en
+          xcrun simctl spawn "$device" defaults write .GlobalPreferences AppleLocale -string zh_CN
+          xcrun simctl shutdown "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Capture light and dark first-launch screens
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios/qa/screenshots build/ios/qa/logs
+          capture_appearance() {
+            local appearance="$1"
+            xcrun simctl ui "$SIMULATOR_UDID" appearance "$appearance"
+            xcrun simctl install "$SIMULATOR_UDID" build/ios/app/Kernarium.app
+            xcrun simctl launch "$SIMULATOR_UDID" io.cocode.ios
+            sleep 5
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-005s.png"
+            sleep 15
+            xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-020s.png"
+            local elapsed=20
+            while (( elapsed < 720 )); do
+              local pid
+              pid=$(xcrun simctl spawn "$SIMULATOR_UDID" launchctl list | awk '$3 == "io.cocode.ios" {print $1; exit}')
+              [[ -n "$pid" ]] || break
+              sleep 60
+              elapsed=$((elapsed + 60))
+              printf -v stamp '%03d' "$elapsed"
+              xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/${appearance}-${stamp}s.png"
+            done
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --predicate 'process == "Kernarium"' --last 15m > "build/ios/qa/logs/${appearance}-Kernarium.log" || true
+            xcrun simctl terminate "$SIMULATOR_UDID" io.cocode.ios || true
+            xcrun simctl uninstall "$SIMULATOR_UDID" io.cocode.ios
+          }
+          capture_appearance light
+          capture_appearance dark
+      - name: Run selected Kernarium tests
+        if: ${{ inputs.only_testing != '' }}
+        env:
+          ONLY_TESTING: ${{ inputs.only_testing }}
+        run: |
+          set -o pipefail
+          result=build/ios/qa/KernariumTests.xcresult
+          xcodebuild test -project kernarium/Kernarium/Kernarium.xcodeproj \
+            -scheme Kernarium -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath build/ios/test-derived -resultBundlePath "$result" \
+            -only-testing:"$ONLY_TESTING" CODE_SIGNING_ALLOWED=NO | tee build/ios/qa/logs/KernariumTests-xcodebuild.log
+          xcrun xcresulttool get test-results summary --path "$result" --format json | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt
+      - name: Save test skip summary
+        if: ${{ inputs.only_testing == '' }}
+        run: |
+          printf 'Skipped: only_testing input was empty.\\n' > build/ios/qa/logs/KernariumTests-summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CoCode-iOS-simulator-qa
+          path: build/ios/qa/
+          if-no-files-found: error
+          retention-days: 14

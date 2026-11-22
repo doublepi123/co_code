@@ -27,6 +27,8 @@ On `main`, the workflow also exports the archive using Apple-managed distributio
 
 The guest starts BusyBox init, sets up its terminal devices and network, and runs Cox on guest port `3773`. The iOS host publishes that port on iOS loopback only. CoCode stores projects in `/root/projects`, Cox data in `/root/.cox`, and the generated local login password in a private file under `/root`. Those paths must be backed by the host's persistent disk.
 
+The [iOS Simulator QA workflow](../.github/workflows/ios-simulator-qa.yml) can be started manually from any dispatched ref. It builds the simulator app, captures first-launch screens in light and dark appearance with simulator logs, and optionally runs selected `KernariumTests` when `only_testing` is supplied.
+
 ## Verify on an iPhone
 
 Follow the host build and installation steps in [host/README.md](host/README.md). Then run the following on the installed CoCode app:
