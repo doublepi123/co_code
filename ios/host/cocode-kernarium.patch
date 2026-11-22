@@ -4046,10 +4046,10 @@ index 2e58947..7fcd94b 100644
      }
 diff --git a/Kernarium/KernariumUITests/CoCodeHomeUITests.swift b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
 new file mode 100644
-index 0000000..73723b1
+index 0000000..5754bb6
 --- /dev/null
 +++ b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,67 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import XCTest
 +
@@ -4077,6 +4077,36 @@ index 0000000..73723b1
 +        app.buttons["homeSettingsTile"].tap()
 +        XCTAssertTrue(app.buttons["settingsSaveButton"].waitForExistence(timeout: 5))
 +        attachScreenshot(of: app, named: "settings")
++    }
++
++    /// Opening Cox's own settings makes Cox probe its providers inside the
++    /// Linux environment; the app must still be running afterwards.
++    @MainActor
++    func testCoxSettingsOpenWithoutEndingTheApp() throws {
++        let app = XCUIApplication()
++        app.launch()
++        let web = app.webViews.firstMatch
++        let toggle = web.buttons.matching(
++            NSPredicate(format: "label IN %@", ["切换主侧边栏", "Toggle main sidebar"])
++        ).firstMatch
++        XCTAssertTrue(toggle.waitForExistence(timeout: 900), "Cox did not open signed in")
++        attachScreenshot(of: app, named: "cox-signed-in")
++        toggle.tap()
++
++        let settings = web.buttons.matching(
++            NSPredicate(format: "label IN %@", ["设置", "Settings"])
++        ).firstMatch
++        XCTAssertTrue(settings.waitForExistence(timeout: 15))
++        settings.tap()
++
++        let ended = XCTNSPredicateExpectation(
++            predicate: NSPredicate(
++                format: "state != %d", XCUIApplication.State.runningForeground.rawValue
++            ),
++            object: app
++        )
++        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 90), .timedOut, "CoCode ended after Cox settings opened")
++        attachScreenshot(of: app, named: "cox-settings")
 +    }
 +
 +    @MainActor
