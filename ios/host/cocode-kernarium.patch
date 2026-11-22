@@ -488,10 +488,10 @@ index 0000000..8f3df90
 +}
 diff --git a/Kernarium/Kernarium/CoCodeHome.swift b/Kernarium/Kernarium/CoCodeHome.swift
 new file mode 100644
-index 0000000..f4361f9
+index 0000000..e6a93ee
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeHome.swift
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,208 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import SwiftUI
@@ -582,12 +582,11 @@ index 0000000..f4361f9
 +                    }
 +                    HStack(spacing: 10) {
 +                        Button("Reload") { route(.reload) }
-+                            .buttonStyle(CoCodeButtonStyle(prominent: false))
++                            .buttonStyle(CoCodeButtonStyle(prominent: false, expands: true))
 +                            .disabled(status != .running)
 +                            .accessibilityIdentifier("homeReloadButton")
 +                        Button("Open Cox") { route(.cox) }
-+                            .buttonStyle(CoCodeButtonStyle(prominent: true))
-+                            .frame(maxWidth: .infinity)
++                            .buttonStyle(CoCodeButtonStyle(prominent: true, expands: true))
 +                            .accessibilityIdentifier("homeOpenCoxButton")
 +                    }
 +                }
@@ -613,7 +612,7 @@ index 0000000..f4361f9
 +                        )
 +                        .frame(maxWidth: .infinity)
 +                    }
-+                    .buttonStyle(CoCodeButtonStyle(prominent: false))
++                    .buttonStyle(CoCodeButtonStyle(prominent: false, expands: true))
 +                }
 +
 +                Text("Tap the tab on the right edge to come back here.")
@@ -703,10 +702,10 @@ index 0000000..f4361f9
 +}
 diff --git a/Kernarium/Kernarium/CoCodeStyle.swift b/Kernarium/Kernarium/CoCodeStyle.swift
 new file mode 100644
-index 0000000..b7f6e46
+index 0000000..624884e
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeStyle.swift
-@@ -0,0 +1,270 @@
+@@ -0,0 +1,271 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import SwiftUI
@@ -959,13 +958,14 @@ index 0000000..b7f6e46
 +
 +struct CoCodeButtonStyle: ButtonStyle {
 +    var prominent: Bool
++    var expands = false
 +
 +    func makeBody(configuration: Configuration) -> some View {
 +        configuration.label
 +            .font(.body.weight(.semibold))
 +            .foregroundStyle(prominent ? CoCodePalette.onPrimary : CoCodePalette.primary)
 +            .padding(.horizontal, 20)
-+            .frame(minHeight: 48)
++            .frame(maxWidth: expands ? .infinity : nil, minHeight: 48)
 +            .background {
 +                if prominent {
 +                    RoundedRectangle(cornerRadius: 12).fill(CoCodePalette.primary)
@@ -978,7 +978,7 @@ index 0000000..b7f6e46
 +    }
 +}
 diff --git a/Kernarium/Kernarium/ContentView.swift b/Kernarium/Kernarium/ContentView.swift
-index 8ee4cfa..9ea2e72 100644
+index 8ee4cfa..d265308 100644
 --- a/Kernarium/Kernarium/ContentView.swift
 +++ b/Kernarium/Kernarium/ContentView.swift
 @@ -8,6 +8,7 @@ import SwiftUI
@@ -989,7 +989,7 @@ index 8ee4cfa..9ea2e72 100644
      @ObservedObject private var launcher = EmulatorLauncher.shared
      @ObservedObject private var backgroundSession = BackgroundSession.shared
      @ObservedObject private var backgroundJob = BackgroundJob.shared
-@@ -21,6 +22,11 @@ struct ContentView: View {
+@@ -21,6 +22,13 @@ struct ContentView: View {
      @State private var framebufferKeyboardVisible = false
      @State private var specialKeysExpanded = false
      @State private var settingsPresented = false
@@ -998,10 +998,12 @@ index 8ee4cfa..9ea2e72 100644
 +    @State private var homeRoute: CoCodeHomeRoute?
 +    /// Bumped by Home's Reload: a new pane signs in and loads Cox again.
 +    @State private var coxReload = 0
++    /// Whether the Cox page has painted since the pane was last created.
++    @State private var coxOpened = false
      /// Whether the window scene fills the screen. Until the view is in a
      /// scene, it is taken to be a window, which is the system's own default.
      @State private var sceneCoversScreen = false
-@@ -29,20 +35,25 @@ struct ContentView: View {
+@@ -29,20 +37,25 @@ struct ContentView: View {
      var body: some View {
          ZStack(alignment: .trailing) {
              ZStack {
@@ -1036,14 +1038,15 @@ index 8ee4cfa..9ea2e72 100644
  
                  SerialConsoleView(
                      controller: serialConsole,
-@@ -52,7 +63,26 @@ struct ContentView: View {
+@@ -52,7 +65,27 @@ struct ContentView: View {
                      .allowsHitTesting(guestViewMode == .serialConsole)
                      .accessibilityHidden(guestViewMode != .serialConsole)
  
 -                if let refusal = launcher.memoryRefusal {
 +                if launcher.phase == .running && serialConsole.cocodeForwardReady {
-+                    CoxWebPane(console: serialConsole) { guestViewMode = .serialConsole }
++                    CoxWebPane(console: serialConsole) { guestViewMode = .serialConsole } opened: { coxOpened = true }
 +                        .id(coxReload)
++                        .onDisappear { coxOpened = false }
 +                        .opacity(guestViewMode == .cox ? 1 : 0)
 +                        .allowsHitTesting(guestViewMode == .cox)
 +                        .accessibilityHidden(guestViewMode != .cox)
@@ -1064,7 +1067,7 @@ index 8ee4cfa..9ea2e72 100644
                      MemoryRefusalNotice(reason: refusal)
                          .padding()
                  } else if let shortage = launcher.startShortage {
-@@ -97,9 +127,20 @@ struct ContentView: View {
+@@ -97,9 +130,20 @@ struct ContentView: View {
                  SceneCoverage.cornerOffsetEdges(coversScreen: sceneCoversScreen),
                  sizeToFit: true
              )
@@ -1086,7 +1089,7 @@ index 8ee4cfa..9ea2e72 100644
          .overlay {
              // Over the guest and its controls: the guest is not running.
              if let pause = spacePause.pause {
-@@ -117,8 +158,24 @@ struct ContentView: View {
+@@ -117,8 +161,24 @@ struct ContentView: View {
          .background {
              SceneCoverageReader { sceneCoversScreen = $0 }
          }
@@ -1112,7 +1115,7 @@ index 8ee4cfa..9ea2e72 100644
          }
          .onAppear {
              serialConsole.startObserving()
-@@ -163,6 +220,7 @@ struct ContentView: View {
+@@ -163,6 +223,7 @@ struct ContentView: View {
              // or a keyboard would cover it.
              guard paused else { return }
              settingsPresented = false
@@ -1120,7 +1123,7 @@ index 8ee4cfa..9ea2e72 100644
              framebufferKeyboardVisible = false
              serialConsole.resignFirstResponder()
          }
-@@ -178,6 +236,82 @@ struct ContentView: View {
+@@ -178,6 +239,83 @@ struct ContentView: View {
          }
      }
  
@@ -1171,7 +1174,7 @@ index 8ee4cfa..9ea2e72 100644
 +        }
 +        switch launcher.phase {
 +        case .ended: return .stopped
-+        case .running: return serialConsole.cocodeForwardReady && !launcher.restarting ? .running : .starting
++        case .running: return coxOpened && !launcher.restarting ? .running : .starting
 +        case .idle: return .starting
 +        }
 +    }
@@ -1184,6 +1187,7 @@ index 8ee4cfa..9ea2e72 100644
 +            guestViewMode = .cox
 +        case .reload:
 +            guestViewMode = .cox
++            coxOpened = false
 +            coxReload += 1
 +        case .logs:
 +            guestViewMode = .serialConsole
@@ -1203,7 +1207,7 @@ index 8ee4cfa..9ea2e72 100644
      @ViewBuilder
      private var floatingButtons: some View {
          GlassEffectContainer(spacing: FloatingControlMetrics.spacing) {
-@@ -187,11 +321,11 @@ struct ContentView: View {
+@@ -187,11 +325,11 @@ struct ContentView: View {
  
      private var floatingButtonsContent: some View {
          VStack(alignment: .trailing, spacing: FloatingControlMetrics.spacing) {
@@ -1216,7 +1220,7 @@ index 8ee4cfa..9ea2e72 100644
              keyboardButton
              specialKeysRow
          }
-@@ -219,7 +353,7 @@ struct ContentView: View {
+@@ -219,7 +357,7 @@ struct ContentView: View {
          guard let guest = launcher.runningGuestName else { return }
          backgroundJob.start(
              limitMinutes: BackgroundSettings().limitMinutes(forGuest: guest),
@@ -1225,7 +1229,7 @@ index 8ee4cfa..9ea2e72 100644
          )
      }
  
-@@ -240,9 +374,9 @@ struct ContentView: View {
+@@ -240,9 +378,9 @@ struct ContentView: View {
  
      private var keepRunningLabel: String {
          switch backgroundJob.state {
@@ -1238,7 +1242,7 @@ index 8ee4cfa..9ea2e72 100644
          }
      }
  
-@@ -254,21 +388,20 @@ struct ContentView: View {
+@@ -254,21 +392,20 @@ struct ContentView: View {
          backgroundJob.reconcile(mode: mode)
      }
  
@@ -1268,7 +1272,7 @@ index 8ee4cfa..9ea2e72 100644
              identifier: "settingsButton"
          ) {
              settingsPresented = true
-@@ -278,6 +411,7 @@ struct ContentView: View {
+@@ -278,6 +415,7 @@ struct ContentView: View {
      /// Whether the view on screen holds the keyboard.
      private var keyboardVisible: Bool {
          switch guestViewMode {
@@ -1276,7 +1280,7 @@ index 8ee4cfa..9ea2e72 100644
          case .framebuffer: framebufferKeyboardVisible
          case .serialConsole: serialConsole.isFocused
          }
-@@ -289,8 +423,8 @@ struct ContentView: View {
+@@ -289,8 +427,8 @@ struct ContentView: View {
                  ? "keyboard.chevron.compact.down"
                  : "keyboard",
              accessibilityLabel: keyboardVisible
@@ -1287,7 +1291,7 @@ index 8ee4cfa..9ea2e72 100644
              identifier: "keyboardButton",
              action: toggleKeyboard
          )
-@@ -309,8 +443,8 @@ struct ContentView: View {
+@@ -309,8 +447,8 @@ struct ContentView: View {
                      ? "chevron.right"
                      : "chevron.left",
                  accessibilityLabel: specialKeysExpanded
@@ -1298,7 +1302,7 @@ index 8ee4cfa..9ea2e72 100644
                  identifier: "specialKeysButton"
              ) {
                  withAnimation {
-@@ -360,6 +494,8 @@ struct ContentView: View {
+@@ -360,6 +498,8 @@ struct ContentView: View {
      /// text reaches what the user is looking at.
      private func toggleKeyboard() {
          switch guestViewMode {
@@ -1307,7 +1311,7 @@ index 8ee4cfa..9ea2e72 100644
          case .framebuffer:
              framebufferKeyboardVisible.toggle()
          case .serialConsole:
-@@ -370,26 +506,14 @@ struct ContentView: View {
+@@ -370,26 +510,14 @@ struct ContentView: View {
              }
          }
      }
@@ -1336,7 +1340,7 @@ index 8ee4cfa..9ea2e72 100644
  }
  
  /// How this launch's guest run ended, as the application reports it.
-@@ -412,20 +536,19 @@ struct GuestRunEnd: Equatable {
+@@ -412,20 +540,19 @@ struct GuestRunEnd: Equatable {
      }
  
      var title: String {
@@ -1364,7 +1368,7 @@ index 8ee4cfa..9ea2e72 100644
      }
  
      var systemName: String {
-@@ -441,10 +564,10 @@ private struct GuestEndedNotice: View {
+@@ -441,10 +568,10 @@ private struct GuestEndedNotice: View {
      let end: GuestRunEnd
  
      var body: some View {
@@ -1379,7 +1383,7 @@ index 8ee4cfa..9ea2e72 100644
          )
          .accessibilityElement(children: .combine)
          .accessibilityIdentifier("guestEndedNotice")
-@@ -459,12 +582,11 @@ private struct MemoryRefusalNotice: View {
+@@ -459,12 +586,11 @@ private struct MemoryRefusalNotice: View {
      let reason: String
  
      var body: some View {
@@ -1397,7 +1401,7 @@ index 8ee4cfa..9ea2e72 100644
          )
          .accessibilityElement(children: .combine)
          .accessibilityIdentifier("memoryRefusalNotice")
-@@ -478,18 +600,13 @@ private struct StartShortageNotice: View {
+@@ -478,18 +604,13 @@ private struct StartShortageNotice: View {
      let checkAgain: () -> Void
  
      var body: some View {
@@ -1423,7 +1427,7 @@ index 8ee4cfa..9ea2e72 100644
          .accessibilityElement(children: .contain)
          .accessibilityIdentifier("startShortageNotice")
      }
-@@ -537,15 +654,10 @@ struct GPUBudgetWarning: Equatable {
+@@ -537,15 +658,10 @@ struct GPUBudgetWarning: Equatable {
          floorMiB = mebibytes(plan.budget_bytes)
      }
  
@@ -1441,7 +1445,7 @@ index 8ee4cfa..9ea2e72 100644
      }
  
      var systemName: String { "exclamationmark.triangle" }
-@@ -564,7 +676,7 @@ private struct GPUBudgetWarningNotice: View {
+@@ -564,7 +680,7 @@ private struct GPUBudgetWarningNotice: View {
                  title: warning.title,
                  message: warning.message,
                  messageStyle: .primary,
@@ -1450,7 +1454,7 @@ index 8ee4cfa..9ea2e72 100644
              )
          }
          .buttonStyle(.plain)
-@@ -589,7 +701,7 @@ private struct GuestRestartedNotice: View {
+@@ -589,7 +705,7 @@ private struct GuestRestartedNotice: View {
                  title: restart.title,
                  message: restart.message,
                  messageStyle: .primary,
@@ -1459,7 +1463,7 @@ index 8ee4cfa..9ea2e72 100644
              )
          }
          .buttonStyle(.plain)
-@@ -665,12 +777,12 @@ enum GuestSpecialKey: UInt16, CaseIterable, Identifiable {
+@@ -665,12 +781,12 @@ enum GuestSpecialKey: UInt16, CaseIterable, Identifiable {
  
      var accessibilityLabel: String {
          switch self {
@@ -1478,7 +1482,7 @@ index 8ee4cfa..9ea2e72 100644
          }
      }
  
-@@ -696,6 +808,33 @@ enum OverlayDisk {
+@@ -696,6 +812,33 @@ enum OverlayDisk {
          return UInt64(sizeGiB) * 1024 * 1024 * 1024
      }
  
@@ -1512,7 +1516,7 @@ index 8ee4cfa..9ea2e72 100644
      static func recreate(
          sizeGiB: Int,
          in directory: URL = FileManager.default.temporaryDirectory
-@@ -892,6 +1031,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -892,6 +1035,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
      /// Set while the device has too little free space for the guest to start.
      /// Nothing started: the guest starts once there is room and the person
      /// asks again.
@@ -1520,7 +1524,7 @@ index 8ee4cfa..9ea2e72 100644
      @Published private(set) var startShortage: StartSpace?
      /// Set when the memory this launch states is a size the runtime refuses
      /// (`MemoryRefusal`): nothing started, and a relaunch is what starts it.
-@@ -954,16 +1094,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -954,16 +1098,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          geometry: GuestDisplayGeometry
      ) {
          guard phase == .idle else { return }
@@ -1540,7 +1544,7 @@ index 8ee4cfa..9ea2e72 100644
          // The runtime refuses a size this host does not admit; the settings
          // never offer one, so this says why rather than end on its bare result.
          guard kernarium_runtime_loader_guest_memory_admitted(
-@@ -972,10 +1108,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -972,10 +1112,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
              // Every layout of the guest view asks to start while the run is
              // idle, so a refusal is said, and published, once.
              if memoryRefusal == nil {
@@ -1557,7 +1561,7 @@ index 8ee4cfa..9ea2e72 100644
                  print("Kernarium: cannot start the guest: \(reason)")
                  memoryRefusal = reason
              }
-@@ -1003,7 +1141,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1003,7 +1145,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          guard kernarium_runtime_loader_select(
              selection.flavor.rawValue
          ) == 0 else {
@@ -1566,7 +1570,7 @@ index 8ee4cfa..9ea2e72 100644
              return
          }
          // A guest that restarts itself is booted again inside the run; the
-@@ -1115,30 +1253,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1115,30 +1257,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          return run()
      }
  
@@ -1601,7 +1605,7 @@ index 8ee4cfa..9ea2e72 100644
              return nil
          }
      }
-@@ -1175,6 +1297,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1175,6 +1301,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          stopThermalObservation()
          restartIndicator.runEnded()
          restarting = false
@@ -1611,7 +1615,7 @@ index 8ee4cfa..9ea2e72 100644
          phase = .ended(result: result)
          UIApplication.shared.isIdleTimerDisabled = false
          print("Kernarium: runtime returned \(result)")
-@@ -1208,7 +1333,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1208,7 +1337,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
                  atPath: bundle.dataDisk.path
              )
          } else {
@@ -1759,10 +1763,10 @@ index 0000000..90f55e3
 +}
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..d6fa84f
+index 0000000..986ee8e
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,223 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -1776,6 +1780,8 @@ index 0000000..d6fa84f
 +struct CoxWebPane: View {
 +    @ObservedObject var console: SerialConsoleController
 +    let showLogs: () -> Void
++    /// Told once the Cox page has painted, which is when Cox counts as running.
++    var opened: () -> Void = {}
 +
 +    @State private var ready: Ready?
 +    @State private var pageShown = false
@@ -1792,6 +1798,7 @@ index 0000000..d6fa84f
 +            if let ready, failure == nil {
 +                CoxWebView(rules: ready.rules, cookies: ready.cookies) {
 +                    pageShown = true
++                    opened()
 +                } failed: {
 +                    failure = String(localized: "The Cox page could not load. Check the logs.")
 +                }
