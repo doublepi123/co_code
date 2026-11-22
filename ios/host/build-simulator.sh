@@ -169,6 +169,7 @@ if [[ -n "${COCODE_IOS_TEST_ONLY:-}" ]]; then
     test_status=0
     xcodebuild test -project "$KERNARIUM_DIR/Kernarium/Kernarium.xcodeproj" -scheme Kernarium \
         -destination "$COCODE_IOS_TEST_DESTINATION" -derivedDataPath "$WORK/test-derived" \
+        -parallel-testing-enabled NO \
         -resultBundlePath "$OUTPUT_DIR/KernariumTests.xcresult" "${selected[@]}" CODE_SIGNING_ALLOWED=NO \
         > "$OUTPUT_DIR/KernariumTests-xcodebuild.log" 2>&1 || test_status=$?
     printf '%s\n' "$test_status" > "$OUTPUT_DIR/KernariumTests.status"

@@ -162,6 +162,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/ios/qa/screenshots build/ios/qa/logs
+          # The test run can leave the simulator shut down.
+          xcrun simctl boot "$SIMULATOR_UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          xcrun simctl status_bar "$SIMULATOR_UDID" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
           shot() { xcrun simctl io "$SIMULATOR_UDID" screenshot "build/ios/qa/screenshots/$1-$(printf '%03d' "$2")s.png" >/dev/null; }
           wait_until() { local left=$(( $1 - (SECONDS - started) )); (( left > 0 )) && sleep "$left" || true; }
           capture_appearance() {
