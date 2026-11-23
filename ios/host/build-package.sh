@@ -18,7 +18,9 @@ python3 - "$GUEST_MANIFEST" <<'PY' || fail 'guest manifest is invalid'
 import json, re, sys
 from urllib.parse import urlparse
 manifest = json.load(open(sys.argv[1], encoding='utf-8'))
-assert set(manifest) == {'version', 'url', 'compressedSHA256', 'compressedSize', 'imageSHA256', 'imageSize'}
+required = {'version', 'url', 'compressedSHA256', 'compressedSize', 'imageSHA256', 'imageSize', 'format'}
+assert required <= set(manifest) <= required | {'guestTree'}
+assert manifest['format'] == 2
 assert re.fullmatch(r'[0-9A-Za-z._-]+', manifest['version'])
 assert urlparse(manifest['url']).scheme == 'https'
 for key in ('compressedSHA256', 'imageSHA256'):

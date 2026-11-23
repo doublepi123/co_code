@@ -169,12 +169,466 @@ index e9a9126..e3cef0f 100644
      }
  
      var systemName: String { "arrow.clockwise" }
+diff --git a/Kernarium/Kernarium/CoCodeComponents.swift b/Kernarium/Kernarium/CoCodeComponents.swift
+new file mode 100644
+index 0000000..6bf7b28
+--- /dev/null
++++ b/Kernarium/Kernarium/CoCodeComponents.swift
+@@ -0,0 +1,448 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++import Combine
++import Foundation
++import GuestHostCore
++import SwiftUI
++
++nonisolated struct CoCodeManagerState: Decodable, Equatable, Sendable {
++    struct Cox: Decodable, Equatable, Sendable {
++        let state: String
++    }
++
++    struct Component: Decodable, Equatable, Sendable, Identifiable {
++        let id: String
++        let name: String
++        let kind: String
++        let required: Bool
++        let installed: String?
++        let latest: String?
++
++        var updateAvailable: Bool {
++            guard let installed, let latest else { return false }
++            return installed != latest
++        }
++    }
++
++    struct Job: Decodable, Equatable, Sendable {
++        let id: String
++        let component: String
++        let action: String
++        let version: String?
++        let state: String
++        let message: String
++        let startedAt: String
++        let finishedAt: String?
++
++        var isRunning: Bool { state == "running" }
++    }
++
++    let cox: Cox
++    let checking: Bool
++    let components: [Component]
++    let job: Job?
++}
++
++/// The guest's component manager, reached through the loopback forward of
++/// guest port 3774. Every call carries the local password, as Cox's sign-in
++/// does, and never follows a redirect.
++nonisolated enum CoCodeManagerAPI {
++    static let origin = "http://127.0.0.1:3774"
++
++    enum Failure: Error, Equatable {
++        case unavailable
++        case unauthorized
++        case busy
++        case notFound
++        case rejected(Int)
++    }
++
++    static func request(_ path: String, method: String = "GET", password: String, body: Data? = nil) -> URLRequest {
++        var request = URLRequest(url: URL(string: origin + path)!, timeoutInterval: 15)
++        request.httpMethod = method
++        request.httpShouldHandleCookies = false
++        request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
++        if let body {
++            request.httpBody = body
++            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        }
++        return request
++    }
++
++    static func componentPath(_ id: String, action: String) -> String? {
++        guard !id.isEmpty, id.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 45 })
++        else { return nil }
++        return "/v1/components/\(id)/\(action)"
++    }
++
++    static func state(password: String) async throws -> CoCodeManagerState {
++        try decodeState(await send(request("/v1/state", password: password)))
++    }
++
++    static func check(password: String) async throws -> CoCodeManagerState {
++        try decodeState(await send(request("/v1/check", method: "POST", password: password)))
++    }
++
++    static func install(_ id: String, password: String) async throws {
++        guard let path = componentPath(id, action: "install") else { throw Failure.notFound }
++        let body = try JSONSerialization.data(withJSONObject: ["version": "latest"])
++        _ = try await send(request(path, method: "POST", password: password, body: body))
++    }
++
++    static func remove(_ id: String, password: String) async throws {
++        guard let path = componentPath(id, action: "remove") else { throw Failure.notFound }
++        _ = try await send(request(path, method: "POST", password: password))
++    }
++
++    static func decodeState(_ data: Data) throws -> CoCodeManagerState {
++        do {
++            return try JSONDecoder().decode(CoCodeManagerState.self, from: data)
++        } catch {
++            throw Failure.unavailable
++        }
++    }
++
++    static func send(_ request: URLRequest) async throws -> Data {
++        let configuration = URLSessionConfiguration.ephemeral
++        configuration.httpShouldSetCookies = false
++        configuration.httpCookieStorage = nil
++        configuration.urlCache = nil
++        let session = URLSession(configuration: configuration, delegate: CoxNoRedirects(), delegateQueue: nil)
++        defer { session.finishTasksAndInvalidate() }
++        guard let (data, response) = try? await session.data(for: request),
++              let http = response as? HTTPURLResponse
++        else { throw Failure.unavailable }
++        return try result(of: http, data: data)
++    }
++
++    static func result(of response: HTTPURLResponse, data: Data) throws -> Data {
++        guard response.url?.scheme == "http", response.url?.host == "127.0.0.1", response.url?.port == 3774 else {
++            throw Failure.unavailable
++        }
++        switch response.statusCode {
++        case 200..<300: return data
++        case 401: throw Failure.unauthorized
++        case 404: throw Failure.notFound
++        case 409: throw Failure.busy
++        default: throw Failure.rejected(response.statusCode)
++        }
++    }
++}
++
++@MainActor
++final class CoCodeComponents: ObservableObject {
++    @Published private(set) var state: CoCodeManagerState?
++    @Published private(set) var problem: String?
++    /// Counts finished updates of Cox, whose page then opens again on the
++    /// restarted server.
++    @Published private(set) var coxUpdates = 0
++    /// The local password, once the guest has printed it.
++    var password: () -> String? = { nil }
++
++    var isBusy: Bool { state?.job?.isRunning == true || state?.checking == true }
++
++    func refresh() async {
++        await call { try await CoCodeManagerAPI.state(password: $0) }
++    }
++
++    func check() async {
++        await call { try await CoCodeManagerAPI.check(password: $0) }
++    }
++
++    func install(_ id: String) async {
++        await call { password in
++            try await CoCodeManagerAPI.install(id, password: password)
++            return try await CoCodeManagerAPI.state(password: password)
++        }
++    }
++
++    func remove(_ id: String) async {
++        await call { password in
++            try await CoCodeManagerAPI.remove(id, password: password)
++            return try await CoCodeManagerAPI.state(password: password)
++        }
++    }
++
++    func watch() async {
++        while !Task.isCancelled {
++            await refresh()
++            try? await Task.sleep(for: .seconds(isBusy ? 2 : 10))
++        }
++    }
++
++    func apply(_ new: CoCodeManagerState) {
++        if let job = new.job, job.component == "cox", job.action == "install",
++           job.state == "succeeded", let previous = state?.job,
++           previous.id == job.id, previous.isRunning {
++            coxUpdates += 1
++        }
++        state = new
++        problem = nil
++    }
++
++    private func call(_ body: (String) async throws -> CoCodeManagerState) async {
++        guard let password = password() else {
++            problem = String(localized: "The Linux environment is still starting.")
++            return
++        }
++        do {
++            apply(try await body(password))
++        } catch let failure as CoCodeManagerAPI.Failure {
++            problem = Self.describe(failure)
++        } catch {
++            problem = Self.describe(.unavailable)
++        }
++    }
++
++    static func describe(_ failure: CoCodeManagerAPI.Failure) -> String {
++        switch failure {
++        case .busy: String(localized: "Another update is in progress, or this component cannot be removed.")
++        case .unavailable, .notFound: String(localized: "The component manager is not available yet. It starts with the Linux environment.")
++        case .unauthorized, .rejected: String(localized: "The component manager refused the request.")
++        }
++    }
++}
++
++struct CoCodeComponentsSheet: View {
++    @ObservedObject var components: CoCodeComponents
++    @ObservedObject var imageSetup: CoCodeGuestSetup
++    @Environment(\.dismiss) private var dismiss
++
++    var body: some View {
++        ScrollView {
++            VStack(alignment: .leading, spacing: 16) {
++                HStack {
++                    Text("Components and updates")
++                        .font(.title2.weight(.semibold))
++                        .foregroundStyle(CoCodePalette.onSurface)
++                    Spacer()
++                    Button {
++                        dismiss()
++                    } label: {
++                        Image(systemName: "xmark")
++                            .font(.body.weight(.semibold))
++                            .foregroundStyle(CoCodePalette.onSurfaceVariant)
++                            .frame(width: 36, height: 36)
++                            .background(CoCodePalette.surfaceContainerHighest, in: .circle)
++                    }
++                    .accessibilityLabel(Text("Close"))
++                }
++
++                Button {
++                    Task { await imageSetup.checkForUpdate() }
++                    Task { await components.check() }
++                } label: {
++                    Label("Check for updates", systemImage: "arrow.triangle.2.circlepath")
++                        .frame(maxWidth: .infinity)
++                }
++                .buttonStyle(CoCodeButtonStyle(prominent: false, expands: true))
++                .disabled(components.state?.checking == true || imageSetup.update == .checking)
++                .accessibilityIdentifier("componentsCheckButton")
++
++                card {
++                    row(title: Text("CoCode app"), detail: Text(Self.appVersion), identifier: "app")
++                    Text("Update CoCode from TestFlight or the App Store.")
++                        .font(.footnote)
++                        .foregroundStyle(CoCodePalette.onSurfaceVariant)
++                }
++
++                card {
++                    row(
++                        title: Text("Linux image"),
++                        detail: imageSetup.version.map { Text(verbatim: $0) } ?? Text("Not installed"),
++                        identifier: "image"
++                    )
++                    imageUpdate
++                }
++
++                card {
++                    Text("Cox and agents")
++                        .font(.headline)
++                        .foregroundStyle(CoCodePalette.onSurface)
++                    if let job = components.state?.job {
++                        jobRow(job)
++                    }
++                    if let state = components.state {
++                        ForEach(state.components) { component in
++                            componentRow(component, busy: components.isBusy)
++                        }
++                    } else if components.problem == nil {
++                        ProgressView().frame(maxWidth: .infinity)
++                    }
++                    if let problem = components.problem {
++                        Text(problem)
++                            .font(.footnote)
++                            .foregroundStyle(CoCodePalette.error)
++                            .accessibilityIdentifier("componentsProblem")
++                    }
++                }
++            }
++            .padding(20)
++        }
++        .background(CoCodePalette.background.ignoresSafeArea())
++        .task { await components.watch() }
++        .presentationDetents([.large])
++        .presentationDragIndicator(.visible)
++    }
++
++    private static var appVersion: String {
++        let info = Bundle.main.infoDictionary
++        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
++        let build = info?["CFBundleVersion"] as? String ?? "?"
++        return "\(version) (\(build))"
++    }
++
++    @ViewBuilder
++    private var imageUpdate: some View {
++        switch imageSetup.update {
++        case .idle:
++            EmptyView()
++        case .checking:
++            caption(Text("Checking…"))
++        case .upToDate:
++            caption(Text("Up to date"))
++        case let .available(version):
++            HStack {
++                caption(Text("Version \(version) is available"))
++                Spacer()
++                Button("Download") {
++                    Task { await imageSetup.downloadUpdate() }
++                }
++                .buttonStyle(CoCodeButtonStyle(prominent: true, expands: false))
++                .accessibilityIdentifier("imageDownloadButton")
++            }
++        case let .downloading(received, total):
++            VStack(alignment: .leading, spacing: 6) {
++                CoCodeProgressBar(progress: .fraction(Double(received) / Double(max(total, 1))))
++                    .frame(height: 6)
++                caption(Text("Downloaded \(Formats.size(bytes: UInt64(received))) of \(Formats.size(bytes: UInt64(total)))"))
++            }
++        case .installing:
++            VStack(alignment: .leading, spacing: 6) {
++                CoCodeProgressBar(progress: .indeterminate)
++                    .frame(height: 6)
++                caption(Text("Verifying the image…"))
++            }
++        case let .staged(version):
++            caption(Text("Version \(version) is ready. It takes effect the next time CoCode opens."))
++        case let .failed(message):
++            Text(message)
++                .font(.footnote)
++                .foregroundStyle(CoCodePalette.error)
++        }
++    }
++
++    private func componentRow(_ component: CoCodeManagerState.Component, busy: Bool) -> some View {
++        HStack(alignment: .center, spacing: 10) {
++            VStack(alignment: .leading, spacing: 2) {
++                Text(verbatim: component.name)
++                    .font(.body.weight(.medium))
++                    .foregroundStyle(CoCodePalette.onSurface)
++                Group {
++                    if let installed = component.installed {
++                        if let latest = component.latest, component.updateAvailable {
++                            Text(verbatim: "\(installed) → \(latest)")
++                        } else {
++                            Text(verbatim: installed)
++                        }
++                    } else {
++                        Text("Not installed")
++                    }
++                }
++                .font(.footnote)
++                .foregroundStyle(CoCodePalette.onSurfaceVariant)
++                .accessibilityIdentifier("componentVersion-\(component.id)")
++            }
++            Spacer()
++            if component.installed == nil {
++                actionButton("Install", prominent: true, busy: busy, identifier: "componentInstall-\(component.id)") {
++                    await components.install(component.id)
++                }
++            } else {
++                if component.updateAvailable {
++                    actionButton("Update", prominent: true, busy: busy, identifier: "componentUpdate-\(component.id)") {
++                        await components.install(component.id)
++                    }
++                }
++                if !component.required {
++                    actionButton("Remove", prominent: false, busy: busy, identifier: "componentRemove-\(component.id)") {
++                        await components.remove(component.id)
++                    }
++                }
++            }
++        }
++        .padding(.vertical, 4)
++        .accessibilityElement(children: .contain)
++        .accessibilityIdentifier("componentRow-\(component.id)")
++    }
++
++    private func jobRow(_ job: CoCodeManagerState.Job) -> some View {
++        let name = components.state?.components.first(where: { $0.id == job.component })?.name ?? job.component
++        return VStack(alignment: .leading, spacing: 6) {
++            switch job.state {
++            case "running":
++                Text("Working on \(name)…").font(.subheadline.weight(.medium))
++                CoCodeProgressBar(progress: .indeterminate)
++                    .frame(height: 6)
++            case "succeeded":
++                Text("\(name) finished").font(.subheadline.weight(.medium))
++                    .foregroundStyle(CoCodePalette.success)
++            default:
++                Text("\(name) failed").font(.subheadline.weight(.medium))
++                    .foregroundStyle(CoCodePalette.error)
++            }
++            if !job.message.isEmpty {
++                Text(verbatim: job.message)
++                    .font(.caption.monospaced())
++                    .foregroundStyle(CoCodePalette.onSurfaceVariant)
++                    .lineLimit(4)
++            }
++        }
++        .padding(12)
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .background(CoCodePalette.surfaceContainer, in: .rect(cornerRadius: 12))
++        .accessibilityIdentifier("componentsJob")
++    }
++
++    private func actionButton(
++        _ title: LocalizedStringKey,
++        prominent: Bool,
++        busy: Bool,
++        identifier: String,
++        action: @escaping () async -> Void
++    ) -> some View {
++        Button(title) {
++            Task { await action() }
++        }
++        .buttonStyle(CoCodeButtonStyle(prominent: prominent, expands: false))
++        .disabled(busy)
++        .accessibilityIdentifier(identifier)
++    }
++
++    private func row(title: Text, detail: Text, identifier: String) -> some View {
++        HStack {
++            title
++                .font(.body.weight(.medium))
++                .foregroundStyle(CoCodePalette.onSurface)
++            Spacer()
++            detail
++                .font(.subheadline)
++                .foregroundStyle(CoCodePalette.onSurfaceVariant)
++                .accessibilityIdentifier("componentVersion-\(identifier)")
++        }
++    }
++
++    private func caption(_ text: Text) -> some View {
++        text
++            .font(.footnote)
++            .foregroundStyle(CoCodePalette.onSurfaceVariant)
++    }
++
++    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
++        VStack(alignment: .leading, spacing: 10, content: content)
++            .padding(16)
++            .frame(maxWidth: .infinity, alignment: .leading)
++            .background(CoCodePalette.card, in: .rect(cornerRadius: 16))
++            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(CoCodePalette.cardBorder))
++    }
++}
 diff --git a/Kernarium/Kernarium/CoCodeGuestImage.swift b/Kernarium/Kernarium/CoCodeGuestImage.swift
 new file mode 100644
-index 0000000..bd91eb3
+index 0000000..6c12b61
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeGuestImage.swift
-@@ -0,0 +1,251 @@
+@@ -0,0 +1,404 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import CryptoKit
@@ -182,23 +636,49 @@ index 0000000..bd91eb3
 +import Foundation
 +import GuestHostCore
 +
-+nonisolated struct CoCodeGuestImage: Decodable, Sendable {
++/// Where the Linux image and its records live: the app's Documents directory,
++/// or a test's own directory.
++nonisolated struct CoCodeGuestFiles: Sendable {
++    let directory: URL
++
++    static let app = CoCodeGuestFiles(directory: RootfsImage.documentsDirectory)
++
++    var image: URL { directory.appendingPathComponent(RootfsImage.defaultFilename) }
++    var record: URL { directory.appendingPathComponent(".cocode-linux.json") }
++    /// What builds before format 2 wrote instead of a record.
++    var legacyVersion: URL { directory.appendingPathComponent(".cocode-linux.version") }
++    /// A downloaded and verified update, applied at the next launch.
++    var pendingImage: URL { directory.appendingPathComponent(".cocode-linux.next") }
++    var pendingRecord: URL { directory.appendingPathComponent(".cocode-linux.next.json") }
++}
++
++/// A Linux image release: where it is and the digests that prove it. The
++/// image carries the operating system and the component manager, while Cox
++/// and the agents are installed and updated inside it on their own, so a new
++/// image or a new app leaves them as they are.
++nonisolated struct CoCodeGuestImage: Codable, Equatable, Sendable {
++    /// The image layout this app boots: format 2 images run the component
++    /// manager. An older installed image is replaced at launch.
++    static let supportedFormat = 2
++    /// The newest image of the supported format, published with every image release.
++    static let channel = URL(
++        string: "https://github.com/doublepi123/co_code/releases/download/ios-image-channel/CoCodeGuest-v2.json"
++    )!
++
 +    let version: String
 +    let url: URL
 +    let compressedSHA256: String
 +    let compressedSize: Int64
 +    let imageSHA256: String
 +    let imageSize: Int64
++    let format: Int
 +
 +    private enum CodingKeys: String, CodingKey {
-+        case version, url, compressedSHA256, compressedSize, imageSHA256, imageSize
++        case version, url, compressedSHA256, compressedSize, imageSHA256, imageSize, format
 +    }
 +
 +    private static let spaceMargin: Int64 = 256 * 1024 * 1024
-+    private static let image = RootfsImage.documentsDirectory
-+        .appendingPathComponent(RootfsImage.defaultFilename)
-+    private static let versionFile = RootfsImage.documentsDirectory
-+        .appendingPathComponent(".cocode-linux.version")
++    private static let manifestLimit = 64 * 1024
 +
 +    init(from decoder: any Decoder) throws {
 +        let fields = try decoder.container(keyedBy: CodingKeys.self)
@@ -208,6 +688,7 @@ index 0000000..bd91eb3
 +        compressedSize = try fields.decode(Int64.self, forKey: .compressedSize)
 +        imageSHA256 = try fields.decode(String.self, forKey: .imageSHA256)
 +        imageSize = try fields.decode(Int64.self, forKey: .imageSize)
++        format = try fields.decodeIfPresent(Int.self, forKey: .format) ?? 1
 +        guard !version.isEmpty,
 +              version == version.trimmingCharacters(in: .whitespacesAndNewlines),
 +              version.rangeOfCharacter(from: .controlCharacters) == nil,
@@ -215,23 +696,94 @@ index 0000000..bd91eb3
 +              Self.isPublicHTTPS(parsedURL),
 +              parsedURL.lastPathComponent == "cocode-linux.erofs.zst",
 +              Self.isSHA256(compressedSHA256), Self.isSHA256(imageSHA256),
-+              compressedSize > 0, imageSize > 0,
++              compressedSize > 0, imageSize > 0, format > 0,
 +              compressedSize <= Int64.max - imageSize - Self.spaceMargin
 +        else { throw Failure.manifest }
 +        url = parsedURL
 +    }
 +
-+    static func bundled() throws -> Self {
-+        guard let file = Bundle.main.url(forResource: "CoCodeGuest", withExtension: "json"),
-+              let data = try? Data(contentsOf: file),
++    func encode(to encoder: any Encoder) throws {
++        var fields = encoder.container(keyedBy: CodingKeys.self)
++        try fields.encode(version, forKey: .version)
++        try fields.encode(url.absoluteString, forKey: .url)
++        try fields.encode(compressedSHA256, forKey: .compressedSHA256)
++        try fields.encode(compressedSize, forKey: .compressedSize)
++        try fields.encode(imageSHA256, forKey: .imageSHA256)
++        try fields.encode(imageSize, forKey: .imageSize)
++        try fields.encode(format, forKey: .format)
++    }
++
++    var isSupported: Bool { format == Self.supportedFormat }
++
++    static func decode(_ data: Data) throws -> Self {
++        guard data.count <= manifestLimit,
 +              let manifest = try? JSONDecoder().decode(Self.self, from: data)
 +        else { throw Failure.manifest }
 +        return manifest
 +    }
 +
-+    var isInstalled: Bool {
-+        (try? Self.image.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true &&
-+            (try? Data(contentsOf: Self.versionFile)) == Data(version.utf8)
++    static func bundled() throws -> Self {
++        guard let file = Bundle.main.url(forResource: "CoCodeGuest", withExtension: "json"),
++              let data = try? Data(contentsOf: file)
++        else { throw Failure.manifest }
++        return try decode(data)
++    }
++
++    static func installed(files: CoCodeGuestFiles = .app) -> Self? {
++        guard isRegularFile(files.image),
++              let data = try? Data(contentsOf: files.record)
++        else { return nil }
++        return try? decode(data)
++    }
++
++    static func pending(files: CoCodeGuestFiles = .app) -> Self? {
++        guard isRegularFile(files.pendingImage),
++              let data = try? Data(contentsOf: files.pendingRecord)
++        else { return nil }
++        return try? decode(data)
++    }
++
++    /// Puts a waiting update in place of the installed image. It runs before
++    /// the guest starts, so nothing holds the old image. A pending update
++    /// that cannot be applied is discarded and the installed image stays.
++    @discardableResult
++    static func applyPending(files: CoCodeGuestFiles = .app) -> Self? {
++        guard let update = pending(files: files) else {
++            discardPending(files: files)
++            return nil
++        }
++        do {
++            try publish(files.pendingImage, as: update, files: files)
++            try? FileManager.default.removeItem(at: files.pendingRecord)
++            return update
++        } catch {
++            discardPending(files: files)
++            return nil
++        }
++    }
++
++    static func discardPending(files: CoCodeGuestFiles = .app) {
++        try? FileManager.default.removeItem(at: files.pendingRecord)
++        try? FileManager.default.removeItem(at: files.pendingImage)
++    }
++
++    static func fetchChannel(
++        configuration: URLSessionConfiguration = .ephemeral
++    ) async throws -> Self {
++        configuration.httpShouldSetCookies = false
++        configuration.httpCookieStorage = nil
++        configuration.urlCredentialStorage = nil
++        configuration.urlCache = nil
++        let session = URLSession(configuration: configuration, delegate: PublicHTTPSRedirects(), delegateQueue: nil)
++        defer { session.finishTasksAndInvalidate() }
++        let request = URLRequest(url: channel, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
++        guard let (data, response) = try? await session.data(for: request),
++              let http = response as? HTTPURLResponse
++        else { throw Failure.channel }
++        guard http.statusCode == 200 else { throw Failure.channel }
++        let manifest = try decode(data)
++        guard manifest.isSupported else { throw Failure.channel }
++        return manifest
 +    }
 +
 +    func checkFreeSpace() throws {
@@ -243,17 +795,43 @@ index 0000000..bd91eb3
 +    }
 +
 +    func install(
++        files: CoCodeGuestFiles = .app,
 +        progress: @escaping @Sendable (Int64) -> Void,
 +        installing: @escaping @MainActor () -> Void
 +    ) async throws {
-+        let files = FileManager.default
++        try await fetch(files: files, progress: progress, installing: installing) { unpacked in
++            try Self.publish(unpacked, as: self, files: files)
++        }
++    }
++
++    /// Downloads and verifies the image beside the installed one, to replace
++    /// it at the next launch. The running guest keeps its image meanwhile.
++    func stage(
++        files: CoCodeGuestFiles = .app,
++        progress: @escaping @Sendable (Int64) -> Void,
++        installing: @escaping @MainActor () -> Void
++    ) async throws {
++        try await fetch(files: files, progress: progress, installing: installing) { unpacked in
++            Self.discardPending(files: files)
++            try Self.rename(unpacked, to: files.pendingImage)
++            try JSONEncoder().encode(self).write(to: files.pendingRecord, options: .atomic)
++        }
++    }
++
++    private func fetch(
++        files: CoCodeGuestFiles,
++        progress: @escaping @Sendable (Int64) -> Void,
++        installing: @escaping @MainActor () -> Void,
++        place: @escaping @Sendable (URL) throws -> Void
++    ) async throws {
++        let manager = FileManager.default
 +        let compressed = URL.cachesDirectory
 +            .appendingPathComponent(".cocode-\(UUID().uuidString).zst")
-+        let unpacked = RootfsImage.documentsDirectory
-+            .appendingPathComponent(".cocode-\(UUID().uuidString).erofs")
++        let unpacked = files.directory
++            .appendingPathComponent(".cocode-\(UUID().uuidString).unpacked")
 +        defer {
-+            try? files.removeItem(at: compressed)
-+            try? files.removeItem(at: unpacked)
++            try? manager.removeItem(at: compressed)
++            try? manager.removeItem(at: unpacked)
 +        }
 +
 +        let configuration = URLSessionConfiguration.ephemeral
@@ -271,31 +849,45 @@ index 0000000..bd91eb3
 +        }
 +
 +        await installing()
++        let manifest = self
 +        try await Task.detached(priority: .userInitiated) {
 +            do {
-+                guard try Self.verify(compressed, size: compressedSize, sha256: compressedSHA256) else {
++                guard try Self.verify(compressed, size: manifest.compressedSize, sha256: manifest.compressedSHA256) else {
 +                    throw Failure.compressedIntegrity
 +                }
 +                try ZstdUtil.decompress(from: compressed, to: unpacked, sparse: false)
-+                guard try Self.verify(unpacked, size: imageSize, sha256: imageSHA256) else {
++                guard try Self.verify(unpacked, size: manifest.imageSize, sha256: manifest.imageSHA256) else {
 +                    throw Failure.imageIntegrity
 +                }
-+
-+                // A failed publication must not leave a marker for a different image.
-+                if files.fileExists(atPath: Self.versionFile.path) {
-+                    try files.removeItem(at: Self.versionFile)
-+                }
-+                let result = unpacked.path.withCString { source in
-+                    Self.image.path.withCString { destination in Darwin.rename(source, destination) }
-+                }
-+                guard result == 0 else { throw Failure.install }
-+                try Data(version.utf8).write(to: Self.versionFile, options: .atomic)
++                try place(unpacked)
 +            } catch let failure as Failure {
 +                throw failure
 +            } catch {
 +                throw Failure.install
 +            }
 +        }.value
++    }
++
++    /// Moves a verified image into place and records it. A failure in between
++    /// never leaves a record that names a different image.
++    private static func publish(_ source: URL, as manifest: Self, files: CoCodeGuestFiles) throws {
++        let manager = FileManager.default
++        for record in [files.record, files.legacyVersion] where manager.fileExists(atPath: record.path) {
++            try manager.removeItem(at: record)
++        }
++        try rename(source, to: files.image)
++        try JSONEncoder().encode(manifest).write(to: files.record, options: .atomic)
++    }
++
++    private static func rename(_ source: URL, to destination: URL) throws {
++        let result = source.path.withCString { from in
++            destination.path.withCString { to in Darwin.rename(from, to) }
++        }
++        guard result == 0 else { throw Failure.install }
++    }
++
++    private static func isRegularFile(_ url: URL) -> Bool {
++        (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
 +    }
 +
 +    fileprivate static func isPublicHTTPS(_ url: URL) -> Bool {
@@ -323,6 +915,7 @@ index 0000000..bd91eb3
 +
 +    enum Failure: LocalizedError {
 +        case manifest
++        case channel
 +        case space(required: UInt64, available: UInt64)
 +        case network
 +        case http(Int)
@@ -334,6 +927,8 @@ index 0000000..bd91eb3
 +            switch self {
 +            case .manifest:
 +                String(localized: "This copy of CoCode is missing a valid Linux image manifest. Reinstall CoCode from a complete build.")
++            case .channel:
++                String(localized: "CoCode could not check for a new Linux image. Check your internet connection and try again.")
 +            case let .space(required, available):
 +                String(localized: "Installing the Linux environment needs \(Formats.size(bytes: required)) of free space. This device has \(Formats.size(bytes: available)) available. Free up space and try again.")
 +            case .network:
@@ -348,6 +943,18 @@ index 0000000..bd91eb3
 +                String(localized: "CoCode could not unpack or save the Linux image. Check available storage and try again.")
 +            }
 +        }
++    }
++}
++
++/// Follows a redirect only to another public HTTPS address, as GitHub's
++/// release downloads do.
++private nonisolated final class PublicHTTPSRedirects: NSObject, URLSessionTaskDelegate {
++    func urlSession(
++        _ session: URLSession, task: URLSessionTask,
++        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
++        completionHandler: @escaping @Sendable (URLRequest?) -> Void
++    ) {
++        completionHandler(request.url.map(CoCodeGuestImage.isPublicHTTPS) == true ? request : nil)
 +    }
 +}
 +
@@ -428,10 +1035,10 @@ index 0000000..bd91eb3
 +}
 diff --git a/Kernarium/Kernarium/CoCodeGuestSetup.swift b/Kernarium/Kernarium/CoCodeGuestSetup.swift
 new file mode 100644
-index 0000000..8f3df90
+index 0000000..26a4b83
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeGuestSetup.swift
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,127 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Combine
@@ -447,32 +1054,60 @@ index 0000000..8f3df90
 +        case ready(version: String)
 +    }
 +
++    /// A newer Linux image, from checking to waiting for the next launch.
++    enum Update: Equatable {
++        case idle
++        case checking
++        case upToDate
++        case available(version: String)
++        case downloading(received: Int64, total: Int64)
++        case installing
++        case staged(version: String)
++        case failed(String)
++    }
++
 +    @Published private(set) var stage: Stage = .checking
 +    @Published private(set) var attempt = 0
++    @Published private(set) var update: Update = .idle
++    private var available: CoCodeGuestImage?
++    private let files: CoCodeGuestFiles
++
++    init(files: CoCodeGuestFiles = .app) {
++        self.files = files
++    }
 +
 +    var version: String? {
 +        if case let .ready(version) = stage { return version }
 +        return nil
 +    }
 +
++    /// Readies the image before the guest boots: an update downloaded earlier
++    /// replaces the installed image, and an image this app cannot boot, or
++    /// none at all, is replaced by the one this build names.
 +    func prepare() async {
 +        let attempt = self.attempt
++        if let applied = CoCodeGuestImage.applyPending(files: files) {
++            print("CoCode: Linux image \(applied.version) is now installed")
++        }
++        if let installed = CoCodeGuestImage.installed(files: files), installed.isSupported {
++            stage = .ready(version: installed.version)
++            return
++        }
 +        do {
 +            let manifest = try CoCodeGuestImage.bundled()
-+            if !manifest.isInstalled {
-+                try manifest.checkFreeSpace()
-+                let total = manifest.compressedSize
-+                stage = .downloading(received: 0, total: total)
-+                try await manifest.install { [weak self] bytes in
-+                    Task { @MainActor [weak self] in
-+                        guard let self, self.attempt == attempt,
-+                              case let .downloading(received, _) = self.stage,
-+                              bytes > received else { return }
-+                        self.stage = .downloading(received: bytes, total: total)
-+                    }
-+                } installing: {
-+                    self.stage = .installing
++            guard manifest.isSupported else { throw CoCodeGuestImage.Failure.manifest }
++            try manifest.checkFreeSpace()
++            let total = manifest.compressedSize
++            stage = .downloading(received: 0, total: total)
++            try await manifest.install(files: files) { [weak self] bytes in
++                Task { @MainActor [weak self] in
++                    guard let self, self.attempt == attempt,
++                          case let .downloading(received, _) = self.stage,
++                          bytes > received else { return }
++                    self.stage = .downloading(received: bytes, total: total)
 +                }
++            } installing: {
++                self.stage = .installing
 +            }
 +            stage = .ready(version: manifest.version)
 +        } catch {
@@ -485,13 +1120,58 @@ index 0000000..8f3df90
 +        stage = .checking
 +        attempt += 1
 +    }
++
++    func checkForUpdate() async {
++        guard let installed = version else { return }
++        switch update {
++        case .checking, .downloading, .installing: return
++        default: break
++        }
++        update = .checking
++        do {
++            let latest = try await CoCodeGuestImage.fetchChannel()
++            if CoCodeGuestImage.pending(files: files)?.version == latest.version {
++                update = .staged(version: latest.version)
++            } else if latest.version == installed {
++                available = nil
++                update = .upToDate
++            } else {
++                available = latest
++                update = .available(version: latest.version)
++            }
++        } catch {
++            update = .failed(error.localizedDescription)
++        }
++    }
++
++    func downloadUpdate() async {
++        guard let image = available, case .available = update else { return }
++        do {
++            try image.checkFreeSpace()
++            let total = image.compressedSize
++            update = .downloading(received: 0, total: total)
++            try await image.stage(files: files) { [weak self] bytes in
++                Task { @MainActor [weak self] in
++                    guard let self, case let .downloading(received, _) = self.update,
++                          bytes > received else { return }
++                    self.update = .downloading(received: bytes, total: total)
++                }
++            } installing: {
++                self.update = .installing
++            }
++            available = nil
++            update = .staged(version: image.version)
++        } catch {
++            update = .failed(error.localizedDescription)
++        }
++    }
 +}
 diff --git a/Kernarium/Kernarium/CoCodeHome.swift b/Kernarium/Kernarium/CoCodeHome.swift
 new file mode 100644
-index 0000000..e6a93ee
+index 0000000..99d2ef7
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoCodeHome.swift
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,218 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import SwiftUI
@@ -529,6 +1209,7 @@ index 0000000..e6a93ee
 +    case logs
 +    case display
 +    case settings
++    case components
 +    case keepRunning
 +}
 +
@@ -599,6 +1280,15 @@ index 0000000..e6a93ee
 +                    tile("Display", systemImage: "display", identifier: "homeDisplayTile", enabled: guestStarted) { route(.display) }
 +                    tile("Settings", systemImage: "gearshape", identifier: "homeSettingsTile", enabled: true) { route(.settings) }
 +                }
++
++                Button {
++                    route(.components)
++                } label: {
++                    Label("Components and updates", systemImage: "shippingbox")
++                        .frame(maxWidth: .infinity)
++                }
++                .buttonStyle(CoCodeButtonStyle(prominent: false, expands: true))
++                .accessibilityIdentifier("homeComponentsButton")
 +
 +                if let keepRunningActive {
 +                    Button {
@@ -698,6 +1388,112 @@ index 0000000..e6a93ee
 +            try? await Task.sleep(for: .seconds(3))
 +            if !Task.isCancelled { resting = true }
 +        }
++    }
++}
+diff --git a/Kernarium/Kernarium/CoCodePictureCard.swift b/Kernarium/Kernarium/CoCodePictureCard.swift
+new file mode 100644
+index 0000000..286c332
+--- /dev/null
++++ b/Kernarium/Kernarium/CoCodePictureCard.swift
+@@ -0,0 +1,100 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++import CoreGraphics
++import CoreVideo
++import SwiftUI
++
++/// The picture the Picture in Picture window plays while CoCode runs in the
++/// background: the state of Cox and how long Linux has been up, in CoCode's
++/// colours, instead of the guest's text console.
++enum CoCodePictureCard {
++    struct Content: Equatable {
++        var coxRunning: Bool
++        var uptime: TimeInterval
++    }
++
++    static let size = CGSize(width: 640, height: 360)
++
++    static func render(_ content: Content, size: CGSize = size) -> CVPixelBuffer? {
++        let renderer = ImageRenderer(
++            content: CoCodePictureCardView(content: content)
++                .frame(width: size.width, height: size.height)
++        )
++        renderer.scale = 1
++        renderer.isOpaque = true
++        guard let image = renderer.cgImage else { return nil }
++
++        let width = Int(size.width)
++        let height = Int(size.height)
++        let attributes: [CFString: Any] = [
++            kCVPixelBufferCGImageCompatibilityKey: true,
++            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
++            kCVPixelBufferIOSurfacePropertiesKey: [CFString: Any]() as CFDictionary,
++        ]
++        var created: CVPixelBuffer?
++        guard CVPixelBufferCreate(
++            kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
++            attributes as CFDictionary, &created
++        ) == kCVReturnSuccess, let buffer = created else { return nil }
++        CVPixelBufferLockBaseAddress(buffer, [])
++        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
++        guard let context = CGContext(
++            data: CVPixelBufferGetBaseAddress(buffer),
++            width: width, height: height, bitsPerComponent: 8,
++            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
++            space: CGColorSpaceCreateDeviceRGB(),
++            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
++        ) else { return nil }
++        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
++        return buffer
++    }
++
++    static func uptimeText(_ uptime: TimeInterval) -> String {
++        let seconds = max(Int(uptime), 0)
++        return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
++    }
++}
++
++/// Drawn in the dark palette whatever the system's appearance: a video
++/// window floats over any screen.
++private struct CoCodePictureCardView: View {
++    let content: CoCodePictureCard.Content
++    private static let background = rgb(0x151313)
++    private static let onSurface = rgb(0xECE6DA)
++    private static let onSurfaceVariant = rgb(0xA9A196)
++    private static let primary = rgb(0xEDB449)
++    private static let success = rgb(0x8CC79A)
++
++    private static func rgb(_ value: UInt32) -> Color {
++        Color(
++            red: Double((value >> 16) & 0xFF) / 255,
++            green: Double((value >> 8) & 0xFF) / 255,
++            blue: Double(value & 0xFF) / 255
++        )
++    }
++
++    var body: some View {
++        HStack(spacing: 28) {
++            CoCodeMark(size: 120, color: Self.onSurface, accent: Self.primary)
++            VStack(alignment: .leading, spacing: 12) {
++                Text(verbatim: "CoCode")
++                    .font(.system(size: 30, weight: .semibold))
++                    .foregroundStyle(Self.onSurfaceVariant)
++                HStack(spacing: 12) {
++                    Circle()
++                        .fill(content.coxRunning ? Self.success : Self.primary)
++                        .frame(width: 18, height: 18)
++                    Text(content.coxRunning ? "Cox is running" : "Cox is starting")
++                        .font(.system(size: 40, weight: .bold))
++                        .foregroundStyle(Self.onSurface)
++                }
++                Text("Linux environment · up \(CoCodePictureCard.uptimeText(content.uptime))")
++                    .font(.system(size: 26, weight: .medium).monospacedDigit())
++                    .foregroundStyle(Self.onSurfaceVariant)
++            }
++        }
++        .padding(40)
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
++        .background(Self.background)
 +    }
 +}
 diff --git a/Kernarium/Kernarium/CoCodeStyle.swift b/Kernarium/Kernarium/CoCodeStyle.swift
@@ -978,22 +1774,26 @@ index 0000000..624884e
 +    }
 +}
 diff --git a/Kernarium/Kernarium/ContentView.swift b/Kernarium/Kernarium/ContentView.swift
-index 8ee4cfa..d265308 100644
+index 8ee4cfa..7941a6c 100644
 --- a/Kernarium/Kernarium/ContentView.swift
 +++ b/Kernarium/Kernarium/ContentView.swift
-@@ -8,6 +8,7 @@ import SwiftUI
+@@ -8,8 +8,9 @@ import SwiftUI
  
  struct ContentView: View {
      @StateObject private var serialConsole = SerialConsoleController()
 +    @StateObject private var imageSetup = CoCodeGuestSetup()
++    @StateObject private var components = CoCodeComponents()
      @ObservedObject private var launcher = EmulatorLauncher.shared
-     @ObservedObject private var backgroundSession = BackgroundSession.shared
+-    @ObservedObject private var backgroundSession = BackgroundSession.shared
      @ObservedObject private var backgroundJob = BackgroundJob.shared
-@@ -21,6 +22,13 @@ struct ContentView: View {
+     @ObservedObject private var spacePause = GuestSpacePause.shared
+     /// Whether the running guest chose the keep-running mode, which is what
+@@ -21,6 +22,14 @@ struct ContentView: View {
      @State private var framebufferKeyboardVisible = false
      @State private var specialKeysExpanded = false
      @State private var settingsPresented = false
 +    @State private var homePresented = false
++    @State private var componentsPresented = false
 +    /// Where Home sends the person once its sheet has gone.
 +    @State private var homeRoute: CoCodeHomeRoute?
 +    /// Bumped by Home's Reload: a new pane signs in and loads Cox again.
@@ -1003,7 +1803,7 @@ index 8ee4cfa..d265308 100644
      /// Whether the window scene fills the screen. Until the view is in a
      /// scene, it is taken to be a window, which is the system's own default.
      @State private var sceneCoversScreen = false
-@@ -29,20 +37,25 @@ struct ContentView: View {
+@@ -29,20 +38,25 @@ struct ContentView: View {
      var body: some View {
          ZStack(alignment: .trailing) {
              ZStack {
@@ -1038,7 +1838,7 @@ index 8ee4cfa..d265308 100644
  
                  SerialConsoleView(
                      controller: serialConsole,
-@@ -52,7 +65,27 @@ struct ContentView: View {
+@@ -52,7 +66,27 @@ struct ContentView: View {
                      .allowsHitTesting(guestViewMode == .serialConsole)
                      .accessibilityHidden(guestViewMode != .serialConsole)
  
@@ -1067,7 +1867,20 @@ index 8ee4cfa..d265308 100644
                      MemoryRefusalNotice(reason: refusal)
                          .padding()
                  } else if let shortage = launcher.startShortage {
-@@ -97,9 +130,20 @@ struct ContentView: View {
+@@ -77,12 +111,6 @@ struct ContentView: View {
+                     GuestRestartingBadge()
+                         .padding()
+                         .frame(maxHeight: .infinity, alignment: .top)
+-                } else if let restart = backgroundSession.restart {
+-                    GuestRestartedNotice(restart: restart) {
+-                        backgroundSession.dismissRestartNotice()
+-                    }
+-                    .padding()
+-                    .frame(maxHeight: .infinity, alignment: .top)
+                 }
+             }
+             // In a window, iPadOS draws its window controls over the top-left
+@@ -97,9 +125,20 @@ struct ContentView: View {
                  SceneCoverage.cornerOffsetEdges(coversScreen: sceneCoversScreen),
                  sizeToFit: true
              )
@@ -1089,7 +1902,7 @@ index 8ee4cfa..d265308 100644
          .overlay {
              // Over the guest and its controls: the guest is not running.
              if let pause = spacePause.pause {
-@@ -117,8 +161,24 @@ struct ContentView: View {
+@@ -117,11 +156,32 @@ struct ContentView: View {
          .background {
              SceneCoverageReader { sceneCoversScreen = $0 }
          }
@@ -1097,6 +1910,9 @@ index 8ee4cfa..d265308 100644
          .sheet(isPresented: $settingsPresented) {
 -            EmulatorSettingsView()
 +            EmulatorSettingsView(imageSetup: imageSetup)
++        }
++        .sheet(isPresented: $componentsPresented) {
++            CoCodeComponentsSheet(components: components, imageSetup: imageSetup)
 +        }
 +        .sheet(isPresented: $homePresented, onDismiss: openHomeRoute) {
 +            CoCodeHomeSheet(
@@ -1115,15 +1931,33 @@ index 8ee4cfa..d265308 100644
          }
          .onAppear {
              serialConsole.startObserving()
-@@ -163,6 +223,7 @@ struct ContentView: View {
++            let console = serialConsole
++            components.password = { console.coxPassword }
+             let window = GuestPictureInPicture.shared
+             window.wanted = {
+                 // A guest paused for space is not shown in a window.
+@@ -158,11 +218,20 @@ struct ContentView: View {
+             GuestPictureInPicture.shared.refresh()
+             refreshKeepRunning()
+         }
++        .onChange(of: coxOpened) { _, opened in
++            GuestPictureInPicture.shared.coxRunning = opened
++        }
++        .onChange(of: components.coxUpdates) {
++            coxOpened = false
++            coxReload += 1
++        }
+         .onChange(of: spacePause.pause != nil) { _, paused in
+             // The screen over the guest says why it is paused, and a sheet
              // or a keyboard would cover it.
              guard paused else { return }
              settingsPresented = false
 +            homePresented = false
++            componentsPresented = false
              framebufferKeyboardVisible = false
              serialConsole.resignFirstResponder()
          }
-@@ -178,6 +239,83 @@ struct ContentView: View {
+@@ -178,6 +247,85 @@ struct ContentView: View {
          }
      }
  
@@ -1195,6 +2029,8 @@ index 8ee4cfa..d265308 100644
 +            guestViewMode = .framebuffer
 +        case .settings:
 +            settingsPresented = true
++        case .components:
++            componentsPresented = true
 +        case .keepRunning:
 +            if backgroundJob.state == .idle {
 +                startKeepRunningJob()
@@ -1207,7 +2043,7 @@ index 8ee4cfa..d265308 100644
      @ViewBuilder
      private var floatingButtons: some View {
          GlassEffectContainer(spacing: FloatingControlMetrics.spacing) {
-@@ -187,11 +325,11 @@ struct ContentView: View {
+@@ -187,11 +335,11 @@ struct ContentView: View {
  
      private var floatingButtonsContent: some View {
          VStack(alignment: .trailing, spacing: FloatingControlMetrics.spacing) {
@@ -1220,7 +2056,7 @@ index 8ee4cfa..d265308 100644
              keyboardButton
              specialKeysRow
          }
-@@ -219,7 +357,7 @@ struct ContentView: View {
+@@ -219,7 +367,7 @@ struct ContentView: View {
          guard let guest = launcher.runningGuestName else { return }
          backgroundJob.start(
              limitMinutes: BackgroundSettings().limitMinutes(forGuest: guest),
@@ -1229,7 +2065,7 @@ index 8ee4cfa..d265308 100644
          )
      }
  
-@@ -240,9 +378,9 @@ struct ContentView: View {
+@@ -240,9 +388,9 @@ struct ContentView: View {
  
      private var keepRunningLabel: String {
          switch backgroundJob.state {
@@ -1242,7 +2078,7 @@ index 8ee4cfa..d265308 100644
          }
      }
  
-@@ -254,21 +392,20 @@ struct ContentView: View {
+@@ -254,21 +402,20 @@ struct ContentView: View {
          backgroundJob.reconcile(mode: mode)
      }
  
@@ -1272,7 +2108,7 @@ index 8ee4cfa..d265308 100644
              identifier: "settingsButton"
          ) {
              settingsPresented = true
-@@ -278,6 +415,7 @@ struct ContentView: View {
+@@ -278,6 +425,7 @@ struct ContentView: View {
      /// Whether the view on screen holds the keyboard.
      private var keyboardVisible: Bool {
          switch guestViewMode {
@@ -1280,7 +2116,7 @@ index 8ee4cfa..d265308 100644
          case .framebuffer: framebufferKeyboardVisible
          case .serialConsole: serialConsole.isFocused
          }
-@@ -289,8 +427,8 @@ struct ContentView: View {
+@@ -289,8 +437,8 @@ struct ContentView: View {
                  ? "keyboard.chevron.compact.down"
                  : "keyboard",
              accessibilityLabel: keyboardVisible
@@ -1291,7 +2127,7 @@ index 8ee4cfa..d265308 100644
              identifier: "keyboardButton",
              action: toggleKeyboard
          )
-@@ -309,8 +447,8 @@ struct ContentView: View {
+@@ -309,8 +457,8 @@ struct ContentView: View {
                      ? "chevron.right"
                      : "chevron.left",
                  accessibilityLabel: specialKeysExpanded
@@ -1302,7 +2138,7 @@ index 8ee4cfa..d265308 100644
                  identifier: "specialKeysButton"
              ) {
                  withAnimation {
-@@ -360,6 +498,8 @@ struct ContentView: View {
+@@ -360,6 +508,8 @@ struct ContentView: View {
      /// text reaches what the user is looking at.
      private func toggleKeyboard() {
          switch guestViewMode {
@@ -1311,7 +2147,7 @@ index 8ee4cfa..d265308 100644
          case .framebuffer:
              framebufferKeyboardVisible.toggle()
          case .serialConsole:
-@@ -370,26 +510,14 @@ struct ContentView: View {
+@@ -370,26 +520,14 @@ struct ContentView: View {
              }
          }
      }
@@ -1340,7 +2176,7 @@ index 8ee4cfa..d265308 100644
  }
  
  /// How this launch's guest run ended, as the application reports it.
-@@ -412,20 +540,19 @@ struct GuestRunEnd: Equatable {
+@@ -412,20 +550,19 @@ struct GuestRunEnd: Equatable {
      }
  
      var title: String {
@@ -1368,7 +2204,7 @@ index 8ee4cfa..d265308 100644
      }
  
      var systemName: String {
-@@ -441,10 +568,10 @@ private struct GuestEndedNotice: View {
+@@ -441,10 +578,10 @@ private struct GuestEndedNotice: View {
      let end: GuestRunEnd
  
      var body: some View {
@@ -1383,7 +2219,7 @@ index 8ee4cfa..d265308 100644
          )
          .accessibilityElement(children: .combine)
          .accessibilityIdentifier("guestEndedNotice")
-@@ -459,12 +586,11 @@ private struct MemoryRefusalNotice: View {
+@@ -459,12 +596,11 @@ private struct MemoryRefusalNotice: View {
      let reason: String
  
      var body: some View {
@@ -1401,7 +2237,7 @@ index 8ee4cfa..d265308 100644
          )
          .accessibilityElement(children: .combine)
          .accessibilityIdentifier("memoryRefusalNotice")
-@@ -478,18 +604,13 @@ private struct StartShortageNotice: View {
+@@ -478,18 +614,13 @@ private struct StartShortageNotice: View {
      let checkAgain: () -> Void
  
      var body: some View {
@@ -1427,7 +2263,7 @@ index 8ee4cfa..d265308 100644
          .accessibilityElement(children: .contain)
          .accessibilityIdentifier("startShortageNotice")
      }
-@@ -537,15 +658,10 @@ struct GPUBudgetWarning: Equatable {
+@@ -537,15 +668,10 @@ struct GPUBudgetWarning: Equatable {
          floorMiB = mebibytes(plan.budget_bytes)
      }
  
@@ -1445,7 +2281,7 @@ index 8ee4cfa..d265308 100644
      }
  
      var systemName: String { "exclamationmark.triangle" }
-@@ -564,7 +680,7 @@ private struct GPUBudgetWarningNotice: View {
+@@ -564,7 +690,7 @@ private struct GPUBudgetWarningNotice: View {
                  title: warning.title,
                  message: warning.message,
                  messageStyle: .primary,
@@ -1454,16 +2290,43 @@ index 8ee4cfa..d265308 100644
              )
          }
          .buttonStyle(.plain)
-@@ -589,7 +705,7 @@ private struct GuestRestartedNotice: View {
-                 title: restart.title,
-                 message: restart.message,
-                 messageStyle: .primary,
+@@ -574,33 +700,8 @@ private struct GPUBudgetWarningNotice: View {
+     }
+ }
+ 
+-/// Shown over the guest views when the previous launch ended in the
+-/// background and this launch's guest booted again. It stays until dismissed:
+-/// the guest's boot is under way behind it, and what was running before is
+-/// gone.
+-private struct GuestRestartedNotice: View {
+-    let restart: GuestRestart
+-    let dismiss: () -> Void
+-
+-    var body: some View {
+-        Button(action: dismiss) {
+-            GuestNoticeCard(
+-                systemName: restart.systemName,
+-                title: restart.title,
+-                message: restart.message,
+-                messageStyle: .primary,
 -                footer: "Tap to dismiss"
-+                footer: String(localized: "Tap to dismiss")
-             )
-         }
-         .buttonStyle(.plain)
-@@ -665,12 +781,12 @@ enum GuestSpecialKey: UInt16, CaseIterable, Identifiable {
+-            )
+-        }
+-        .buttonStyle(.plain)
+-        .accessibilityElement(children: .combine)
+-        .accessibilityAddTraits(.isButton)
+-        .accessibilityIdentifier("guestRestartedNotice")
+-    }
+-}
+-
+-/// The card both notices share: an icon, a headline and a message, with an
+-/// optional line beneath.
++/// The card of the GPU budget notice: an icon, a headline and a message, with
++/// an optional line beneath.
+ private struct GuestNoticeCard: View {
+     let systemName: String
+     let title: String
+@@ -665,12 +766,12 @@ enum GuestSpecialKey: UInt16, CaseIterable, Identifiable {
  
      var accessibilityLabel: String {
          switch self {
@@ -1482,7 +2345,7 @@ index 8ee4cfa..d265308 100644
          }
      }
  
-@@ -696,6 +812,33 @@ enum OverlayDisk {
+@@ -696,6 +797,33 @@ enum OverlayDisk {
          return UInt64(sizeGiB) * 1024 * 1024 * 1024
      }
  
@@ -1516,7 +2379,7 @@ index 8ee4cfa..d265308 100644
      static func recreate(
          sizeGiB: Int,
          in directory: URL = FileManager.default.temporaryDirectory
-@@ -892,6 +1035,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -892,6 +1020,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
      /// Set while the device has too little free space for the guest to start.
      /// Nothing started: the guest starts once there is room and the person
      /// asks again.
@@ -1524,7 +2387,7 @@ index 8ee4cfa..d265308 100644
      @Published private(set) var startShortage: StartSpace?
      /// Set when the memory this launch states is a size the runtime refuses
      /// (`MemoryRefusal`): nothing started, and a relaunch is what starts it.
-@@ -954,16 +1098,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -954,16 +1083,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          geometry: GuestDisplayGeometry
      ) {
          guard phase == .idle else { return }
@@ -1544,7 +2407,7 @@ index 8ee4cfa..d265308 100644
          // The runtime refuses a size this host does not admit; the settings
          // never offer one, so this says why rather than end on its bare result.
          guard kernarium_runtime_loader_guest_memory_admitted(
-@@ -972,10 +1112,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -972,10 +1097,12 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
              // Every layout of the guest view asks to start while the run is
              // idle, so a refusal is said, and published, once.
              if memoryRefusal == nil {
@@ -1561,7 +2424,7 @@ index 8ee4cfa..d265308 100644
                  print("Kernarium: cannot start the guest: \(reason)")
                  memoryRefusal = reason
              }
-@@ -1003,7 +1145,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1003,7 +1130,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          guard kernarium_runtime_loader_select(
              selection.flavor.rawValue
          ) == 0 else {
@@ -1570,7 +2433,7 @@ index 8ee4cfa..d265308 100644
              return
          }
          // A guest that restarts itself is booted again inside the run; the
-@@ -1115,30 +1257,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1115,30 +1242,14 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          return run()
      }
  
@@ -1605,17 +2468,17 @@ index 8ee4cfa..d265308 100644
              return nil
          }
      }
-@@ -1175,6 +1301,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1175,6 +1286,9 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
          stopThermalObservation()
          restartIndicator.runEnded()
          restarting = false
 +        if result == Int32(KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED) {
-+            launchIssue = String(localized: "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode.")
++            launchIssue = String(localized: "CoCode could not open local ports 3773 and 3774. Close any app using them, then reopen CoCode.")
 +        }
          phase = .ended(result: result)
          UIApplication.shared.isIdleTimerDisabled = false
          print("Kernarium: runtime returned \(result)")
-@@ -1208,7 +1337,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
+@@ -1208,7 +1322,7 @@ final class EmulatorLauncher: ObservableObject, SpaceRun {
                  atPath: bundle.dataDisk.path
              )
          } else {
@@ -2004,7 +2867,7 @@ index fb5fc1a..214cce7 100644
  
      nonisolated static var documentsDirectory: URL {
 diff --git a/Kernarium/Kernarium/EmulatorSettingsView.swift b/Kernarium/Kernarium/EmulatorSettingsView.swift
-index e722b7d..3a344b2 100644
+index e722b7d..40b3b7d 100644
 --- a/Kernarium/Kernarium/EmulatorSettingsView.swift
 +++ b/Kernarium/Kernarium/EmulatorSettingsView.swift
 @@ -7,6 +7,7 @@ import UIKit
@@ -2162,7 +3025,7 @@ index e722b7d..3a344b2 100644
 -                        "EROFS images and .\(GuestBundle.pathExtension) " +
 -                        "guest bundles are loaded from Documents."
 -                    )
-+                    Text("CoCode downloads the Linux image when it is first needed and when the bundled version changes. Your Linux files are kept on a separate disk.")
++                    Text("The Linux image, Cox and the agents update separately in Home › Components and updates. Your Linux files are kept on a separate disk.")
                  }
  
                  Section("Background") {
@@ -2186,6 +3049,172 @@ index e722b7d..3a344b2 100644
  
                  Section {
                      Text("Changes take effect the next time the app launches.")
+diff --git a/Kernarium/Kernarium/GuestPictureInPicture.swift b/Kernarium/Kernarium/GuestPictureInPicture.swift
+index 720ccc3..455e51c 100644
+--- a/Kernarium/Kernarium/GuestPictureInPicture.swift
++++ b/Kernarium/Kernarium/GuestPictureInPicture.swift
+@@ -47,44 +47,34 @@ final class FrameRelay: @unchecked Sendable {
+     }
+ }
+ 
+-private let runtimeFrameSink: kernarium_runtime_frame_sink = { context, buffer in
+-    guard let context, let buffer else { return }
+-    let relay = Unmanaged<FrameRelay>.fromOpaque(context).takeUnretainedValue()
+-    relay.receive(Unmanaged<CVPixelBuffer>.fromOpaque(buffer).takeUnretainedValue())
+-}
+-
+-/// The window that keeps the guest running in the background: iOS shows the
+-/// guest's display in a floating Picture in Picture window and keeps the
++/// The window that keeps the guest running in the background: iOS shows
++/// CoCode's status card in a floating Picture in Picture window and keeps the
+ /// process scheduled for as long as the user leaves it open.
+ ///
+-/// It owns a sample-buffer layer fed from the runtime's copy of the guest's
+-/// display, through the receiver of a render synchronizer that runs on the host
+-/// clock, so a frame stamped with the time it is made is due as it arrives.
+-/// While the guest's background mode asks for the window, a slow
+-/// trickle of frames keeps the layer holding a current picture, which iOS
+-/// needs before it starts the window on its own as the app leaves; the rate
+-/// rises once the window is up.
++/// It owns a sample-buffer layer fed once a second with the card
++/// (`CoCodePictureCard`), through the receiver of a render synchronizer that
++/// runs on the host clock, so a frame stamped with the time it is made is due
++/// as it arrives. The layer must hold a current picture before iOS starts the
++/// window on its own as the app leaves, so the card is fed while the guest's
++/// background mode asks for the window.
+ @MainActor
+ final class GuestPictureInPicture: NSObject, PictureInPictureWindow {
+     static let shared = GuestPictureInPicture()
+ 
+-    /// The mirror's size and rate while the app is in front, and in the window.
+-    /// The window is small, and the picture is for glancing at.
+-    private static let standby = (width: UInt32(480), framesPerSecond: UInt32(2))
+-    private static let showing = (width: UInt32(800), framesPerSecond: UInt32(15))
+-
+     weak var controller: BackgroundController?
+     /// Whether the running guest chose the window; the policy that reads it
+     /// is installed with the observers.
+     var wanted: () -> Bool = { false }
++    /// Whether Cox has opened, for the card.
++    var coxRunning = false
+ 
+     let layer = AVSampleBufferDisplayLayer()
+     private let synchronizer = AVSampleBufferRenderSynchronizer()
+     private var receiver: AVSampleBufferVideoRenderer.Receiver?
+     private var pictureInPicture: AVPictureInPictureController?
+-    private var relay: FrameRelay?
++    private var cardTimer: Timer?
+     private var guestRunning = false
+-    private var armedRate: UInt32?
++    private var guestStartedAt: Date?
+     private var starting = false
+     private var format: CMVideoFormatDescription?
+     private var formatSize = CMVideoDimensions(width: 0, height: 0)
+@@ -94,7 +84,8 @@ final class GuestPictureInPicture: NSObject, PictureInPictureWindow {
+     private override init() {
+         super.init()
+         layer.videoGravity = .resizeAspect
+-        layer.backgroundColor = UIColor.black.cgColor
++        layer.backgroundColor = CoCodePalette.backgroundUIColor
++            .resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)).cgColor
+     }
+ 
+     static var isSupported: Bool {
+@@ -119,6 +110,7 @@ final class GuestPictureInPicture: NSObject, PictureInPictureWindow {
+     /// The guest started or ended. The mirror exists only for a run.
+     func guestRunningChanged(_ running: Bool) {
+         guestRunning = running
++        guestStartedAt = running ? (guestStartedAt ?? Date()) : nil
+         refresh()
+     }
+ 
+@@ -127,7 +119,7 @@ final class GuestPictureInPicture: NSObject, PictureInPictureWindow {
+     func refresh() {
+         if guestRunning, wanted(), Self.isSupported {
+             prepareController()
+-            arm(rate: isActive ? Self.showing : Self.standby)
++            arm()
+         } else {
+             disarm()
+         }
+@@ -194,43 +186,30 @@ final class GuestPictureInPicture: NSObject, PictureInPictureWindow {
+         }
+     }
+ 
+-    private func arm(rate: (width: UInt32, framesPerSecond: UInt32)) {
+-        if armedRate == rate.framesPerSecond { return }
+-        let owner: FrameRelay
+-        if let relay {
+-            owner = relay
+-        } else {
+-            owner = FrameRelay()
+-            owner.handler = { [weak self] buffer in self?.show(buffer) }
+-            relay = owner
+-        }
+-        let result = kernarium_runtime_loader_set_frame_sink(
+-            runtimeFrameSink,
+-            Unmanaged.passUnretained(owner).toOpaque(),
+-            rate.width,
+-            rate.framesPerSecond
+-        )
+-        if result == 0 {
+-            armedRate = rate.framesPerSecond
+-            print(
+-                "Kernarium: picture in picture mirror \(rate.width) px, " +
+-                    "\(rate.framesPerSecond) fps"
+-            )
+-        } else {
+-            print("Kernarium: picture in picture frame sink refused (\(result))")
++    private func arm() {
++        guard cardTimer == nil else { return }
++        showCard()
++        let timer = Timer(timeInterval: 1, repeats: true) { _ in
++            MainActor.assumeIsolated { GuestPictureInPicture.shared.showCard() }
+         }
++        RunLoop.main.add(timer, forMode: .common)
++        cardTimer = timer
++        print("CoCode: picture in picture shows the status card")
++    }
++
++    private func showCard() {
++        let uptime = guestStartedAt.map { Date().timeIntervalSince($0) } ?? 0
++        let content = CoCodePictureCard.Content(coxRunning: coxRunning, uptime: uptime)
++        guard let buffer = CoCodePictureCard.render(content) else { return }
++        show(buffer)
+     }
+ 
+     private func disarm() {
+-        guard armedRate != nil || relay != nil || pictureInPicture != nil else {
++        guard cardTimer != nil || pictureInPicture != nil else {
+             return
+         }
+-        if armedRate != nil {
+-            // Returns only once no delivery is running, so the relay can go.
+-            _ = kernarium_runtime_loader_set_frame_sink(nil, nil, 0, 0)
+-            armedRate = nil
+-        }
+-        relay = nil
++        cardTimer?.invalidate()
++        cardTimer = nil
+         if let receiver {
+             Task { await receiver.flush(removingDisplayedImage: true) }
+         }
+@@ -353,7 +332,6 @@ extension GuestPictureInPicture: AVPictureInPictureControllerDelegate {
+         Task { @MainActor in
+             let window = GuestPictureInPicture.shared
+             window.starting = false
+-            window.arm(rate: Self.showing)
+             window.controller?.pictureInPictureDidStart()
+         }
+     }
+@@ -377,7 +355,6 @@ extension GuestPictureInPicture: AVPictureInPictureControllerDelegate {
+         Task { @MainActor in
+             let window = GuestPictureInPicture.shared
+             window.starting = false
+-            window.arm(rate: Self.standby)
+             window.controller?.pictureInPictureDidStop()
+         }
+     }
 diff --git a/Kernarium/Kernarium/InfoPlist.xcstrings b/Kernarium/Kernarium/InfoPlist.xcstrings
 new file mode 100644
 index 0000000..9f552bd
@@ -2232,10 +3261,10 @@ index 0000000..9f552bd
 +}
 diff --git a/Kernarium/Kernarium/Localizable.xcstrings b/Kernarium/Kernarium/Localizable.xcstrings
 new file mode 100644
-index 0000000..22ee782
+index 0000000..ed5421f
 --- /dev/null
 +++ b/Kernarium/Kernarium/Localizable.xcstrings
-@@ -0,0 +1,1326 @@
+@@ -0,0 +1,1606 @@
 +{
 +  "sourceLanguage": "en",
 +  "strings": {
@@ -2245,6 +3274,26 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "%@ 请在“设置”中选择其他内存大小，然后重新打开 CoCode。"
++          }
++        }
++      }
++    },
++    "%@ failed": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%@ 失败"
++          }
++        }
++      }
++    },
++    "%@ finished": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%@ 已完成"
 +          }
 +        }
 +      }
@@ -2329,6 +3378,16 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "Another update is in progress, or this component cannot be removed.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "另一个更新正在进行，或者此组件不能卸载。"
++          }
++        }
++      }
++    },
 +    "At %lld virtual CPU cores, this device can allocate at most %lld MiB of RAM to the Linux environment. More cores reduce this limit.": {
 +      "localizations": {
 +        "zh-Hans": {
@@ -2409,12 +3468,32 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "Check for updates": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "检查更新"
++          }
++        }
++      }
++    },
 +    "Checking the Linux environment…": {
 +      "localizations": {
 +        "zh-Hans": {
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "正在检查 Linux 环境…"
++          }
++        }
++      }
++    },
++    "Checking…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在检查…"
 +          }
 +        }
 +      }
@@ -2439,6 +3518,16 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "CoCode app": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 应用"
++          }
++        }
++      }
++    },
 +    "CoCode checks the download and unpacks it. This needs no network.": {
 +      "localizations": {
 +        "zh-Hans": {
@@ -2459,12 +3548,22 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
-+    "CoCode could not open local port 3773. Close any app using the port, then reopen CoCode.": {
++    "CoCode could not check for a new Linux image. Check your internet connection and try again.": {
 +      "localizations": {
 +        "zh-Hans": {
 +          "stringUnit": {
 +            "state": "translated",
-+            "value": "CoCode 无法打开本地 3773 端口。请关闭占用该端口的应用，然后重新打开 CoCode。"
++            "value": "CoCode 无法检查新的 Linux 镜像。请检查网络连接后重试。"
++          }
++        }
++      }
++    },
++    "CoCode could not open local ports 3773 and 3774. Close any app using them, then reopen CoCode.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 无法打开本地 3773 和 3774 端口。请关闭占用这些端口的应用，然后重新打开 CoCode。"
 +          }
 +        }
 +      }
@@ -2499,12 +3598,42 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
-+    "CoCode downloads the Linux image when it is first needed and when the bundled version changes. Your Linux files are kept on a separate disk.": {
++    "Components and updates": {
 +      "localizations": {
 +        "zh-Hans": {
 +          "stringUnit": {
 +            "state": "translated",
-+            "value": "CoCode 会在首次启动以及应用要求的版本变更时下载 Linux 镜像。你的 Linux 文件保存在单独的数据磁盘中。"
++            "value": "组件与更新"
++          }
++        }
++      }
++    },
++    "Cox and agents": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox 与智能体"
++          }
++        }
++      }
++    },
++    "Cox is running": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox 正在运行"
++          }
++        }
++      }
++    },
++    "Cox is starting": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Cox 正在启动"
 +          }
 +        }
 +      }
@@ -2535,6 +3664,26 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "画面"
++          }
++        }
++      }
++    },
++    "Download": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "下载"
++          }
++        }
++      }
++    },
++    "Downloaded %@ of %@": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "已下载 %1$@，共 %2$@"
 +          }
 +        }
 +      }
@@ -2625,6 +3774,16 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "进行中"
++          }
++        }
++      }
++    },
++    "Install": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "安装"
 +          }
 +        }
 +      }
@@ -2739,6 +3898,26 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "Linux environment · up %@": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境 · 已运行 %@"
++          }
++        }
++      }
++    },
++    "Linux image": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 镜像"
++          }
++        }
++      }
++    },
 +    "Logs": {
 +      "localizations": {
 +        "zh-Hans": {
@@ -2785,6 +3964,16 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "可用空间不足"
++          }
++        }
++      }
++    },
++    "Not installed": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "未安装"
 +          }
 +        }
 +      }
@@ -2935,6 +4124,16 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "重新载入"
++          }
++        }
++      }
++    },
++    "Remove": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "卸载"
 +          }
 +        }
 +      }
@@ -3259,6 +4458,16 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "The Linux environment is still starting.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 环境仍在启动。"
++          }
++        }
++      }
++    },
 +    "The Linux environment is stopping. Data already saved to disk is kept.": {
 +      "localizations": {
 +        "zh-Hans": {
@@ -3359,12 +4568,42 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "The Linux image, Cox and the agents update separately in Home › Components and updates. Your Linux files are kept on a separate disk.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "Linux 镜像、Cox 和各智能体分别独立更新，可在首页的“组件与更新”中管理。你的 Linux 文件保存在单独的数据磁盘中。"
++          }
++        }
++      }
++    },
 +    "The Linux runtime framework could not load.": {
 +      "localizations": {
 +        "zh-Hans": {
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "无法加载 Linux 运行时框架。"
++          }
++        }
++      }
++    },
++    "The component manager is not available yet. It starts with the Linux environment.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "组件管理器尚未就绪，它会随 Linux 环境一起启动。"
++          }
++        }
++      }
++    },
++    "The component manager refused the request.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "组件管理器拒绝了此请求。"
 +          }
 +        }
 +      }
@@ -3469,12 +4708,72 @@ index 0000000..22ee782
 +        }
 +      }
 +    },
++    "Up to date": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "已是最新版本"
++          }
++        }
++      }
++    },
++    "Update": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "更新"
++          }
++        }
++      }
++    },
++    "Update CoCode from TestFlight or the App Store.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "CoCode 应用本身通过 TestFlight 或 App Store 更新。"
++          }
++        }
++      }
++    },
 +    "Verifying and installing": {
 +      "localizations": {
 +        "zh-Hans": {
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "正在校验并安装"
++          }
++        }
++      }
++    },
++    "Verifying the image…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在校验镜像…"
++          }
++        }
++      }
++    },
++    "Version %@ is available": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "可更新到 %@"
++          }
++        }
++      }
++    },
++    "Version %@ is ready. It takes effect the next time CoCode opens.": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "%@ 已下载完成，下次打开 CoCode 时生效。"
 +          }
 +        }
 +      }
@@ -3535,6 +4834,16 @@ index 0000000..22ee782
 +          "stringUnit": {
 +            "state": "translated",
 +            "value": "CoCode 进入后台时"
++          }
++        }
++      }
++    },
++    "Working on %@…": {
++      "localizations": {
++        "zh-Hans": {
++          "stringUnit": {
++            "state": "translated",
++            "value": "正在处理 %@…"
 +          }
 +        }
 +      }
@@ -3766,6 +5075,194 @@ index dc271ba..dc3fce4 100644
          #expect(relaunched.restart?.message.contains("closed") == true)
  
          // Reported once: the launch after it starts clean.
+diff --git a/Kernarium/KernariumTests/CoCodeComponentsTests.swift b/Kernarium/KernariumTests/CoCodeComponentsTests.swift
+new file mode 100644
+index 0000000..0dfb330
+--- /dev/null
++++ b/Kernarium/KernariumTests/CoCodeComponentsTests.swift
+@@ -0,0 +1,182 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++import CoreVideo
++import Foundation
++import Testing
++@testable import Kernarium
++
++@MainActor
++@Suite(.serialized)
++struct CoCodeComponentsTests {
++    private static func manifest(version: String, format: Int? = 2, url: String? = nil) -> Data {
++        var fields: [String: Any] = [
++            "version": version,
++            "url": url ?? "https://github.com/doublepi123/co_code/releases/download/\(version)/cocode-linux.erofs.zst",
++            "compressedSHA256": String(repeating: "a", count: 64),
++            "compressedSize": 10,
++            "imageSHA256": String(repeating: "b", count: 64),
++            "imageSize": 20,
++        ]
++        if let format { fields["format"] = format }
++        return try! JSONSerialization.data(withJSONObject: fields)
++    }
++
++    private static func temporaryFiles() throws -> CoCodeGuestFiles {
++        let directory = FileManager.default.temporaryDirectory
++            .appendingPathComponent("cocode-image-\(UUID().uuidString)")
++        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
++        return CoCodeGuestFiles(directory: directory)
++    }
++
++    @Test func aManifestWithoutAFormatIsAnOlderImageThisAppReplaces() throws {
++        let old = try CoCodeGuestImage.decode(Self.manifest(version: "ios-build-45", format: nil))
++        #expect(old.format == 1)
++        #expect(!old.isSupported)
++        let current = try CoCodeGuestImage.decode(Self.manifest(version: "ios-image-7"))
++        #expect(current.format == CoCodeGuestImage.supportedFormat)
++        #expect(current.isSupported)
++    }
++
++    @Test func aManifestOutsidePublicHTTPSIsRejected() {
++        #expect(throws: CoCodeGuestImage.Failure.self) {
++            try CoCodeGuestImage.decode(Self.manifest(version: "x", url: "http://example.com/cocode-linux.erofs.zst"))
++        }
++        #expect(throws: CoCodeGuestImage.Failure.self) {
++            try CoCodeGuestImage.decode(Self.manifest(version: "x", url: "https://example.com/other.zst"))
++        }
++    }
++
++    @Test func theChannelNamesTheSupportedFormat() {
++        #expect(CoCodeGuestImage.channel.scheme == "https")
++        #expect(CoCodeGuestImage.channel.lastPathComponent == "CoCodeGuest-v\(CoCodeGuestImage.supportedFormat).json")
++    }
++
++    @Test func aRecordRoundTripsThroughItsEncoding() throws {
++        let image = try CoCodeGuestImage.decode(Self.manifest(version: "ios-image-7"))
++        let again = try CoCodeGuestImage.decode(JSONEncoder().encode(image))
++        #expect(again == image)
++    }
++
++    @Test func aPendingUpdateReplacesTheInstalledImageAtLaunch() throws {
++        let files = try Self.temporaryFiles()
++        defer { try? FileManager.default.removeItem(at: files.directory) }
++        try Data("old".utf8).write(to: files.image)
++        try Self.manifest(version: "ios-image-1").write(to: files.record)
++        try Data("new".utf8).write(to: files.pendingImage)
++        try Self.manifest(version: "ios-image-2").write(to: files.pendingRecord)
++        #expect(CoCodeGuestImage.pending(files: files)?.version == "ios-image-2")
++
++        let applied = CoCodeGuestImage.applyPending(files: files)
++
++        #expect(applied?.version == "ios-image-2")
++        #expect(try Data(contentsOf: files.image) == Data("new".utf8))
++        #expect(CoCodeGuestImage.installed(files: files)?.version == "ios-image-2")
++        #expect(!FileManager.default.fileExists(atPath: files.pendingImage.path))
++        #expect(!FileManager.default.fileExists(atPath: files.pendingRecord.path))
++    }
++
++    @Test func aPendingRecordWithoutItsImageIsDiscarded() throws {
++        let files = try Self.temporaryFiles()
++        defer { try? FileManager.default.removeItem(at: files.directory) }
++        try Data("old".utf8).write(to: files.image)
++        try Self.manifest(version: "ios-image-1").write(to: files.record)
++        try Self.manifest(version: "ios-image-2").write(to: files.pendingRecord)
++
++        #expect(CoCodeGuestImage.applyPending(files: files) == nil)
++        #expect(CoCodeGuestImage.installed(files: files)?.version == "ios-image-1")
++        #expect(try Data(contentsOf: files.image) == Data("old".utf8))
++        #expect(!FileManager.default.fileExists(atPath: files.pendingRecord.path))
++    }
++
++    @Test func anImageFromBeforeRecordsCountsAsNotInstalled() throws {
++        let files = try Self.temporaryFiles()
++        defer { try? FileManager.default.removeItem(at: files.directory) }
++        try Data("old".utf8).write(to: files.image)
++        try Data("ios-build-45".utf8).write(to: files.legacyVersion)
++        #expect(CoCodeGuestImage.installed(files: files) == nil)
++    }
++
++    private static let state = Data("""
++    {"cox":{"state":"running"},"checking":false,
++     "components":[
++       {"id":"cox","name":"Cox","kind":"server","required":true,"installed":"0.2.31","latest":"0.2.32"},
++       {"id":"codex","name":"Codex","kind":"agent","required":false,"installed":null,"latest":"0.171.0"}],
++     "job":{"id":"j1","component":"cox","action":"install","version":"0.2.32","state":"running",
++            "message":"installing","startedAt":"2026-11-23T08:00:00.000Z","finishedAt":null}}
++    """.utf8)
++
++    @Test func theManagerStateDecodes() throws {
++        let state = try CoCodeManagerAPI.decodeState(Self.state)
++        #expect(state.cox.state == "running")
++        #expect(state.components.map(\.id) == ["cox", "codex"])
++        #expect(state.components[0].updateAvailable)
++        #expect(!state.components[1].updateAvailable)
++        #expect(state.job?.isRunning == true)
++        #expect(throws: CoCodeManagerAPI.Failure.unavailable) {
++            try CoCodeManagerAPI.decodeState(Data("{}".utf8))
++        }
++    }
++
++    @Test func requestsCarryThePasswordToTheLoopbackManagerOnly() throws {
++        let request = CoCodeManagerAPI.request("/v1/state", password: "secret")
++        #expect(request.url?.absoluteString == "http://127.0.0.1:3774/v1/state")
++        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
++        #expect(request.httpShouldHandleCookies == false)
++        #expect(CoCodeManagerAPI.componentPath("codex", action: "install") == "/v1/components/codex/install")
++        #expect(CoCodeManagerAPI.componentPath("../cox", action: "remove") == nil)
++        #expect(CoCodeManagerAPI.componentPath("", action: "remove") == nil)
++    }
++
++    @Test func managerAnswersMapToFailures() throws {
++        func answer(_ status: Int, url: String = "http://127.0.0.1:3774/v1/state") throws -> Data {
++            let response = HTTPURLResponse(url: URL(string: url)!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
++            return try CoCodeManagerAPI.result(of: response, data: Data("{}".utf8))
++        }
++        #expect(try answer(202) == Data("{}".utf8))
++        #expect(throws: CoCodeManagerAPI.Failure.unauthorized) { try answer(401) }
++        #expect(throws: CoCodeManagerAPI.Failure.busy) { try answer(409) }
++        #expect(throws: CoCodeManagerAPI.Failure.notFound) { try answer(404) }
++        #expect(throws: CoCodeManagerAPI.Failure.unavailable) { try answer(200, url: "http://127.0.0.1:3773/v1/state") }
++    }
++
++    @Test func aFinishedCoxUpdateOpensCoxAgain() throws {
++        let components = CoCodeComponents()
++        let running = try CoCodeManagerAPI.decodeState(Self.state)
++        components.apply(running)
++        #expect(components.coxUpdates == 0)
++        let finished = try CoCodeManagerAPI.decodeState(Data(
++            String(decoding: Self.state, as: UTF8.self)
++                .replacingOccurrences(of: "\"state\":\"running\",\n", with: "\"state\":\"succeeded\",\n")
++                .utf8
++        ))
++        #expect(finished.job?.state == "succeeded")
++        components.apply(finished)
++        #expect(components.coxUpdates == 1)
++        components.apply(finished)
++        #expect(components.coxUpdates == 1)
++    }
++
++    @Test func thePictureInPictureCardIsDrawnInCoCodeColours() throws {
++        let buffer = try #require(CoCodePictureCard.render(.init(coxRunning: true, uptime: 3723)))
++        #expect(CVPixelBufferGetWidth(buffer) == 640)
++        #expect(CVPixelBufferGetHeight(buffer) == 360)
++        CVPixelBufferLockBaseAddress(buffer, .readOnly)
++        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
++        let base = try #require(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
++        let row = CVPixelBufferGetBytesPerRow(buffer)
++        func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int) {
++            let at = base + y * row + x * 4
++            return (Int(at[2]), Int(at[1]), Int(at[0]))
++        }
++        let corner = pixel(3, 3)
++        #expect(abs(corner.r - 0x15) <= 4 && abs(corner.g - 0x13) <= 4 && abs(corner.b - 0x13) <= 4)
++        var differing = 0
++        for y in stride(from: 0, to: 360, by: 4) {
++            for x in stride(from: 0, to: 640, by: 4) {
++                let p = pixel(x, y)
++                if abs(p.r - corner.r) + abs(p.g - corner.g) + abs(p.b - corner.b) > 60 { differing += 1 }
++            }
++        }
++        #expect(differing > 200)
++        #expect(CoCodePictureCard.uptimeText(3723) == "1:02:03")
++    }
++}
 diff --git a/Kernarium/KernariumTests/CoCodeConsoleTests.swift b/Kernarium/KernariumTests/CoCodeConsoleTests.swift
 new file mode 100644
 index 0000000..f375015
@@ -4033,10 +5530,10 @@ index 2e58947..7fcd94b 100644
      }
 diff --git a/Kernarium/KernariumUITests/CoCodeHomeUITests.swift b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
 new file mode 100644
-index 0000000..fc204f1
+index 0000000..a24848e
 --- /dev/null
 +++ b/Kernarium/KernariumUITests/CoCodeHomeUITests.swift
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,115 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import XCTest
 +
@@ -4110,6 +5607,40 @@ index 0000000..fc204f1
 +        attachScreenshot(of: app, named: "cox-settings")
 +    }
 +
++    /// Once the guest's component manager has started Cox, Home opens the
++    /// components sheet, which lists the Cox it installed.
++    @MainActor
++    func testComponentsListTheInstalledCox() throws {
++        let app = XCUIApplication()
++        app.launch()
++        let toggle = app.webViews.firstMatch.descendants(matching: .any).matching(
++            NSPredicate(format: "label IN %@", ["切换主侧边栏", "Toggle main sidebar"])
++        ).firstMatch
++        guard toggle.waitForExistence(timeout: 1800) else {
++            attachScreenshot(of: app, named: "components-cox-not-open")
++            XCTFail("Cox did not open signed in")
++            return
++        }
++
++        let handle = app.descendants(matching: .any)["cocodeEdgeHandle"]
++        XCTAssertTrue(handle.waitForExistence(timeout: 15))
++        handle.tap()
++        let open = app.buttons["homeComponentsButton"]
++        XCTAssertTrue(open.waitForExistence(timeout: 5))
++        open.tap()
++
++        let version = app.descendants(matching: .any)["componentVersion-cox"]
++        XCTAssertTrue(version.waitForExistence(timeout: 30))
++        let installed = XCTNSPredicateExpectation(
++            predicate: NSPredicate(format: "label MATCHES %@", "^[0-9]+\\.[0-9]+\\.[0-9]+.*"),
++            object: version
++        )
++        let found = XCTWaiter.wait(for: [installed], timeout: 60)
++        attachScreenshot(of: app, named: "components")
++        XCTAssertEqual(found, .completed, "Cox's installed version is \(version.label)")
++        XCTAssertTrue(app.descendants(matching: .any)["componentRow-omo"].exists)
++    }
++
 +    @MainActor
 +    private func attachScreenshot(of app: XCUIApplication, named name: String) {
 +        let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -4141,7 +5672,7 @@ index c3484e0..db3700c 100644
  
  /* Evaluates the host GPU's budget for a guest of `guest_memory_mib` and
 diff --git a/Kernarium/Runtime/KernariumRuntime.mm b/Kernarium/Runtime/KernariumRuntime.mm
-index 3aebcb7..32f4587 100644
+index 3aebcb7..eb26857 100644
 --- a/Kernarium/Runtime/KernariumRuntime.mm
 +++ b/Kernarium/Runtime/KernariumRuntime.mm
 @@ -437,11 +437,17 @@ void publishConsoleOutput(const void* buffer, std::size_t length)
@@ -4163,7 +5694,24 @@ index 3aebcb7..32f4587 100644
          const char* forwarding = std::getenv("KERNARIUM_HOST_FORWARD");
  #else
          /* An App Store runtime reads no environment knob. */
-@@ -462,6 +468,9 @@ public:
+@@ -457,11 +463,26 @@ public:
+                     std::to_string(error));
+             }
+         }
++#if !KERNARIUM_RUNTIME_ANDROID_GUEST
++        /* The guest's component manager, which installs and updates Cox and
++         * the agents, answers on its own port. */
++        if (const int error = uml_slirp_net_add_forward(
++                context_, "tcp:127.0.0.1:3774-10.0.2.15:3774");
++            error != 0) {
++            uml_slirp_net_destroy(context_);
++            context_ = nullptr;
++            throw std::runtime_error(
++                "invalid CoCode manager forward: " + std::to_string(error));
++        }
++#endif
+     }
+ 
      ~AppNetwork()
      {
          if (context_ != nullptr) {
@@ -4173,7 +5721,7 @@ index 3aebcb7..32f4587 100644
              uml_slirp_net_stop(context_);
              uml_slirp_net_destroy(context_);
          }
-@@ -470,6 +479,34 @@ public:
+@@ -470,6 +491,34 @@ public:
      AppNetwork(const AppNetwork&) = delete;
      AppNetwork& operator=(const AppNetwork&) = delete;
  
@@ -4208,7 +5756,7 @@ index 3aebcb7..32f4587 100644
      [[nodiscard]] uml_emulator_network_callbacks callbacks() noexcept
      {
          return {
-@@ -491,10 +528,15 @@ public:
+@@ -491,10 +540,15 @@ public:
       * the guest's IRQ registration borrows. */
      void resetLink() noexcept
      {
@@ -4227,7 +5775,7 @@ index 3aebcb7..32f4587 100644
          if (opened < 0) {
              std::fprintf(
                  stderr,
-@@ -1064,6 +1106,7 @@ public:
+@@ -1064,6 +1118,7 @@ public:
                      if (received > 0) {
                          publishConsoleOutput(
                              buffer, static_cast<std::size_t>(received));
@@ -4235,7 +5783,7 @@ index 3aebcb7..32f4587 100644
                          std::lock_guard outputLock(
                              kernarium::console::output().stdoutMutex());
                          std::string_view output(
-@@ -1082,6 +1125,7 @@ public:
+@@ -1082,6 +1137,7 @@ public:
                                  break;
                              }
                          }
@@ -4243,7 +5791,7 @@ index 3aebcb7..32f4587 100644
                          continue;
                      }
                      if (received < 0 && errno == EINTR)
-@@ -1366,15 +1410,14 @@ std::string fbconFontArgument(uint32_t dotsPerInch)
+@@ -1366,15 +1422,14 @@ std::string fbconFontArgument(uint32_t dotsPerInch)
  
  /* A Linux guest boots the embedded base archive and a segment holding the
   * generic per-run /init and these parameters: the image read-only beneath an
@@ -4262,14 +5810,14 @@ index 3aebcb7..32f4587 100644
          "UML_BOOT_UPPER_DEVICE=/dev/ubdb\n"
          "UML_BOOT_ENTRY=/sbin/init\n");
      return parameters;
-@@ -2543,7 +2586,12 @@ int runtimeRun(
+@@ -2543,7 +2598,12 @@ int runtimeRun(
              guestProcessorCount);
  
          AppNetwork network;
 -#if KERNARIUM_RUNTIME_ANDROID_GUEST
 +#if !KERNARIUM_RUNTIME_ANDROID_GUEST
 +        if (const int error = network.startCoCodeForward(); error < 0) {
-+            std::fprintf(stderr, "CoCode: loopback forward on port 3773 failed: %d\n", error);
++            std::fprintf(stderr, "CoCode: loopback forwards on ports 3773 and 3774 failed: %d\n", error);
 +            return KERNARIUM_RUNTIME_RESULT_COCODE_FORWARD_FAILED;
 +        }
 +#else
