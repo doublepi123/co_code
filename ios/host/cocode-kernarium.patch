@@ -2489,10 +2489,10 @@ index 8ee4cfa..7941a6c 100644
      }
 diff --git a/Kernarium/Kernarium/CoxSession.swift b/Kernarium/Kernarium/CoxSession.swift
 new file mode 100644
-index 0000000..90f55e3
+index 0000000..fb4696b
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxSession.swift
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,149 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -2563,7 +2563,7 @@ index 0000000..90f55e3
 +    static let signInURL = URL(string: "http://127.0.0.1:3773/api/auth/browser-session")!
 +
 +    static func request(password: String) -> URLRequest {
-+        var request = URLRequest(url: signInURL, timeoutInterval: 5)
++        var request = URLRequest(url: signInURL, timeoutInterval: 15)
 +        request.httpMethod = "POST"
 +        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 +        request.httpShouldHandleCookies = false
@@ -2586,18 +2586,29 @@ index 0000000..90f55e3
 +        return cookies.isEmpty ? nil : cookies
 +    }
 +
-+    static func signIn(
++    enum Outcome: Equatable {
++        case signedIn([HTTPCookie])
++        case refused(status: Int)
++        case unanswered
++    }
++
++    static func outcome(of response: HTTPURLResponse) -> Outcome {
++        if let cookies = cookies(from: response) { return .signedIn(cookies) }
++        return .refused(status: response.statusCode)
++    }
++
++    static func attempt(
 +        password: String,
 +        configuration: URLSessionConfiguration = .ephemeral
-+    ) async -> [HTTPCookie]? {
++    ) async -> Outcome {
 +        configuration.httpShouldSetCookies = false
 +        configuration.httpCookieStorage = nil
 +        configuration.urlCache = nil
 +        let session = URLSession(configuration: configuration, delegate: CoxNoRedirects(), delegateQueue: nil)
 +        defer { session.finishTasksAndInvalidate() }
 +        guard let (_, response) = try? await session.data(for: request(password: password)),
-+              let http = response as? HTTPURLResponse else { return nil }
-+        return cookies(from: http)
++              let http = response as? HTTPURLResponse else { return .unanswered }
++        return outcome(of: http)
 +    }
 +}
 +
@@ -2624,12 +2635,19 @@ index 0000000..90f55e3
 +        completionHandler(nil)
 +    }
 +}
++
++/// Writes a CoCode line to standard output and the unified log, where the
++/// simulator QA collects it.
++nonisolated func cocodeLog(_ message: String) {
++    print(message)
++    NSLog("%@", message)
++}
 diff --git a/Kernarium/Kernarium/CoxWebPane.swift b/Kernarium/Kernarium/CoxWebPane.swift
 new file mode 100644
-index 0000000..d33aaef
+index 0000000..4a08d18
 --- /dev/null
 +++ b/Kernarium/Kernarium/CoxWebPane.swift
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,236 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
 +import Foundation
@@ -2707,7 +2725,7 @@ index 0000000..d33aaef
 +        await waitForCox()
 +        guard !Task.isCancelled else { return }
 +        let cookies = await signIn() ?? []
-+        print(cookies.isEmpty
++        cocodeLog(cookies.isEmpty
 +            ? "CoCode: opening Cox without a native sign-in"
 +            : "CoCode: signed in to Cox")
 +        if !Task.isCancelled { ready = Ready(rules: compiled, cookies: cookies) }
@@ -2734,15 +2752,31 @@ index 0000000..d33aaef
 +        }
 +    }
 +
-+    /// The guest prints the password before it starts Cox, so it is normally
-+    /// known once Cox answers; a short grace covers output still in flight.
++    /// The guest prints the password as it boots and again once Cox answers.
++    /// A Cox that has just started can leave a sign-in unanswered or refuse it
++    /// while it settles, so the sign-in is tried for up to a minute; a password
++    /// Cox rejects is not sent again until the console shows another one.
 +    private func signIn() async -> [HTTPCookie]? {
-+        let deadline = ContinuousClock.now + .seconds(5)
-+        while console.coxPassword == nil && !Task.isCancelled && ContinuousClock.now < deadline {
-+            try? await Task.sleep(for: .milliseconds(250))
++        let deadline = ContinuousClock.now + .seconds(60)
++        var rejected: String?
++        while !Task.isCancelled && ContinuousClock.now < deadline {
++            if let password = console.coxPassword, password != rejected {
++                switch await CoxLocalSession.attempt(password: password) {
++                case let .signedIn(cookies):
++                    return cookies
++                case let .refused(status):
++                    cocodeLog("CoCode: Cox refused the sign-in with HTTP \(status)")
++                    if status == 401 || status == 403 { rejected = password }
++                case .unanswered:
++                    cocodeLog("CoCode: Cox did not answer the sign-in")
++                }
++            }
++            try? await Task.sleep(for: .seconds(2))
 +        }
-+        guard let password = console.coxPassword else { return nil }
-+        return await CoxLocalSession.signIn(password: password)
++        cocodeLog(console.coxPassword == nil
++            ? "CoCode: the console never showed the local password"
++            : "CoCode: Cox did not accept the sign-in")
++        return nil
 +    }
 +}
 +
@@ -5294,10 +5328,10 @@ index 0000000..f375015
 +}
 diff --git a/Kernarium/KernariumTests/CoCodeSessionTests.swift b/Kernarium/KernariumTests/CoCodeSessionTests.swift
 new file mode 100644
-index 0000000..acf8207
+index 0000000..e0e56aa
 --- /dev/null
 +++ b/Kernarium/KernariumTests/CoCodeSessionTests.swift
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,135 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +import Foundation
 +import Testing
@@ -5377,13 +5411,26 @@ index 0000000..acf8207
 +        configuration.protocolClasses = [StubCox.self]
 +
 +        StubCox.answer = (200, ["Set-Cookie": "t3_session=abc; Path=/"])
-+        let cookies = await CoxLocalSession.signIn(password: Self.password, configuration: configuration)
-+        #expect(cookies?.map(\.name) == ["t3_session"])
++        guard case let .signedIn(cookies) = await CoxLocalSession.attempt(password: Self.password, configuration: configuration) else {
++            Issue.record("an accepted sign-in gave no cookies")
++            return
++        }
++        #expect(cookies.map(\.name) == ["t3_session"])
 +        #expect(StubCox.lastBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
 +            == ["credential": Self.password])
 +
 +        StubCox.answer = (302, ["Location": "http://127.0.0.1:3773/", "Set-Cookie": "t3_session=abc; Path=/"])
-+        #expect(await CoxLocalSession.signIn(password: Self.password, configuration: configuration) == nil)
++        #expect(await CoxLocalSession.attempt(password: Self.password, configuration: .ephemeral.withStub()) == .refused(status: 302))
++
++        StubCox.answer = (401, [:])
++        #expect(await CoxLocalSession.attempt(password: Self.password, configuration: .ephemeral.withStub()) == .refused(status: 401))
++    }
++}
++
++private extension URLSessionConfiguration {
++    func withStub() -> URLSessionConfiguration {
++        protocolClasses = [StubCox.self]
++        return self
 +    }
 +}
 +

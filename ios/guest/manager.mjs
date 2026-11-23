@@ -196,8 +196,11 @@ async function ensurePassword() {
     await rename(temporary, passwordFile);
   }
   const password = (await readFile(passwordFile, 'utf8')).trim();
-  await writeFile(consolePath, '\nCoCode local password: ' + password + '\n\n');
+  await announcePassword(password);
   return password;
+}
+async function announcePassword(password) {
+  await writeFile(consolePath, '\nCoCode local password: ' + password + '\n\n');
 }
 async function prepareHome() {
   const coxHome = '/root/.cox';
@@ -227,7 +230,13 @@ async function startCox(password) {
     state.cox = 'starting';
     const exited = new Promise(resolvePromise => child.once('exit', (code, signal) => resolvePromise({ code, signal })));
     while (state.coxChild === child && !stoppingCox) {
-      if (await probeCox()) { state.cox = 'running'; break; }
+      if (await probeCox()) {
+        state.cox = 'running';
+        // The host signs in as soon as Cox answers; repeating the line then
+        // spares it from depending on the boot-time copy alone.
+        await announcePassword(password).catch(error => log('cannot write the password line: ' + error.message));
+        break;
+      }
       await new Promise(resolvePromise => setTimeout(resolvePromise, 500));
     }
     if (state.cox === 'running') delay = 2000;
