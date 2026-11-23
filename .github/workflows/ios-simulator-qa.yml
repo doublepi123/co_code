@@ -25,7 +25,7 @@ concurrency:
 
 env:
   KERNARIUM_REV: b14aa9e6da9df15f467d8aad0090888373cc9b21
-  MANIFEST_TAG: ${{ inputs.manifest_tag || 'ios-v1.0.1' }}
+  MANIFEST_TAG: ${{ inputs.manifest_tag || 'ios-image-50' }}
   ONLY_TESTING: ${{ github.event_name == 'push' && 'KernariumTests/CoCodeSessionTests KernariumTests/CoCodeConsoleTests KernariumTests/CoCodeComponentsTests KernariumUITests/CoCodeHomeUITests' || inputs.only_testing }}
 
 jobs:
