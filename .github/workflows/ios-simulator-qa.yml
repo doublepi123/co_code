@@ -198,6 +198,7 @@ jobs:
           if [[ -d build/ios/app/KernariumTests.xcresult ]]; then
             mv build/ios/app/KernariumTests.xcresult build/ios/qa/
             cp build/ios/app/KernariumTests-xcodebuild.log build/ios/qa/logs/ || true
+            cp build/ios/app/KernariumTests-app.log build/ios/qa/logs/ || true
             xcrun xcresulttool get test-results summary --path build/ios/qa/KernariumTests.xcresult --format json \
               | python3 -m json.tool > build/ios/qa/logs/KernariumTests-summary.txt || true
             xcrun xcresulttool export attachments --path build/ios/qa/KernariumTests.xcresult \
