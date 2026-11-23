@@ -8,4 +8,4 @@ ip link set lo up
 ip link set eth0 up
 udhcpc -n -q -i eth0
 
-exec /usr/local/sbin/cocode-start --console-password
+exec node /usr/lib/cocode/manager.mjs serve
