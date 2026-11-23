@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants, readlinkSync } from 'node:fs';
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile, chmod } from 'node:fs/promises';
+import { access, copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, writeFile, chmod } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 
@@ -188,14 +188,22 @@ async function removeComponent(component) {
 async function ensurePassword() {
   const passwordFile = '/root/.cocode-password';
   await mkdir('/root', { recursive: true });
-  try { await access(passwordFile); }
-  catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
+  let password = null;
+  try { password = (await readFile(passwordFile, 'utf8')).trim(); }
+  catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  // iOS can end the app, and with it the guest, right after the first boot;
+  // a file renamed into place before its data reached the disk comes back
+  // empty, so the password is synced and an unreadable one is replaced.
+  if (!/^[0-9a-f]{32,128}$/.test(password ?? '')) {
+    if (password !== null) log('the saved local password was unreadable; creating a new one');
+    password = randomBytes(24).toString('hex');
     const temporary = passwordFile + '.' + process.pid;
-    await writeFile(temporary, randomBytes(24).toString('hex') + '\n', { mode: 0o600, flag: 'wx' });
+    const file = await open(temporary, 'w', 0o600);
+    try { await file.writeFile(password + '\n'); await file.sync(); } finally { await file.close(); }
     await rename(temporary, passwordFile);
+    const directory = await open('/root', 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
   }
-  const password = (await readFile(passwordFile, 'utf8')).trim();
   await announcePassword(password);
   return password;
 }
