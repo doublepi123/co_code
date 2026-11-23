@@ -25,14 +25,20 @@ env:
 
 jobs:
   guest:
-    name: ARM64 Cox guest
+    name: ARM64 Linux image
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 60
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       publish: ${{ steps.release.outputs.publish }}
       version: ${{ steps.release.outputs.version }}
       build: ${{ steps.release.outputs.build }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL_TAG: ios-image-channel
+      CHANNEL_ASSET: CoCodeGuest-v2.json
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,22 +65,47 @@ jobs:
           else
             version=0.1.0
           fi
-          printf 'tag=%s\npublish=%s\nversion=%s\nbuild=%s\n' "$tag" "$publish" "$version" "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          # The channel names the newest image for every app; only main and release tags move it.
+          channel=false
+          if [[ "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/ios-v* ]] && [[ "$publish" == true ]]; then
+            channel=true
+          fi
+          printf 'tag=%s\npublish=%s\nversion=%s\nbuild=%s\nchannel=%s\n' "$tag" "$publish" "$version" "$GITHUB_RUN_NUMBER" "$channel" >> "$GITHUB_OUTPUT"
           echo "CoCode iOS $version ($GITHUB_RUN_NUMBER), release $tag"
+      - name: Reuse the published image when its source is unchanged
+        id: reuse
+        run: |
+          mkdir -p build/ios/guest
+          tree=$(git rev-parse HEAD:ios/guest)
+          printf 'tree=%s\n' "$tree" >> "$GITHUB_OUTPUT"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$CHANNEL_TAG/$CHANNEL_ASSET"
+          if curl -fsSL --retry 3 --retry-all-errors -o channel.json "$url" &&
+              python3 -c 'import json,sys; m=json.load(open("channel.json")); sys.exit(0 if m.get("guestTree") == sys.argv[1] and m.get("format") == 2 else 1)' "$tree"; then
+            mv channel.json build/ios/guest/CoCodeGuest.json
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+            echo "The channel image was built from ios/guest $tree; reusing it."
+          else
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+            echo "ios/guest $tree has no published image; building one."
+          fi
       - uses: docker/setup-buildx-action@v3
-      - name: Build and check guest filesystem
+        if: steps.reuse.outputs.reused != 'true'
+      - name: Build and check the image
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           docker buildx build --platform linux/arm64 --target bundle \
             --output type=local,dest=build/ios/guest --progress plain ios/guest
       - name: Compress the image and write its download manifest
+        if: steps.reuse.outputs.reused != 'true'
         env:
-          TAG: ${{ steps.release.outputs.tag }}
+          IMAGE_TAG: ios-image-${{ github.run_number }}
+          TREE: ${{ steps.reuse.outputs.tree }}
         working-directory: build/ios/guest
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
           zstd -19 -T0 --no-progress -o cocode-linux.erofs.zst cocode-linux.erofs
           zstd -t cocode-linux.erofs.zst
-          python3 - "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/cocode-linux.erofs.zst" "$TAG" <<'PY'
+          python3 - "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$IMAGE_TAG/cocode-linux.erofs.zst" "$IMAGE_TAG" "$TREE" <<'PY'
           import hashlib, json, os, sys
           def digest(path):
               value = hashlib.sha256()
@@ -89,6 +120,8 @@ jobs:
               'compressedSize': os.path.getsize('cocode-linux.erofs.zst'),
               'imageSHA256': digest('cocode-linux.erofs'),
               'imageSize': os.path.getsize('cocode-linux.erofs'),
+              'format': 2,
+              'guestTree': sys.argv[3],
           }
           with open('CoCodeGuest.json', 'w', encoding='utf-8') as stream:
               json.dump(manifest, stream, indent=2)
@@ -96,12 +129,68 @@ jobs:
           PY
           cat CoCodeGuest.json
           rm cocode-linux.erofs
+      - name: Publish the image release
+        if: steps.reuse.outputs.reused != 'true' && steps.release.outputs.publish == 'true'
+        env:
+          IMAGE_TAG: ios-image-${{ github.run_number }}
+        working-directory: build/ios/guest
+        run: |
+          sha256sum cocode-linux.erofs.zst CoCodeGuest.json > SHA256SUMS
+          assets=(cocode-linux.erofs.zst CoCodeGuest.json SHA256SUMS)
+          # The releases API intermittently answers 403 to this token; retry, and finish a
+          # release an earlier attempt created by uploading its assets again.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$IMAGE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$IMAGE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}" && exit 0
+            elif gh release create "$IMAGE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+                --title "CoCode iOS Linux image $IMAGE_TAG" \
+                --notes "Linux image for CoCode iOS (format 2). CoCode downloads and verifies it; it does not change the installed Cox or agents." \
+                "${assets[@]}"; then
+              exit 0
+            fi
+            echo "Release attempt $attempt failed; retrying"
+            sleep $(( attempt * 20 ))
+          done
+          exit 1
+      - name: Verify the image downloads without credentials
+        if: steps.release.outputs.publish == 'true'
+        working-directory: build/ios/guest
+        run: |
+          url=$(python3 -c 'import json; print(json.load(open("CoCodeGuest.json"))["url"])')
+          expected=$(python3 -c 'import json; print(json.load(open("CoCodeGuest.json"))["compressedSHA256"])')
+          env -u GH_TOKEN curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/anonymous.zst" "$url"
+          test "$(sha256sum "$RUNNER_TEMP/anonymous.zst" | awk '{print $1}')" = "$expected"
+          echo "Anonymous download verified: $url"
+      - name: Point the channel at this image
+        if: steps.reuse.outputs.reused != 'true' && steps.release.outputs.channel == 'true'
+        working-directory: build/ios/guest
+        run: |
+          cp CoCodeGuest.json "$CHANNEL_ASSET"
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" --clobber "$CHANNEL_ASSET" && break
+            elif gh release create "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+                --title "CoCode iOS Linux image channel" \
+                --notes "$CHANNEL_ASSET names the newest format 2 Linux image. CoCode iOS checks it for image updates." \
+                "$CHANNEL_ASSET"; then
+              break
+            fi
+            echo "Channel attempt $attempt failed; retrying"
+            sleep $(( attempt * 20 ))
+            [[ $attempt == 5 ]] && exit 1
+          done
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$CHANNEL_TAG/$CHANNEL_ASSET"
+          for attempt in 1 2 3 4 5 6; do
+            env -u GH_TOKEN curl -fsSL -H 'Cache-Control: no-cache' -o "$RUNNER_TEMP/channel.json" "$url" &&
+              cmp "$RUNNER_TEMP/channel.json" "$CHANNEL_ASSET" && { echo "Channel verified: $url"; exit 0; }
+            sleep $(( attempt * 10 ))
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
-          name: CoCode-iOS-ARM64-guest
-          path: build/ios/guest/
+          name: CoCode-iOS-guest-manifest
+          path: build/ios/guest/CoCodeGuest.json
           if-no-files-found: error
-          compression-level: 0
 
   boot-base:
     name: ARM64 boot ramdisk
@@ -157,7 +246,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: CoCode-iOS-ARM64-guest
+          name: CoCode-iOS-guest-manifest
           path: build/ios/guest
       - uses: actions/download-artifact@v4
         with:
@@ -166,8 +255,7 @@ jobs:
       - name: Verify build inputs
         id: toolchain
         run: |
-          python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["compressedSize"] > 0' build/ios/guest/CoCodeGuest.json
-          test "$(shasum -a 256 build/ios/guest/cocode-linux.erofs.zst | awk '{print $1}')" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["compressedSHA256"])' build/ios/guest/CoCodeGuest.json)"
+          python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["compressedSize"] > 0 and m["format"] == 2' build/ios/guest/CoCodeGuest.json
           (cd build/ios/boot && shasum -a 256 -c uml-boot-base-aarch64.cpio.gz.sha256)
           xcodebuild -version
           sdk=$(xcrun --sdk iphoneos --show-sdk-version)
@@ -253,22 +341,22 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: CoCode-iOS-ARM64-guest
+          name: CoCode-iOS-guest-manifest
           path: release
       - uses: actions/download-artifact@v4
         with:
           name: CoCode-iOS-unsigned
           path: package
-      - name: Publish the image and the unsigned IPA
+      - name: Publish the unsigned IPA
         working-directory: release
         run: |
           (cd ../package && shasum -a 256 -c SHA256SUMS)
           mv ../package/CoCode-unsigned.ipa .
           cmp CoCodeGuest.json <(unzip -p CoCode-unsigned.ipa Payload/CoCode.app/CoCodeGuest.json)
-          sha256sum cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json > SHA256SUMS
+          sha256sum CoCode-unsigned.ipa CoCodeGuest.json > SHA256SUMS
           prerelease=--prerelease
           [[ "$TAG" == ios-v* && "$TAG" != ios-v0.* ]] && prerelease=
-          assets=(cocode-linux.erofs.zst CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS)
+          assets=(CoCode-unsigned.ipa CoCodeGuest.json SHA256SUMS)
           # The releases API intermittently answers 403 to this token; retry, and finish a
           # release an earlier attempt created by uploading its assets again.
           for attempt in 1 2 3 4 5; do
@@ -276,7 +364,7 @@ jobs:
               gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}" && exit 0
             elif gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease \
                 --title "CoCode iOS $VERSION ($BUILD)" \
-                --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads cocode-linux.erofs.zst from this release and verifies it." \
+                --notes "Unsigned CoCode iOS build. Sign CoCode-unsigned.ipa before installing. On first launch CoCode downloads the Linux image named in CoCodeGuest.json and verifies it. The image, Cox and the agents update separately from the app." \
                 "${assets[@]}"; then
               exit 0
             fi
