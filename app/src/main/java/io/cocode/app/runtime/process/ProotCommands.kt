@@ -121,6 +121,7 @@ object ProotCommands {
         kind: ServerKind = ServerKind.T3,
         /** True for the Cox bundle; false only while a legacy T3 Code bundle is still installed. */
         coxBundle: Boolean = true,
+        wakeNonce: String? = null,
     ): Map<String, String> =
         buildMap {
             putAll(suiteEnvironment)
@@ -140,6 +141,7 @@ object ProotCommands {
                     if (coxBundle) {
                         put("COX_HOME", COX_HOME)
                         put("COX_AUTH_PASSWORD", uiPassword)
+                        if (wakeNonce != null) put(RuntimeWakeCoordinator.ENV_NONCE, wakeNonce)
                         // CoCode installs and updates Cox itself, so Cox hides its own update check.
                         put("COX_UPDATES_MANAGED_BY", "CoCode")
                     } else {

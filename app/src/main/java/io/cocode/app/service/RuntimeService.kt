@@ -18,6 +18,7 @@ import io.cocode.app.i18n.UserMessages
 import io.cocode.app.runtime.LocalRuntimeController
 import io.cocode.app.runtime.RuntimeOperation
 import io.cocode.app.runtime.RuntimeState
+import io.cocode.app.runtime.process.RuntimeWakeCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,11 +35,12 @@ import org.koin.android.ext.android.inject
  * applies [RuntimeServicePolicy] to (busy, state) on every change: it stays foreground while work is
  * queued or running, or while the server is Running or Starting, and stops itself otherwise.
  *
- * The wake lock is held exactly while the service is foreground ([WakeHold] is released on every
- * path that leaves the foreground, including onDestroy).
+ * The service stays foreground for runtime availability; the partial wake lock is reconciled
+ * independently from native operation work and the owned Cox child's acknowledged wake protocol.
  */
 class RuntimeService : Service() {
     private val runtime: LocalRuntimeController by inject()
+    private val wakeCoordinator: RuntimeWakeCoordinator by inject()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var observer: Job? = null
     private var foreground = false
@@ -55,7 +57,7 @@ class RuntimeService : Service() {
         observer =
             scope.launch {
                 combine(runtime.busy, runtime.state) { busy, state -> busy to state }.collect { (busy, state) ->
-                    apply(RuntimeServicePolicy.decide(busy, state, startedOnce), state)
+                    apply(RuntimeServicePolicy.decide(busy, state, startedOnce), busy, state)
                 }
             }
     }
@@ -71,9 +73,15 @@ class RuntimeService : Service() {
         startedOnce = true
         when (intent?.action) {
             ACTION_OPERATION -> {
-                intent.getStringExtra(EXTRA_OPERATION)?.let(RuntimeOperation::valueOf)?.let(runtime::perform)
+                intent.getStringExtra(EXTRA_OPERATION)?.let(RuntimeOperation::valueOf)?.let { operation ->
+                    wakeCoordinator.observeService(true, runtime.state.value is RuntimeState.Running, true)
+                    runtime.perform(operation)
+                }
             }
-            ACTION_STOP_NOTIFICATION -> runtime.perform(RuntimeOperation.Stop)
+            ACTION_STOP_NOTIFICATION -> {
+                wakeCoordinator.observeService(true, runtime.state.value is RuntimeState.Running, true)
+                runtime.perform(RuntimeOperation.Stop)
+            }
             else -> Unit
         }
         return START_NOT_STICKY
@@ -82,7 +90,14 @@ class RuntimeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        WakeHold.release()
+        val busy = runtime.busy.value
+        val state = runtime.state.value
+        val action = RuntimeServicePolicy.decide(busy, state, startedOnce)
+        wakeCoordinator.observeService(
+            busy,
+            state is RuntimeState.Running,
+            action == RuntimeServicePolicy.Action.KeepRunning && startedOnce && state !is RuntimeState.Running,
+        )
         observer?.cancel()
         scope.coroutineContext[Job]?.cancel()
         super.onDestroy()
@@ -91,8 +106,14 @@ class RuntimeService : Service() {
     /** Applies the policy: the notification follows the state, the foreground follows the policy. */
     private fun apply(
         action: RuntimeServicePolicy.Action,
+        busy: Boolean,
         state: RuntimeState,
     ) {
+        wakeCoordinator.observeService(
+            busy,
+            state is RuntimeState.Running,
+            action == RuntimeServicePolicy.Action.KeepRunning && state !is RuntimeState.Running,
+        )
         when (action) {
             RuntimeServicePolicy.Action.KeepRunning -> {
                 if (foreground) {
@@ -100,7 +121,6 @@ class RuntimeService : Service() {
                 } else {
                     enterForeground(buildNotification(state))
                 }
-                WakeHold.acquire(this)
             }
             RuntimeServicePolicy.Action.Finish -> leaveForeground()
         }
@@ -117,7 +137,6 @@ class RuntimeService : Service() {
     }
 
     private fun leaveForeground() {
-        WakeHold.release()
         if (foreground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             foreground = false

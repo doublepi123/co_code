@@ -98,6 +98,32 @@ class ProotCommandsTest {
     }
 
     @Test
+    fun `wake nonce is exported only to owned Cox`() {
+        val nonce = "0123456789abcdef0123456789abcdef"
+        val coxEnv =
+            ProotCommands.serverEnvironment(
+                suiteEnvironment = emptyMap(),
+                prootTmp = prootTmp,
+                port = 3773,
+                uiPassword = "secret-password",
+                coxBundle = true,
+                wakeNonce = nonce,
+            )
+        val legacyEnv =
+            ProotCommands.serverEnvironment(
+                suiteEnvironment = emptyMap(),
+                prootTmp = prootTmp,
+                port = 3773,
+                uiPassword = "secret-password",
+                coxBundle = false,
+                wakeNonce = nonce,
+            )
+
+        assertEquals(nonce, coxEnv[RuntimeWakeCoordinator.ENV_NONCE])
+        assertFalse(legacyEnv.containsKey(RuntimeWakeCoordinator.ENV_NONCE))
+    }
+
+    @Test
     fun `cox is told that CoCode manages its updates`() {
         val env =
             ProotCommands.serverEnvironment(

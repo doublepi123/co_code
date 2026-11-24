@@ -51,9 +51,11 @@ import io.cocode.app.runtime.process.EmbeddedCommandSuite
 import io.cocode.app.runtime.process.HealthProbe
 import io.cocode.app.runtime.process.ProotRuntimeServer
 import io.cocode.app.runtime.process.ProotStaleServerCleaner
+import io.cocode.app.runtime.process.RuntimeWakeCoordinator
 import io.cocode.app.ui.ScreenAwakeController
 import io.cocode.app.ui.UiPrefs
 import io.cocode.app.service.RuntimeService
+import io.cocode.app.service.WakeHold
 import okhttp3.OkHttpClient
 import org.koin.dsl.module
 import java.io.File
@@ -112,6 +114,13 @@ val appModule =
 
         single<SharedStorageController> { get<SharedStorageControllerImpl>() }
 
+        single<RuntimeWakeCoordinator> {
+            val context = get<Context>()
+            RuntimeWakeCoordinator { held ->
+                if (held) WakeHold.acquire(context) else WakeHold.release()
+            }
+        }
+
         // Shared environment, distinct process identities. The controller runs only one at a time.
         single<Map<ServerKind, RuntimeServer>> {
             val context = get<Context>()
@@ -124,6 +133,7 @@ val appModule =
                 ProotRuntimeServer(
                     paths = paths,
                     kind = kind,
+                    wakeCoordinator = get(),
                     suite = suite,
                     health = HealthProbe.loopback(kind),
                     scanner = scanner,

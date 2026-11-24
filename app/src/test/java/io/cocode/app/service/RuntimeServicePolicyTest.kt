@@ -62,7 +62,6 @@ class RuntimeServicePolicyTest {
             )
 
         assertEquals(Action.Finish, recovery.last())
-        assertFalse(RuntimeServicePolicy.wakeLockHeld(recovery.last()))
     }
 
     @Test
@@ -78,9 +77,11 @@ class RuntimeServicePolicyTest {
     }
 
     @Test
-    fun `wake lock is held exactly while the service is foreground`() {
-        assertTrue(RuntimeServicePolicy.wakeLockHeld(Action.KeepRunning))
-        assertFalse(RuntimeServicePolicy.wakeLockHeld(Action.Finish))
+    fun `running server keeps the service foreground while idle`() {
+        assertEquals(
+            Action.KeepRunning,
+            RuntimeServicePolicy.decide(false, RuntimeState.Running("http://127.0.0.1:3773", 3773, 0)),
+        )
     }
 
     @Test

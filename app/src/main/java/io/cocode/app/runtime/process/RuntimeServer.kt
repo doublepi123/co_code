@@ -73,6 +73,7 @@ class ProotRuntimeServer(
     private val onStarted: (io.cocode.app.runtime.storage.GuestBinds) -> Unit = {},
     /** Told when the server stops, so nothing is marked as needing a restart. */
     private val onStopped: () -> Unit = {},
+    private val wakeCoordinator: RuntimeWakeCoordinator = RuntimeWakeCoordinator {},
     /** Spawns the guest command. Injected so tests can stand in a fake child process. */
     private val spawn: (command: List<String>, env: Map<String, String>, dir: File) -> Process = { command, env, dir ->
         ProcessBuilder(command)
@@ -117,6 +118,7 @@ class ProotRuntimeServer(
         // Cox keeps its data in COX_HOME (/root/.cox, under the bind-mounted home); a legacy T3 Code
         // bundle still reads T3CODE_HOME (/root/.t3).
         val coxBundle = kind == ServerKind.T3 && InstalledComponents.isCoxServerBundle(runtime.rootfs)
+        val wakeNonce = if (coxBundle) RuntimeWakeCoordinator.newNonce() else null
         val prootPath = runCatching { suite().proot.absolutePath }.getOrNull()
             ?: error("Embedded PRoot is unavailable")
         // Port ownership is decided before anything is spawned: a foreign listener that survives our
@@ -168,17 +170,25 @@ class ProotRuntimeServer(
                 uiPassword,
                 kind,
                 coxBundle = coxBundle,
+                wakeNonce = wakeNonce,
             )
         val signal = CompletableDeferred<Unit>()
-        val started = spawn(command, env, paths.root)
         val id =
             synchronized(lock) {
-                process = started
                 recentOutput.clear()
                 readyId = null
                 listenSignal = signal
                 ++launchId
             }
+        wakeCoordinator.launchStarted(id, wakeNonce)
+        val started =
+            try {
+                spawn(command, env, paths.root)
+            } catch (error: Throwable) {
+                wakeCoordinator.launchStopped(id)
+                throw error
+            }
+        synchronized(lock) { process = started }
         val pump = pumpOutput(started, id, port, kind, signal, onLog)
         try {
             waitUntilReady(started, port, kind, isCancelled, signal, pump)
@@ -204,10 +214,10 @@ class ProotRuntimeServer(
     }
 
     override fun stop() {
-        val current =
+        val (current, stoppedLaunch) =
             synchronized(lock) {
                 readyId = null
-                process.also { process = null }
+                process.also { process = null } to launchId
             }
         // Stop the DNS monitor first, so no network refresh can write after the server is torn down.
         // It is idempotent, and a failed start (waitUntilReady throws) also comes through here.
@@ -218,6 +228,7 @@ class ProotRuntimeServer(
         val roots =
             proot?.let { scanner.ownedRoots(prootPath = it, rootfsPath = paths.rootfs.absolutePath) }.orEmpty()
         terminateProcessTree(current, scanner, roots, signal)
+        if (current?.isAlive != true) wakeCoordinator.launchStopped(stoppedLaunch)
         onStopped()
     }
 
@@ -237,13 +248,20 @@ class ProotRuntimeServer(
             val writer = BoundedLogWriter(paths.serverLog(kind), maxLogBytes)
             try {
                 process.inputStream.bufferedReader().forEachLine { line ->
-                    synchronized(lock) {
-                        recentOutput.addLast(line)
-                        while (recentOutput.size > DIAGNOSTIC_LINES) recentOutput.removeFirst()
+                    val protocolLine =
+                        wakeCoordinator.consumeStdoutLine(launch, line) { ack ->
+                            process.outputStream.write(ack.toByteArray(Charsets.UTF_8))
+                            process.outputStream.flush()
+                        }
+                    if (!protocolLine) {
+                        synchronized(lock) {
+                            recentOutput.addLast(line)
+                            while (recentOutput.size > DIAGNOSTIC_LINES) recentOutput.removeFirst()
+                        }
+                        if (line.contains(Readiness.listenMarker(port, kind))) signal.complete(Unit)
+                        writer.appendLine(line)
+                        onLog(line)
                     }
-                    if (line.contains(Readiness.listenMarker(port, kind))) signal.complete(Unit)
-                    writer.appendLine(line)
-                    onLog(line)
                 }
             } catch (_: java.io.IOException) {
                 // Stop/destroy closes the pipe under us (InterruptedIOException on Android): normal end.
@@ -251,6 +269,7 @@ class ProotRuntimeServer(
                 // An uncaught throwable on this thread kills the whole app; log and end the pump instead.
                 runCatching { onLog("Output reader stopped: ${error.message}") }
             } finally {
+                if (process.isAlive) wakeCoordinator.stdoutClosed(launch) else wakeCoordinator.launchStopped(launch)
                 // Only this launch's own death drops trust; a previous pump never clears the next launch.
                 synchronized(lock) {
                     if (this.process === process && launchId == launch) readyId = null

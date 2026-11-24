@@ -6,18 +6,18 @@ import io.cocode.app.runtime.RuntimeState
  * What the foreground service should do, decided from the controller's explicit [busy] signal and
  * its state. Pure so the lifecycle is unit-tested without Android.
  *
- *  - Stay foreground (and keep the wake lock) while work is queued or running, or while the server
- *    is Running or Starting (Starting covers a watchdog restart that is waiting out its backoff).
+ *  - Stay foreground while work is queued or running, or while the server is Running or Starting
+ *    (Starting covers a watchdog restart that is waiting out its backoff).
  *  - Stop only when no work is pending AND the state is terminal-at-rest: Stopped, NotInstalled,
  *    Failed or UnsupportedAbi. Intermediate Stopped (between install and start) never ends the service
  *    because busy is still true then.
  */
 object RuntimeServicePolicy {
     enum class Action {
-        /** Foreground with the wake lock held. */
+        /** Keep the foreground service and its notification. */
         KeepRunning,
 
-        /** Release the wake lock, leave the foreground and stop the service. */
+        /** Leave the foreground and stop the service. */
         Finish,
     }
 
@@ -54,6 +54,4 @@ object RuntimeServicePolicy {
         requestedStartId: Int,
     ): Boolean = requestedStartId == latestStartId
 
-    /** The wake lock must be held exactly while the service is foreground. */
-    fun wakeLockHeld(action: Action): Boolean = action == Action.KeepRunning
 }

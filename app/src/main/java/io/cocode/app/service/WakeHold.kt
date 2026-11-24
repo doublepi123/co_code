@@ -3,22 +3,14 @@ package io.cocode.app.service
 import android.content.Context
 import android.os.PowerManager
 
-/**
- * One process-wide partial wake lock for runtime work. Acquired synchronously by the foreground
- * starter (before any install/start command runs) and released when the runtime stops or fails.
- * Idempotent: repeated acquire calls keep the single lock held.
- */
+/** Low-level partial wake lock; policy lives in RuntimeWakeCoordinator. */
 object WakeHold {
     private const val TAG = "CoCode:runtime"
 
     private val lock = Any()
     private var wakeLock: PowerManager.WakeLock? = null
 
-    /**
-     * No timeout: while Running the lock is held for the server's lifetime, and every end of work
-     * (terminal state, exception, service destroy) calls [release]. A timed lock would silently lose
-     * the CPU guarantee in the middle of a long-running server.
-     */
+    /** No timeout: callers hold it only while native work or unconfirmed/active Cox work requires CPU. */
     fun acquire(context: Context) {
         synchronized(lock) {
             if (wakeLock?.isHeld == true) return
